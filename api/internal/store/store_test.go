@@ -22,6 +22,31 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
+func TestInsertRawPostsIdempotent(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	posts := []RawPost{
+		{Platform: "test", SourceRef: "t-1", Community: "c", Title: "a"},
+		{Platform: "test", SourceRef: "t-2", Community: "c", Title: "b"},
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = 'test'")
+	})
+
+	n1, err := s.InsertRawPosts(ctx, posts)
+	if err != nil {
+		t.Fatalf("ilk insert: %v", err)
+	}
+	n2, err := s.InsertRawPosts(ctx, posts)
+	if err != nil {
+		t.Fatalf("ikinci insert: %v", err)
+	}
+	if n1 != 2 || n2 != 0 {
+		t.Errorf("idempotency: ilk=%d (beklenen 2), ikinci=%d (beklenen 0)", n1, n2)
+	}
+}
+
 func TestConnectSearchPath(t *testing.T) {
 	s := testStore(t)
 

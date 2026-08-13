@@ -19,6 +19,8 @@ import (
 	"syscall"
 
 	"github.com/musaay/idealode/api/internal/config"
+	"github.com/musaay/idealode/api/internal/pipeline"
+	"github.com/musaay/idealode/api/internal/store"
 )
 
 const usageText = `idealode — çok kaynaklı yazılım fikri öneri pipeline'ı
@@ -101,7 +103,15 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 // #3-4 connector'lar, #5-6 analyze, #7-8 synthesize, #9 run/dump).
 
 func cmdIngest(ctx context.Context, cfg *config.Config) error {
-	return fmt.Errorf("henüz uygulanmadı (bkz. issue #3, #4)")
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	n, err := pipeline.Ingest(ctx, cfg, st)
+	log.Printf("ingest tamam: %d yeni post", n)
+	return err
 }
 
 func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
