@@ -132,7 +132,22 @@ func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
-	return fmt.Errorf("henüz uygulanmadı (bkz. issue #7, #8)")
+	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	if _, err := pipeline.GroupThemes(ctx, st); err != nil {
+		return fmt.Errorf("tema gruplama: %w", err)
+	}
+	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)
+	log.Printf("synthesize tamam: %d yeni idea", n)
+	return err
 }
 
 func cmdGenerate(ctx context.Context, cfg *config.Config) error {

@@ -39,6 +39,13 @@ type PostAnalysis struct {
 	Prefiltered      bool // TRUE ise LLM'e gitmeden keyword filtresi eledi
 }
 
+// Theme, tag bazlı gruplamanın ürünü (themes satırı).
+type Theme struct {
+	ID        int64
+	Name      string
+	Frequency int
+}
+
 // Idea, paylaşılan idea card "tohumu".
 type Idea struct {
 	ID                      int64      `json:"id"`

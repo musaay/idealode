@@ -170,6 +170,88 @@ func (s *Store) RefreshThemeStats(ctx context.Context) error {
 	return err
 }
 
+// ThemesReadyForSynthesis, frekans eşiğini geçmiş ve henüz idea üretilmemiş
+// temaları döner (en yüksek frekans önce).
+func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int) ([]Theme, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT t.id, t.theme_name, t.frequency
+		FROM themes t
+		WHERE t.frequency >= $1
+		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
+		ORDER BY t.frequency DESC, t.id
+		LIMIT $2`, minEvidence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Theme
+	for rows.Next() {
+		var t Theme
+		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ThemeEvidence, temayı destekleyen ham post'ları döner (en yüksek skor önce).
+func (s *Store) ThemeEvidence(ctx context.Context, themeID int64, limit int) ([]RawPost, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT rp.id, rp.platform, rp.source_ref, rp.community, rp.title, rp.body,
+		       COALESCE(rp.author, ''), COALESCE(rp.url, ''), COALESCE(rp.score, 0),
+		       COALESCE(rp.created_at, rp.fetched_at)
+		FROM theme_posts tp
+		JOIN raw_posts rp ON rp.id = tp.post_id
+		WHERE tp.theme_id = $1
+		ORDER BY rp.score DESC NULLS LAST, rp.id DESC
+		LIMIT $2`, themeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RawPost
+	for rows.Next() {
+		var p RawPost
+		if err := rows.Scan(&p.ID, &p.Platform, &p.SourceRef, &p.Community, &p.Title,
+			&p.Body, &p.Author, &p.URL, &p.Score, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// IdeaTitleExists, birebir başlık eşleşmesine bakar (Faz 0 naif dedup;
+// pg_trgm benzerlik dedup'u Faz 1).
+func (s *Store) IdeaTitleExists(ctx context.Context, title string) (bool, error) {
+	var exists bool
+	err := s.Pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM ideas WHERE lower(title) = lower($1))`, title).Scan(&exists)
+	return exists, err
+}
+
+// InsertIdea, idea card'ı yazar ve id döner.
+func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
+	var id int64
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO ideas
+			(title, problem_statement, proposed_solution, target_user, evidence_count,
+			 example_quotes, source_type, source_theme_id, created_by_user_id,
+			 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13)
+		RETURNING id`,
+		i.Title, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
+		i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
+		i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("ideas insert: %w", err)
+	}
+	return id, nil
+}
+
 // UpdateSourceLastSeen, kaynağın ilerleme imlecini günceller.
 func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref string) error {
 	_, err := s.Pool.Exec(ctx,
