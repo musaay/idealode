@@ -18,6 +18,8 @@ func Connectors(cfg *config.Config) map[string]connector.SourceConnector {
 	m := map[string]connector.SourceConnector{}
 	hn := connector.NewHackerNews()
 	m[hn.Platform()] = hn
+	se := connector.NewStackExchange(cfg.StackExchangeKey)
+	m[se.Platform()] = se
 	return m
 }
 
