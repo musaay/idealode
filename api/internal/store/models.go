@@ -61,5 +61,6 @@ type Idea struct {
 	MonetizationSignal      int        `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
 	KnownCompetitorsAIGuess string     `json:"known_competitors_ai_guess,omitempty"`
 	DomainTags              []string   `json:"domain_tags"`
+	SourceTheme             string     `json:"source_theme,omitempty"` // tema adı (dump görünümü)
 	CreatedAt               time.Time  `json:"created_at"`
 }

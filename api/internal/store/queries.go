@@ -252,6 +252,38 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 	return id, nil
 }
 
+// ListIdeas, idea card'ları tema adıyla birlikte döner (yeniden eskiye) —
+// Faz 0'da `dump` komutu ve kalite kapısı değerlendirmesi bununla beslenir.
+func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT i.id, i.title, i.problem_statement, i.proposed_solution, i.target_user,
+		       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
+		       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
+		       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
+		       COALESCE(t.theme_name, ''), i.created_at
+		FROM ideas i
+		LEFT JOIN themes t ON t.id = i.source_theme_id
+		ORDER BY i.created_at DESC, i.id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Idea
+	for rows.Next() {
+		var i Idea
+		if err := rows.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
+			&i.TargetUser, &i.EvidenceCount, &i.ExampleQuotes, &i.SourceType,
+			&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
+			&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.SourceTheme, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
 // UpdateSourceLastSeen, kaynağın ilerleme imlecini günceller.
 func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref string) error {
 	_, err := s.Pool.Exec(ctx,

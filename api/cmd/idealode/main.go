@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -155,5 +156,26 @@ func cmdGenerate(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdDump(ctx context.Context, cfg *config.Config) error {
-	return fmt.Errorf("henüz uygulanmadı (bkz. issue #9)")
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	ideas, err := st.ListIdeas(ctx, 500)
+	if err != nil {
+		return err
+	}
+	if ideas == nil {
+		ideas = []store.Idea{}
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(ideas); err != nil {
+		return err
+	}
+	log.Printf("dump: %d idea card", len(ideas))
+	return nil
 }
