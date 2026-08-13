@@ -36,6 +36,7 @@ Komutlar:
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
   run         ingest -> analyze -> synthesize sırayla çalıştırır
   dump        idea card'ları JSON olarak stdout'a döker
+  migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
 
 Konfigürasyon ortam değişkenlerinden okunur; bkz. .env.example
 `
@@ -54,7 +55,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "generate", "run", "dump":
+	case "ingest", "analyze", "synthesize", "generate", "run", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -97,8 +98,20 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return nil
 	case "dump":
 		return cmdDump(ctx, cfg)
+	case "migrate":
+		return cmdMigrate(ctx, cfg)
 	}
 	return fmt.Errorf("bilinmeyen komut: %q", cmd)
+}
+
+// cmdMigrate, embed edilmiş .sql dosyalarını DB'ye elle tetiklenerek uygular
+// (bkz. internal/store/migrate.go). Otomatik/örtük çalışmaz.
+func cmdMigrate(ctx context.Context, cfg *config.Config) error {
+	if err := store.Migrate(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
+	log.Printf("migrate tamam")
+	return nil
 }
 
 // Aşağıdaki komutlar sonraki issue'larda doldurulur (Faz 0 sırası: #2 şema,
