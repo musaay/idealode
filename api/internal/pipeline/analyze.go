@@ -98,7 +98,7 @@ Return ONLY a JSON object of the form:
 Rules:
 - classification: "pain_point" = a real recurring problem someone wants solved; "feature_request" = a concrete ask for a capability/tool; "complaint" = venting without an actionable need; "noise" = none of these.
 - problem_summary and target_audience MUST be written in %s. For noise/complaint they may be empty strings.
-- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated, e.g. "invoice-automation", "browser-extension"). Never translate tags.
+- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated, e.g. "invoice-automation", "browser-extension"). Never translate tags. Order them most-specific first: the FIRST tag is the post's primary domain and is used for grouping.
 - willingness_to_pay: true only if the author signals they would pay / already pay / mention pricing.
 - Include EVERY input post id exactly once. Output JSON only.`
 

@@ -115,6 +115,61 @@ func (s *Store) InsertPostAnalyses(ctx context.Context, analyses []PostAnalysis)
 	return nil
 }
 
+// UnthemedAnalyses, henüz hiçbir temaya bağlanmamış sinyal analizlerini
+// döner (yalnız pain_point / feature_request; noise/complaint tema kurmaz).
+func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT pa.post_id, pa.classification, pa.domain_tags
+		FROM post_analysis pa
+		WHERE pa.classification IN ('pain_point', 'feature_request')
+		  AND COALESCE(array_length(pa.domain_tags, 1), 0) > 0
+		  AND NOT EXISTS (SELECT 1 FROM theme_posts tp WHERE tp.post_id = pa.post_id)
+		ORDER BY pa.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PostAnalysis
+	for rows.Next() {
+		var a PostAnalysis
+		if err := rows.Scan(&a.PostID, &a.Classification, &a.DomainTags); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UpsertTheme, tag için temayı bulur/oluşturur ve last_seen'i tazeler.
+func (s *Store) UpsertTheme(ctx context.Context, name string) (int64, error) {
+	var id int64
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO themes (theme_name) VALUES ($1)
+		ON CONFLICT (theme_name) DO UPDATE SET last_seen = now()
+		RETURNING id`, name).Scan(&id)
+	return id, err
+}
+
+// LinkThemePost, post'u temaya idempotent bağlar.
+func (s *Store) LinkThemePost(ctx context.Context, themeID, postID int64) error {
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO theme_posts (theme_id, post_id) VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`, themeID, postID)
+	return err
+}
+
+// RefreshThemeStats, frequency'yi theme_posts sayısıyla eşitler.
+func (s *Store) RefreshThemeStats(ctx context.Context) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE themes t
+		SET frequency = c.cnt
+		FROM (SELECT theme_id, count(*) AS cnt FROM theme_posts GROUP BY theme_id) c
+		WHERE c.theme_id = t.id`)
+	return err
+}
+
 // UpdateSourceLastSeen, kaynağın ilerleme imlecini günceller.
 func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref string) error {
 	_, err := s.Pool.Exec(ctx,
