@@ -1,0 +1,6 @@
+.env
+*.env.local
+api/idealode
+api/bin/
+dist/
+*.log
