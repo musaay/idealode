@@ -54,10 +54,18 @@ echo "    faz-0 / faz-1 / faz-2 hazır"
 EXISTING_TITLES=$(gh issue list --repo "$REPO" --state all --limit 200 --json title --jq '.[].title')
 
 create_issue() { # $1=title $2=milestone $3=label ; body stdin'den
-  local body
+  local body num
   body=$(cat)
   if grep -Fxq "$1" <<<"$EXISTING_TITLES"; then
-    echo "    issue var, atlandı: $1"
+    # Issue zaten var (örn. API'den açıldı) — milestone'u bağla, içeriğe dokunma.
+    num=$(gh issue list --repo "$REPO" --state all --limit 200 --json number,title \
+          --jq ".[] | select(.title == \"$1\") | .number" | head -n1)
+    if [[ -n "$num" ]]; then
+      gh issue edit "$num" --repo "$REPO" --milestone "$2" >/dev/null
+      echo "    issue var (#$num): $1 — milestone bağlandı: $2"
+    else
+      echo "    issue var ama numarası bulunamadı, atlandı: $1"
+    fi
     return
   fi
   gh issue create --repo "$REPO" --title "$1" --milestone "$2" --label "$3" --body "$body" >/dev/null
