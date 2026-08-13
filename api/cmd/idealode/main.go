@@ -19,6 +19,7 @@ import (
 	"syscall"
 
 	"github.com/musaay/idealode/api/internal/config"
+	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/pipeline"
 	"github.com/musaay/idealode/api/internal/store"
 )
@@ -115,7 +116,19 @@ func cmdIngest(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
-	return fmt.Errorf("henüz uygulanmadı (bkz. issue #5, #6)")
+	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	n, err := pipeline.Analyze(ctx, cfg, st, chat)
+	log.Printf("analyze tamam: %d post işlendi", n)
+	return err
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {

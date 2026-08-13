@@ -59,6 +59,62 @@ func (s *Store) InsertRawPosts(ctx context.Context, posts []RawPost) (int, error
 	return inserted, nil
 }
 
+// UnanalyzedPosts, henüz post_analysis kaydı olmayan post'ları döner
+// (eskiden yeniye — imleç mantığıyla uyumlu).
+func (s *Store) UnanalyzedPosts(ctx context.Context, limit int) ([]RawPost, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT rp.id, rp.platform, rp.source_ref, rp.community, rp.title, rp.body,
+		       COALESCE(rp.author, ''), COALESCE(rp.url, ''), COALESCE(rp.score, 0),
+		       COALESCE(rp.created_at, rp.fetched_at)
+		FROM raw_posts rp
+		LEFT JOIN post_analysis pa ON pa.post_id = rp.id
+		WHERE pa.id IS NULL
+		ORDER BY rp.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RawPost
+	for rows.Next() {
+		var p RawPost
+		if err := rows.Scan(&p.ID, &p.Platform, &p.SourceRef, &p.Community, &p.Title,
+			&p.Body, &p.Author, &p.URL, &p.Score, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// InsertPostAnalyses, classification sonuçlarını idempotent yazar
+// (post_id UNIQUE üzerinde ON CONFLICT DO NOTHING).
+func (s *Store) InsertPostAnalyses(ctx context.Context, analyses []PostAnalysis) error {
+	if len(analyses) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, a := range analyses {
+		batch.Queue(`
+			INSERT INTO post_analysis
+				(post_id, classification, problem_summary, target_audience,
+				 domain_tags, willingness_to_pay, prefiltered)
+			VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7)
+			ON CONFLICT (post_id) DO NOTHING`,
+			a.PostID, a.Classification, a.ProblemSummary, a.TargetAudience,
+			a.DomainTags, a.WillingnessToPay, a.Prefiltered)
+	}
+	results := s.Pool.SendBatch(ctx, batch)
+	defer results.Close()
+	for range analyses {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("post_analysis insert: %w", err)
+		}
+	}
+	return nil
+}
+
 // UpdateSourceLastSeen, kaynağın ilerleme imlecini günceller.
 func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref string) error {
 	_, err := s.Pool.Exec(ctx,

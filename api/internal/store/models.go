@@ -36,6 +36,7 @@ type PostAnalysis struct {
 	TargetAudience   string   // OUTPUT_LANG (TR)
 	DomainTags       []string // kanonik EN slug'lar
 	WillingnessToPay bool
+	Prefiltered      bool // TRUE ise LLM'e gitmeden keyword filtresi eledi
 }
 
 // Idea, paylaşılan idea card "tohumu".
