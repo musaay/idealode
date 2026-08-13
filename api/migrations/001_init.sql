@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS post_analysis (
     target_audience    TEXT,       -- OUTPUT_LANG (TR)
     domain_tags        TEXT[] NOT NULL DEFAULT '{}',  -- kanonik EN slug'lar
     willingness_to_pay BOOLEAN NOT NULL DEFAULT FALSE,
+    -- TRUE ise LLM'e hiç gitmedi: keyword ön-filtresi noise saydı.
+    -- LLM'in noise kararından ayırt edilir (eşik iterasyonu görünürlüğü).
+    prefiltered        BOOLEAN NOT NULL DEFAULT FALSE,
     analyzed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
