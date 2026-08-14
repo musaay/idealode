@@ -172,9 +172,10 @@ func parseClassifyResponse(raw string, chunk []store.RawPost) ([]store.PostAnaly
 var nonSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // normalizeTags, tag'leri kanonik EN slug biçimine indirger ve en fazla 5
-// benzersiz tag döner.
+// benzersiz tag döner. Dönüş hiçbir zaman nil değildir: nil slice pgx'te
+// SQL NULL'a eşlenir ve domain_tags NOT NULL kolonlarını ihlal eder.
 func normalizeTags(tags []string) []string {
-	var out []string
+	out := []string{}
 	seen := map[string]bool{}
 	for _, t := range tags {
 		s := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(t), "-"), "-")
