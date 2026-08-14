@@ -1,38 +1,55 @@
 # IdeaLode
 
-Çok kaynaklı yazılım fikri öneri pipeline'ı: sosyal/geliştirici
-platformlarındaki paylaşımları analiz edip **ayağı yere basan, tek
-kişilik/küçük ekiple hızla inşa edilip deploy edilebilecek** yazılım fikri
-önerileri (idea card) üretir ve saklar.
+Çok kaynaklı yazılım fikri öneri pipeline'ı: geliştirici ve sosyal
+platformlardaki paylaşımları toplar, LLM ile analiz edip temalara gruplar ve
+küçük ekiplerin hızla inşa edebileceği yazılım fikri kartları (idea card)
+üretir.
 
-Kaynaklar (V1): Hacker News (Algolia Search) + Stack Exchange (softwarerecs,
-webapps) aktif; GitHub Issues + Product Hunt Faz 1'de; Reddit wired-ama-uykuda.
+**Kaynaklar:** Hacker News ve Stack Exchange aktif; GitHub Issues, Product
+Hunt ve Reddit connector'ları yolda.
 
-## Yapı
+## Nasıl çalışır
 
-- `api/` — Go backend: pipeline (ingest → analyze → synthesize) + REST API (Faz 2).
-- `ui/` — Stitch export HTML/CSS/JS ekranlar (Faz 2).
-- `scripts/bootstrap_github.sh` — GitHub milestone + issue kurulumu (gh CLI).
-
-## Hızlı başlangıç (Faz 0)
-
-```sh
-# 1. Şemayı kur (bkz. api/migrations/README.md)
-psql "$DATABASE_URL" -f api/migrations/001_init.sql
-psql "$DATABASE_URL" -f api/migrations/002_seed.sql
-
-# 2. Derle
-cd api && go build -o idealode ./cmd/idealode
-
-# 3. Konfigürasyon (bkz. .env.example) — en az DATABASE_URL + GROQ_API_KEY
-
-# 4. Çalıştır
-./idealode run    # ingest -> analyze -> synthesize
-./idealode dump   # idea card'ları JSON olarak incele
+```
+ingest  →  analyze  →  synthesize
+(kaynaklardan  (LLM ile sınıflandırma  (temalardan idea
+ post topla)    + tema gruplama)         card üretimi)
 ```
 
-Üretilen içerik dili `OUTPUT_LANG` ile kontrol edilir (varsayılan `tr`);
-alıntılar orijinal dilde kalır, `domain_tags` kanonik EN slug'dır.
+## Proje yapısı
+
+- `api/` — Go backend: pipeline + REST API
+- `ui/` — web arayüzü
+- `scripts/` — yardımcı scriptler
+
+## Kurulum
+
+Gereksinimler: Go 1.22+, PostgreSQL (`pg_trgm` extension'ı ile), bir
+[Groq](https://groq.com) API anahtarı.
+
+```sh
+# 1. Derle
+cd api && go build -o idealode ./cmd/idealode
+
+# 2. Konfigürasyon — .env.example'ı kopyalayıp doldur
+#    (en az DATABASE_URL + GROQ_API_KEY)
+
+# 3. Veritabanı şemasını kur
+./idealode migrate
+
+# 4. Pipeline'ı çalıştır
+./idealode run    # ingest -> analyze -> synthesize
+./idealode dump   # üretilen idea card'ları JSON olarak incele
+```
+
+Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
+`synthesize`.
+
+## Konfigürasyon
+
+Tüm ayarlar ortam değişkeniyle verilir; liste ve açıklamalar için
+[`.env.example`](.env.example) dosyasına bakın. Üretilen içeriğin dili
+`OUTPUT_LANG` ile seçilir (varsayılan `tr`); alıntılar orijinal dilde kalır.
 
 ## Geliştirme
 
@@ -41,8 +58,3 @@ cd api
 go test ./...                                  # birim testler
 TEST_DATABASE_URL=postgres://... go test ./... # + DB entegrasyon testleri
 ```
-
-Plan ve mimari için V1 Planı (Rev 2) dokümanına, iş sırası için GitHub
-issue'larına (Faz 0/1/2 milestone'ları) bakın. **Kalite kapısı**: Faz 0
-pipeline'ı ~1 hafta çalışıp ≥30 idea üretmeden ve 10 karttan ≥3'ü "inşa
-etmeyi ciddi düşünürüm" seviyesine gelmeden Faz 1'e geçilmez.
