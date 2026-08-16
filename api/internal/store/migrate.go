@@ -14,6 +14,9 @@ var migration001 string
 //go:embed migrate_sql/002_seed.sql
 var migration002 string
 
+//go:embed migrate_sql/003_more_hn_sources.sql
+var migration003 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -40,6 +43,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration002); err != nil {
 		return fmt.Errorf("002_seed.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration003); err != nil {
+		return fmt.Errorf("003_more_hn_sources.sql: %w", err)
 	}
 	return nil
 }

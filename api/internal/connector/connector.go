@@ -41,7 +41,12 @@ func getJSON(ctx context.Context, client *http.Client, url string, target any) e
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json")
+	return doJSON(client, req, target)
+}
 
+// doJSON, hazırlanmış isteği çalıştırır, 2xx dışını hataya çevirir ve
+// gövdeyi target'a decode eder.
+func doJSON(client *http.Client, req *http.Request, target any) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

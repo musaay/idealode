@@ -96,6 +96,12 @@ func (s *Store) InsertPostAnalyses(ctx context.Context, analyses []PostAnalysis)
 	}
 	batch := &pgx.Batch{}
 	for _, a := range analyses {
+		// nil slice pgx'te SQL NULL'a eşlenir ve NOT NULL kolonu ihlal
+		// eder; çağıran ne gönderirse göndersin boş diziye indirgenir.
+		tags := a.DomainTags
+		if tags == nil {
+			tags = []string{}
+		}
 		batch.Queue(`
 			INSERT INTO post_analysis
 				(post_id, classification, problem_summary, target_audience,
@@ -103,7 +109,7 @@ func (s *Store) InsertPostAnalyses(ctx context.Context, analyses []PostAnalysis)
 			VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7)
 			ON CONFLICT (post_id) DO NOTHING`,
 			a.PostID, a.Classification, a.ProblemSummary, a.TargetAudience,
-			a.DomainTags, a.WillingnessToPay, a.Prefiltered)
+			tags, a.WillingnessToPay, a.Prefiltered)
 	}
 	results := s.Pool.SendBatch(ctx, batch)
 	defer results.Close()
@@ -235,6 +241,14 @@ func (s *Store) IdeaTitleExists(ctx context.Context, title string) (bool, error)
 
 // InsertIdea, idea card'ı yazar ve id döner.
 func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
+	// nil slice'lar SQL NULL'a eşlenir; NOT NULL kolonlar için boş diziye
+	// indirgenir (bkz. InsertPostAnalyses'teki aynı koruma).
+	if i.DomainTags == nil {
+		i.DomainTags = []string{}
+	}
+	if i.ExampleQuotes == nil {
+		i.ExampleQuotes = []string{}
+	}
 	var id int64
 	err := s.Pool.QueryRow(ctx, `
 		INSERT INTO ideas
