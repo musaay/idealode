@@ -12,14 +12,16 @@ import (
 )
 
 // Connectors, konfigürasyona göre kullanılabilir connector'ları kurar.
-// Faz 0: hackernews + stackexchange. GitHub/Product Hunt Faz 1'de eklenir;
-// Reddit wired-ama-uykuda (env boşken registry'ye hiç girmez).
+// Product Hunt Faz 1'de eklenir; Reddit wired-ama-uykuda (env boşken
+// registry'ye hiç girmez).
 func Connectors(cfg *config.Config) map[string]connector.SourceConnector {
 	m := map[string]connector.SourceConnector{}
 	hn := connector.NewHackerNews()
 	m[hn.Platform()] = hn
 	se := connector.NewStackExchange(cfg.StackExchangeKey)
 	m[se.Platform()] = se
+	gh := connector.NewGitHub(cfg.GitHubToken)
+	m[gh.Platform()] = gh
 	return m
 }
 
