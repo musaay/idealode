@@ -148,6 +148,14 @@ func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis
 	return out, rows.Err()
 }
 
+// MarkThemeIncoherent, tutarlılık denetimini geçemeyen temayı işaretler;
+// tema, yeni kanıt gelene dek (last_seen > incoherent_at) senteze girmez.
+func (s *Store) MarkThemeIncoherent(ctx context.Context, themeID int64) error {
+	_, err := s.Pool.Exec(ctx,
+		`UPDATE themes SET incoherent_at = now() WHERE id = $1`, themeID)
+	return err
+}
+
 // UpsertTheme, tag için temayı bulur/oluşturur ve last_seen'i tazeler.
 func (s *Store) UpsertTheme(ctx context.Context, name string) (int64, error) {
 	var id int64
@@ -184,6 +192,7 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 		FROM themes t
 		WHERE t.frequency >= $1
 		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
+		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
 		ORDER BY t.frequency DESC, t.id
 		LIMIT $2`, minEvidence, limit)
 	if err != nil {

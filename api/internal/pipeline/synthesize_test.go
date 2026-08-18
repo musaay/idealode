@@ -43,11 +43,44 @@ func TestParseIdeaResponseRejectsEmpty(t *testing.T) {
 	}
 }
 
-// fakeChat, synthesize entegrasyon testi için sabit yanıt döner.
+// fakeChat, synthesize entegrasyon testi için sabit yanıt döner; tutarlılık
+// denetimi çağrısına ise tüm post'ları tutarlı sayan bir cevap verir.
 type fakeChat struct{ response string }
 
 func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	if system == coherenceSystem {
+		return `{"indices":[0,1,2]}`, nil
+	}
 	return f.response, nil
+}
+
+func TestCoherentSubsetFiltersInvalidIndices(t *testing.T) {
+	evidence := []store.RawPost{
+		{Title: "a"}, {Title: "b"}, {Title: "c"},
+	}
+	chat := &indicesChat{response: `{"indices":[2,0,2,7,-1]}`}
+	subset, err := coherentSubset(context.Background(), chat, evidence)
+	if err != nil {
+		t.Fatalf("coherentSubset: %v", err)
+	}
+	// Geçersiz (7, -1) ve tekrar eden (2) indeksler elenir.
+	if len(subset) != 2 || subset[0].Title != "c" || subset[1].Title != "a" {
+		t.Errorf("beklenen [c a], geldi: %+v", subset)
+	}
+}
+
+func TestCoherentSubsetRejectsGarbage(t *testing.T) {
+	chat := &indicesChat{response: `garbage`}
+	if _, err := coherentSubset(context.Background(), chat, []store.RawPost{{Title: "a"}}); err == nil {
+		t.Error("JSON olmayan tutarlılık cevabı hata dönmeli")
+	}
+}
+
+// indicesChat, tutarlılık denetimi birim testleri için sabit cevap döner.
+type indicesChat struct{ response string }
+
+func (c *indicesChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.response, nil
 }
 
 func TestSynthesizeIdeasIntegration(t *testing.T) {
