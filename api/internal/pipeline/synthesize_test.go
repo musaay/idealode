@@ -76,6 +76,38 @@ func TestCoherentSubsetRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestCoherenceIndicesFlexibleFormats(t *testing.T) {
+	cases := []struct {
+		raw  string
+		n    int
+		want []int
+	}{
+		{`{"indices":[0,1,3]}`, 8, []int{0, 1, 3}},          // düzgün format
+		{`{"indices":["013"]}`, 8, []int{0, 1, 3}},          // bitişik string (gpt-oss'un döndüğü)
+		{`{"indices":["0,2,5"]}`, 8, []int{0, 2, 5}},        // virgüllü string
+		{`{"indices":["2"]}`, 8, []int{2}},                  // sayı-string
+		{`{"indices":[7,9,-1,7]}`, 8, []int{7}},             // aralık dışı + tekrar elenir
+		{`{"indices":[]}`, 8, nil},                          // boş
+	}
+	for _, c := range cases {
+		got, err := coherenceIndices(c.raw, c.n)
+		if err != nil {
+			t.Errorf("%s: %v", c.raw, err)
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("%s: beklenen %v, geldi %v", c.raw, c.want, got)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: beklenen %v, geldi %v", c.raw, c.want, got)
+				break
+			}
+		}
+	}
+}
+
 // indicesChat, tutarlılık denetimi birim testleri için sabit cevap döner.
 type indicesChat struct{ response string }
 
