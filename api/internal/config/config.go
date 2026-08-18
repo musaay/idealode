@@ -19,7 +19,7 @@ type Config struct {
 
 	// LLM (analyze/synthesize/generate için zorunlu; ingest/dump için değil)
 	GroqAPIKey string // GROQ_API_KEY
-	GroqModel  string // GROQ_MODEL (default: llama-3.3-70b-versatile)
+	GroqModel  string // GROQ_MODEL (default: openai/gpt-oss-120b)
 
 	// Çıktı dili — üretilen kullanıcıya dönük metinler bu dilde (Rev 2: tr).
 	// EN'e geçiş = env değişikliği; tag'ler kanonik EN slug olduğu için
@@ -53,7 +53,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		GroqAPIKey:         os.Getenv("GROQ_API_KEY"),
-		GroqModel:          getenvDefault("GROQ_MODEL", "llama-3.3-70b-versatile"),
+		GroqModel:          getenvDefault("GROQ_MODEL", "openai/gpt-oss-120b"),
 		OutputLang:         getenvDefault("OUTPUT_LANG", "tr"),
 		StackExchangeKey:   os.Getenv("STACKEXCHANGE_KEY"),
 		GitHubToken:        os.Getenv("GITHUB_TOKEN"),

@@ -17,7 +17,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.OutputLang != "tr" {
 		t.Errorf("OutputLang default tr olmalı, geldi: %q", c.OutputLang)
 	}
-	if c.GroqModel != "llama-3.3-70b-versatile" {
+	if c.GroqModel != "openai/gpt-oss-120b" {
 		t.Errorf("GroqModel default'u yanlış: %q", c.GroqModel)
 	}
 	if c.MinThemeEvidence != 3 || c.LLMChunkSize != 8 || c.LLMSleepMS != 400 {
