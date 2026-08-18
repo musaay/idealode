@@ -20,6 +20,9 @@ var migration003 string
 //go:embed migrate_sql/004_market_derived.sql
 var migration004 string
 
+//go:embed migrate_sql/005_tr_sources.sql
+var migration005 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -52,6 +55,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration004); err != nil {
 		return fmt.Errorf("004_market_derived.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration005); err != nil {
+		return fmt.Errorf("005_tr_sources.sql: %w", err)
 	}
 	return nil
 }

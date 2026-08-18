@@ -22,6 +22,10 @@ func Connectors(cfg *config.Config) map[string]connector.SourceConnector {
 	m[se.Platform()] = se
 	gh := connector.NewGitHub(cfg.GitHubToken)
 	m[gh.Platform()] = gh
+	gp := connector.NewGooglePlay()
+	m[gp.Platform()] = gp
+	tp := connector.NewTechnopat()
+	m[tp.Platform()] = tp
 	return m
 }
 
