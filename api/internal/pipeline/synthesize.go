@@ -182,6 +182,13 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			log.Printf("synthesize: tema %q tutarlılık HATA: %v — atlandı", th.Name, err)
 			continue
 		}
+		if len(subset) == 0 {
+			// Prompt en az 1 indeks garanti eder; boş küme = bozuk model
+			// cevabı. Temayı damgalamadan atla — sonraki koşuda yeniden
+			// denenir.
+			log.Printf("synthesize: tema %q tutarlılık cevabı boş — atlandı (işaretlenmedi)", th.Name)
+			continue
+		}
 		if len(subset) < cfg.MinThemeEvidence {
 			if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
 				return created, err
