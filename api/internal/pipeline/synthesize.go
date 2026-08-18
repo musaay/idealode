@@ -39,6 +39,47 @@ Rules:
 - monetization_signal: integer 0-5, 0 = no signal at all (any mention of paying/pricing raises it).
 - known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
 
+// coherenceSystem: sentezden önce kova içi tutarlılık denetimi. Tema
+// anahtarı tek tag olduğundan aynı kovada FARKLI dertler birikebilir;
+// eşik "tag frekansı" değil "aynı derdin frekansı" olsun diye LLM en
+// büyük tutarlı alt kümeyi seçer.
+const coherenceSystem = `You are a strict evidence auditor. You receive numbered posts that were grouped under one broad topic tag. Identify the LARGEST subset of posts that describe the SAME SPECIFIC user pain or need — not merely the same broad topic. Posts about different pains within the same topic do NOT belong in the same subset.
+
+Return ONLY a JSON object: {"indices":[...]} with the 0-based numbers of that largest subset. If every post describes a different pain, return the single most promising post's index. Never invent indices that were not given.`
+
+type coherenceResponse struct {
+	Indices []int `json:"indices"`
+}
+
+// coherentSubset, kanıt listesinden aynı spesifik derdi anlatan en büyük
+// alt kümeyi seçer.
+func coherentSubset(ctx context.Context, chat llm.Chat, evidence []store.RawPost) ([]store.RawPost, error) {
+	var sb strings.Builder
+	sb.WriteString("Posts:\n\n")
+	for i, p := range evidence {
+		fmt.Fprintf(&sb, "[%d] %s\n%s\n\n", i, clip(p.Title, 200), clip(p.Body, 500))
+	}
+
+	raw, err := chat.ChatJSON(ctx, coherenceSystem, sb.String())
+	if err != nil {
+		return nil, err
+	}
+	var resp coherenceResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return nil, fmt.Errorf("tutarlılık cevabı parse: %w", err)
+	}
+
+	seen := map[int]bool{}
+	var subset []store.RawPost
+	for _, idx := range resp.Indices {
+		if idx >= 0 && idx < len(evidence) && !seen[idx] {
+			seen[idx] = true
+			subset = append(subset, evidence[idx])
+		}
+	}
+	return subset, nil
+}
+
 // SynthesizeIdeas, frekans eşiğini geçen temalardan idea card üretir
 // (source_type=pain_point). Aynı temadan ikinci kez üretilmez (Faz 0 basit
 // dedup; pg_trgm dedup Faz 1 / issue #14).
@@ -66,7 +107,23 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		idea, err := synthesizeOne(ctx, cfg, chat, th, evidence)
+		// Kova içi tutarlılık: eşik, tag frekansını değil aynı derdin
+		// frekansını ölçsün.
+		subset, err := coherentSubset(ctx, chat, evidence)
+		if err != nil {
+			log.Printf("synthesize: tema %q tutarlılık HATA: %v — atlandı", th.Name, err)
+			continue
+		}
+		if len(subset) < cfg.MinThemeEvidence {
+			if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
+				return created, err
+			}
+			log.Printf("synthesize: tema %q tutarsız (%d/%d aynı dert) — yeni kanıta kadar beklemede",
+				th.Name, len(subset), len(evidence))
+			continue
+		}
+
+		idea, err := synthesizeOne(ctx, cfg, chat, th, subset)
 		if err != nil {
 			log.Printf("synthesize: tema %q HATA: %v — atlandı", th.Name, err)
 			continue
@@ -86,7 +143,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			return created, err
 		}
 		created++
-		log.Printf("synthesize: idea üretildi: %q (tema=%s, kanıt=%d)", idea.Title, th.Name, th.Frequency)
+		log.Printf("synthesize: idea üretildi: %q (tema=%s, kanıt=%d)", idea.Title, th.Name, idea.EvidenceCount)
 
 		if i < len(themes)-1 {
 			select {
@@ -118,7 +175,9 @@ func synthesizeOne(ctx context.Context, cfg *config.Config, chat llm.Chat, th st
 	}
 	idea.SourceType = "pain_point"
 	idea.SourceThemeID = &th.ID
-	idea.EvidenceCount = th.Frequency
+	// Kanıt sayısı = tutarlılık denetiminden geçen post sayısı (tema
+	// frekansı değil — kartın iddiası kadar kanıtı olsun).
+	idea.EvidenceCount = len(evidence)
 	return idea, nil
 }
 

@@ -23,6 +23,9 @@ var migration004 string
 //go:embed migrate_sql/005_tr_sources.sql
 var migration005 string
 
+//go:embed migrate_sql/006_theme_coherence.sql
+var migration006 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -58,6 +61,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration005); err != nil {
 		return fmt.Errorf("005_tr_sources.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration006); err != nil {
+		return fmt.Errorf("006_theme_coherence.sql: %w", err)
 	}
 	return nil
 }
