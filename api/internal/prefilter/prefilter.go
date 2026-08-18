@@ -1,8 +1,8 @@
 // Package prefilter, LLM çağrısı öncesi maliyet azaltma katmanı: bariz
 // noise post'ları basit keyword heuristic ile eler (plan madde 4).
 //
-// Keyword'ler İngilizce'dir ve öyle kalır — kaynak içerik İngilizce
-// (bilinçli tutarsızlık değil, tasarım).
+// Kalıplar iki dillidir: global kaynaklar (HN, GitHub) İngilizce, TR
+// kaynakları (Technopat) Türkçe üretir — Faz 1 rescope, TR pazarı odağı.
 package prefilter
 
 import "strings"
@@ -39,13 +39,32 @@ var signalPatterns = []string{
 	"can't find a tool",
 	"cannot find a tool",
 	"struggling to find",
+
+	// Türkçe talep/acı kalıpları (TR kaynakları için)
+	"var mı",
+	"neden yok",
+	"keşke",
+	"arıyorum",
+	"tavsiye",
+	"öneri",
+	"önerir misiniz",
+	"bıktım",
+	"sorun yaşıyorum",
+	"çözemedim",
+	"çözüm bulamadım",
+	"alternatif",
+	"nasıl yapabilirim",
+	"bir uygulama",
+	"bir program",
 }
 
 // bypassPlatforms: içeriği doğal filtrelenmiş kaynaklar — softwarerecs'in
-// tamamı "şu işi yapan araç var mı?" soruları olduğu için SE atlanmaz,
-// doğrudan analize gider.
+// tamamı "şu işi yapan araç var mı?" soruları olduğu için SE atlanmaz;
+// googleplay connector'ı yalnızca <=3 yıldızlı yorumları çektiği için
+// içerik zaten şikayet ağırlıklıdır, doğrudan analize gider.
 var bypassPlatforms = map[string]bool{
 	"stackexchange": true,
+	"googleplay":    true,
 }
 
 // ShouldAnalyze, post'un LLM classification'a gitmeye değer olup olmadığını
