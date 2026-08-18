@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,10 +46,81 @@ Rules:
 // büyük tutarlı alt kümeyi seçer.
 const coherenceSystem = `You are a strict evidence auditor. You receive numbered posts that were grouped under one broad topic tag. Identify the LARGEST subset of posts that describe the SAME SPECIFIC user pain or need — not merely the same broad topic. Posts about different pains within the same topic do NOT belong in the same subset.
 
-Return ONLY a JSON object: {"indices":[...]} with the 0-based numbers of that largest subset. If every post describes a different pain, return the single most promising post's index. Never invent indices that were not given.`
+Return ONLY a JSON object exactly of this shape: {"indices":[0,1,3]} — "indices" is an ARRAY of INTEGER post numbers (0-based), one integer per selected post. If every post describes a different pain, return the single most promising post's index. Never invent indices that were not given.`
 
 type coherenceResponse struct {
-	Indices []int `json:"indices"`
+	Indices []json.RawMessage `json:"indices"`
+}
+
+// coherenceIndices, tutarlılık cevabındaki indeksleri savunmacı ayrıştırır:
+// tam sayı, sayı-string ("3"), bitişik rakamlar ("013" -> 0,1,3) ve virgüllü
+// string ("0,1,3") kabul edilir — küçük modeller format talimatına her zaman
+// uymuyor. n = kanıt sayısı; aralık dışı ve tekrar eden indeksler elenir.
+func coherenceIndices(raw string, n int) ([]int, error) {
+	var resp coherenceResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return nil, fmt.Errorf("tutarlılık cevabı parse: %w", err)
+	}
+
+	seen := map[int]bool{}
+	var out []int
+	add := func(v int) {
+		if v >= 0 && v < n && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+
+	for _, rm := range resp.Indices {
+		var iv int
+		if json.Unmarshal(rm, &iv) == nil {
+			add(iv)
+			continue
+		}
+		var sv string
+		if json.Unmarshal(rm, &sv) != nil {
+			continue
+		}
+		// String içindeki rakam gruplarını çıkar ("0,1,3", " 2 ", "013"...)
+		for _, run := range digitRuns(sv) {
+			v, err := strconv.Atoi(run)
+			if err != nil {
+				continue
+			}
+			if v < n {
+				add(v)
+				continue
+			}
+			// Aralık dışı çok haneli sayı = bitişik tek haneli indeksler
+			// (kanıt <=8 olduğundan geçerli indeks tek hanelidir).
+			for _, r := range run {
+				add(int(r - '0'))
+			}
+		}
+	}
+	return out, nil
+}
+
+// digitRuns, string'deki ardışık rakam gruplarını döner.
+func digitRuns(s string) []string {
+	var runs []string
+	start := -1
+	for i, r := range s {
+		if r >= '0' && r <= '9' {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			runs = append(runs, s[start:i])
+			start = -1
+		}
+	}
+	if start >= 0 {
+		runs = append(runs, s[start:])
+	}
+	return runs
 }
 
 // coherentSubset, kanıt listesinden aynı spesifik derdi anlatan en büyük
@@ -64,18 +136,14 @@ func coherentSubset(ctx context.Context, chat llm.Chat, evidence []store.RawPost
 	if err != nil {
 		return nil, err
 	}
-	var resp coherenceResponse
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		return nil, fmt.Errorf("tutarlılık cevabı parse: %w", err)
+	indices, err := coherenceIndices(raw, len(evidence))
+	if err != nil {
+		return nil, err
 	}
 
-	seen := map[int]bool{}
 	var subset []store.RawPost
-	for _, idx := range resp.Indices {
-		if idx >= 0 && idx < len(evidence) && !seen[idx] {
-			seen[idx] = true
-			subset = append(subset, evidence[idx])
-		}
+	for _, idx := range indices {
+		subset = append(subset, evidence[idx])
 	}
 	return subset, nil
 }
