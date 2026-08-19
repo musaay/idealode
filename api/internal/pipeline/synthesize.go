@@ -30,7 +30,9 @@ CRITICAL CONSTRAINT: Only propose realistic, grounded, SOFTWARE-heavy ideas that
 
 Competition is NOT a filter: the existence of competitors VALIDATES demand. Never reject or water down an idea because "someone already built it". If you can guess likely competitors, list them as an informational note only.
 
-THIRD-PARTY RULE (critical): Much of the evidence consists of complaints about a specific existing product's OWN defects — crashes, login failures, bad support, pricing of that product. Only that product's vendor can fix those; they are NOT valid ideas for an independent builder. Only produce an idea if an INDEPENDENT developer could build and sell a STANDALONE product serving the underlying need across many users — not a patch to someone else's app. If the evidence only supports "the vendor should fix their product", return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
+THIRD-PARTY RULE (critical): Evidence about existing products comes in two kinds — treat them very differently:
+(a) DEFECTS of a specific product: crashes, login failures, technical errors, bad support, that product's own pricing. Only that vendor can fix these; they are NOT valid ideas for an independent builder. If the evidence contains ONLY defects, return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
+(b) UNMET NEEDS voiced as feature wishes: "I wish this app could X", "it would be great if it had Y", "why is there no way to Z". These are VALUABLE — they reveal a need nobody serves. Never propose patching the vendor's app; instead design a STANDALONE product an independent developer could build and sell that serves the underlying need, ideally across many similar apps, platforms or users.
 
 Return ONLY a JSON object:
 {"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","example_quotes":["..."],"urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
