@@ -74,7 +74,16 @@ func coherenceIndices(raw string, n int) ([]int, error) {
 	for _, rm := range resp.Indices {
 		var iv int
 		if json.Unmarshal(rm, &iv) == nil {
-			add(iv)
+			if iv < n {
+				add(iv)
+			} else {
+				// Aralık dışı çok haneli sayı = bitiştirilmiş tek haneli
+				// indeksler (örn. 13567 -> 1,3,5,6,7); kanıt <=8 olduğundan
+				// geçerli indeks tek hanelidir.
+				for _, r := range strconv.Itoa(iv) {
+					add(int(r - '0'))
+				}
+			}
 			continue
 		}
 		var sv string
