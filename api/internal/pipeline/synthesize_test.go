@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -31,6 +32,17 @@ func TestParseIdeaResponseClamps(t *testing.T) {
 	}
 	if idea.DomainTags[0] != "invoice-automation" {
 		t.Errorf("tag slug'lanmalı: %v", idea.DomainTags)
+	}
+}
+
+func TestParseIdeaResponseSkip(t *testing.T) {
+	_, err := parseIdeaResponse(`{"skip": true, "reason": "vendor-internal"}`)
+	if !errors.Is(err, errVendorInternal) {
+		t.Errorf("skip cevabı errVendorInternal dönmeli, geldi: %v", err)
+	}
+	// skip:false normal akışı bozmamalı
+	if _, err := parseIdeaResponse(`{"skip": false, "title": "X", "problem_statement": "p"}`); errors.Is(err, errVendorInternal) {
+		t.Error("skip:false vendor-internal sayılmamalı")
 	}
 }
 

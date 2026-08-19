@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -28,6 +29,8 @@ const synthesizeSystemTmpl = `You generate concrete software product ideas ("ide
 CRITICAL CONSTRAINT: Only propose realistic, grounded, SOFTWARE-heavy ideas that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months. AVOID ideas that require hardware manufacturing, physical infrastructure, large capital, heavy regulation, or a big team. The idea must be a SaaS, an API, a browser extension, an automation tool, an AI-wrapper or similar — something that can quickly be turned into an MVP.
 
 Competition is NOT a filter: the existence of competitors VALIDATES demand. Never reject or water down an idea because "someone already built it". If you can guess likely competitors, list them as an informational note only.
+
+THIRD-PARTY RULE (critical): Much of the evidence consists of complaints about a specific existing product's OWN defects — crashes, login failures, bad support, pricing of that product. Only that product's vendor can fix those; they are NOT valid ideas for an independent builder. Only produce an idea if an INDEPENDENT developer could build and sell a STANDALONE product serving the underlying need across many users — not a patch to someone else's app. If the evidence only supports "the vendor should fix their product", return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
 
 Return ONLY a JSON object:
 {"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","example_quotes":["..."],"urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
@@ -208,6 +211,15 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		}
 
 		idea, err := synthesizeOne(ctx, cfg, chat, th, subset)
+		if errors.Is(err, errVendorInternal) {
+			// Belirli bir ürünün kendi kusuru — kart olamaz. Yeni kanıt
+			// gelene dek tema yeniden değerlendirilmez.
+			if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
+				return created, err
+			}
+			log.Printf("synthesize: tema %q vendor-internal — kart üretilmedi", th.Name)
+			continue
+		}
 		if err != nil {
 			log.Printf("synthesize: tema %q HATA: %v — atlandı", th.Name, err)
 			continue
@@ -280,7 +292,18 @@ type ideaResponse struct {
 // parseIdeaResponse, LLM çıktısını doğrular: skorlar aralığa kıstırılır
 // (urgency 1-5, monetization 0-5), tag'ler slug'a normalize edilir,
 // alıntılar 5 ile sınırlanır.
+// errVendorInternal: kanıt yalnızca belirli bir ürünün kendi kusurlarını
+// anlatıyor — üçüncü tarafça inşa edilebilir bir fikir yok (skip cevabı).
+var errVendorInternal = fmt.Errorf("vendor-internal: üçüncü tarafça inşa edilemez")
+
 func parseIdeaResponse(raw string) (store.Idea, error) {
+	var skip struct {
+		Skip bool `json:"skip"`
+	}
+	if json.Unmarshal([]byte(raw), &skip) == nil && skip.Skip {
+		return store.Idea{}, errVendorInternal
+	}
+
 	var r ideaResponse
 	if err := json.Unmarshal([]byte(raw), &r); err != nil {
 		return store.Idea{}, fmt.Errorf("LLM yanıtı JSON değil: %w (yanıt: %.200s)", err, raw)
