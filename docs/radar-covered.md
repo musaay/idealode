@@ -12,3 +12,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Superpower ChatGPT — tarayıcı eklentisi, 5 haneli aylık gelir (2026-08-19)
 - Zigpoll — Shopify satış-sonrası anket, $125K MRR (2026-08-19)
 - Mentions — AI motorlarında marka görünürlüğü izleme, $62K MRR (2026-08-19)
+- BetterPic — AI kurumsal headshot, ~$270K/ay (2026-08-20)
+- ListKit — ısıtılmış B2B soğuk e-posta listeleri, 87 günde $100K MRR (2026-08-20)
+- Klipy.ai — KOBİ AI satış/CRM asistanı, $440K gelir + $3.8M yatırım (2026-08-20)
+- Rebelgrowth — AI SEO içerik + backlink ağı, $8K+ MRR (2026-08-20)
