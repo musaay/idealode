@@ -63,6 +63,9 @@ func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, e
 	if system == coherenceSystem {
 		return `{"indices":[0,1,2]}`, nil
 	}
+	if system == dupJudgeSystem {
+		return `{"same": false}`, nil
+	}
 	return f.response, nil
 }
 
