@@ -162,9 +162,52 @@ func coherentSubset(ctx context.Context, chat llm.Chat, evidence []store.RawPost
 	return subset, nil
 }
 
+// Dedup eşikleri (#14): >= dupAutoThreshold kesin mükerrer; grey bölge
+// [dupGreyThreshold, dupAutoThreshold) LLM hakemine sorulur.
+const dupAutoThreshold = 0.80
+const dupGreyThreshold = 0.45
+
+const dupJudgeSystem = `You compare two software product idea cards and decide if they describe the SAME product idea (same underlying user need and essentially the same solution) — not merely the same broad domain. Return ONLY a JSON object: {"same": true} or {"same": false}.`
+
+// findDuplicate, yeni fikrin mevcut kartların mükerreri olup olmadığına
+// karar verir: pg_trgm benzerliği yüksekse doğrudan, gri bölgedeyse LLM
+// hakemiyle.
+func findDuplicate(ctx context.Context, st *store.Store, chat llm.Chat, idea store.Idea) (bool, store.Idea, error) {
+	existing, sim, err := st.FindSimilarIdea(ctx, idea.Title, idea.ProblemStatement)
+	if err != nil || existing.ID == 0 {
+		return false, store.Idea{}, err
+	}
+	if sim >= dupAutoThreshold {
+		return true, existing, nil
+	}
+	if sim < dupGreyThreshold {
+		return false, store.Idea{}, nil
+	}
+
+	user := fmt.Sprintf("Idea A:\nTitle: %s\nProblem: %s\n\nIdea B:\nTitle: %s\nProblem: %s",
+		existing.Title, clip(existing.ProblemStatement, 600),
+		idea.Title, clip(idea.ProblemStatement, 600))
+	raw, err := chat.ChatJSON(ctx, dupJudgeSystem, user)
+	if err != nil {
+		// Hakem ulaşılamazsa temkinli davran: mükerrer sayma, kartı yaz.
+		log.Printf("synthesize: dedup hakemi HATA: %v — kart yazılıyor", err)
+		return false, store.Idea{}, nil
+	}
+	var verdict struct {
+		Same bool `json:"same"`
+	}
+	if err := json.Unmarshal([]byte(raw), &verdict); err != nil {
+		return false, store.Idea{}, nil
+	}
+	if verdict.Same {
+		return true, existing, nil
+	}
+	return false, store.Idea{}, nil
+}
+
 // SynthesizeIdeas, frekans eşiğini geçen temalardan idea card üretir
-// (source_type=pain_point). Aynı temadan ikinci kez üretilmez (Faz 0 basit
-// dedup; pg_trgm dedup Faz 1 / issue #14).
+// (source_type=pain_point). Tema bazlı tekrar üretimi ThemesReadyForSynthesis
+// engeller; fikir bazlı mükerrerlik findDuplicate ile yakalanır (#14).
 func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat) (int, error) {
 	themes, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, synthesizeThemeLimit)
 	if err != nil {
@@ -227,13 +270,21 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		// Naif başlık dedup'u (Faz 0): birebir aynı başlık varsa yazma.
-		exists, err := st.IdeaTitleExists(ctx, idea.Title)
+		// Dedup (#14): pg_trgm benzerliği + gri bölgede LLM hakemi. Mükerrer
+		// fikir yeni kart açmaz, mevcut kartın kanıtını güçlendirir.
+		dup, existing, err := findDuplicate(ctx, st, chat, idea)
 		if err != nil {
 			return created, err
 		}
-		if exists {
-			log.Printf("synthesize: %q zaten var (başlık eşleşmesi) — atlandı", idea.Title)
+		if dup {
+			if err := st.MergeIdeaEvidence(ctx, existing.ID, idea.EvidenceCount); err != nil {
+				return created, err
+			}
+			if err := st.MarkThemeMerged(ctx, th.ID, existing.ID); err != nil {
+				return created, err
+			}
+			log.Printf("synthesize: %q mükerrer -> %q kartına katıldı (kanıt +%d)",
+				idea.Title, existing.Title, idea.EvidenceCount)
 			continue
 		}
 

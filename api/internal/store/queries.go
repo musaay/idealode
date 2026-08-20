@@ -148,6 +148,42 @@ func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis
 	return out, rows.Err()
 }
 
+// FindSimilarIdea, verilen başlık+probleme pg_trgm ile en çok benzeyen
+// mevcut kartı ve benzerlik skorunu döner (kart yoksa sim=0, id=0).
+func (s *Store) FindSimilarIdea(ctx context.Context, title, problem string) (Idea, float64, error) {
+	var i Idea
+	var sim float64
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, title, problem_statement, evidence_count,
+		       GREATEST(similarity(title, $1), similarity(problem_statement, $2)) AS sim
+		FROM ideas
+		ORDER BY sim DESC
+		LIMIT 1`, title, problem).Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.EvidenceCount, &sim)
+	if err == pgx.ErrNoRows {
+		return Idea{}, 0, nil
+	}
+	if err != nil {
+		return Idea{}, 0, err
+	}
+	return i, sim, nil
+}
+
+// MergeIdeaEvidence, mükerrer temanın kanıtını mevcut karta ekler.
+func (s *Store) MergeIdeaEvidence(ctx context.Context, ideaID int64, addCount int) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE ideas SET evidence_count = evidence_count + $2, updated_at = now()
+		WHERE id = $1`, ideaID, addCount)
+	return err
+}
+
+// MarkThemeMerged, temayı mevcut bir karta katılmış olarak işaretler;
+// işaretli tema senteze yeniden girmez.
+func (s *Store) MarkThemeMerged(ctx context.Context, themeID, ideaID int64) error {
+	_, err := s.Pool.Exec(ctx,
+		`UPDATE themes SET merged_into_idea_id = $2 WHERE id = $1`, themeID, ideaID)
+	return err
+}
+
 // MarkThemeIncoherent, tutarlılık denetimini geçemeyen temayı işaretler;
 // tema, yeni kanıt gelene dek (last_seen > incoherent_at) senteze girmez.
 func (s *Store) MarkThemeIncoherent(ctx context.Context, themeID int64) error {
@@ -192,6 +228,7 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 		FROM themes t
 		WHERE t.frequency >= $1
 		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
+		  AND t.merged_into_idea_id IS NULL
 		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
 		ORDER BY t.frequency DESC, t.id
 		LIMIT $2`, minEvidence, limit)
