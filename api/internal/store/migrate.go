@@ -32,6 +32,9 @@ var migration007 string
 //go:embed migrate_sql/008_evidence_fusion.sql
 var migration008 string
 
+//go:embed migrate_sql/009_fusion_sources.sql
+var migration009 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -76,6 +79,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration008); err != nil {
 		return fmt.Errorf("008_evidence_fusion.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration009); err != nil {
+		return fmt.Errorf("009_fusion_sources.sql: %w", err)
 	}
 	return nil
 }
