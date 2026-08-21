@@ -148,6 +148,34 @@ func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis
 	return out, rows.Err()
 }
 
+// runLockKey: `idealode run` koşuları için advisory lock anahtarı (#15).
+const runLockKey int64 = 0x1DEA10DE
+
+// AcquireRunLock, koşu kilidi almayı dener (bloklamadan). Kilit alınamazsa
+// ok=false döner — başka bir koşu (örn. çakışan cron) devam ediyordur.
+// Kilit, release çağrılana dek pool'dan ayrılmış tek bağlantıda tutulur.
+func (s *Store) AcquireRunLock(ctx context.Context) (release func(), ok bool, err error) {
+	conn, err := s.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	var got bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", runLockKey).Scan(&got); err != nil {
+		conn.Release()
+		return nil, false, err
+	}
+	if !got {
+		conn.Release()
+		return nil, false, nil
+	}
+	release = func() {
+		// Bağlantı kapanınca kilit zaten düşer; yine de düzgünce bırak.
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", runLockKey)
+		conn.Release()
+	}
+	return release, true, nil
+}
+
 // IdeasNeedingFusion, henüz füzyon denenmemiş market_derived kartları döner.
 func (s *Store) IdeasNeedingFusion(ctx context.Context, limit int) ([]Idea, error) {
 	rows, err := s.Pool.Query(ctx, `
