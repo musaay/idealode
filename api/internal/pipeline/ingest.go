@@ -26,6 +26,12 @@ func Connectors(cfg *config.Config) map[string]connector.SourceConnector {
 	m[gp.Platform()] = gp
 	tp := connector.NewTechnopat()
 	m[tp.Platform()] = tp
+	// Product Hunt token ister; token yokken registry'ye girmez, ingest
+	// kaynağı "connector yok" logu ile atlar (kabul kriteri: pipeline düşmez).
+	if cfg.ProductHuntToken != "" {
+		ph := connector.NewProductHunt(cfg.ProductHuntToken)
+		m[ph.Platform()] = ph
+	}
 	return m
 }
 
