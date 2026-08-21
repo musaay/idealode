@@ -16,3 +16,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - ListKit — ısıtılmış B2B soğuk e-posta listeleri, 87 günde $100K MRR (2026-08-20)
 - Klipy.ai — KOBİ AI satış/CRM asistanı, $440K gelir + $3.8M yatırım (2026-08-20)
 - Rebelgrowth — AI SEO içerik + backlink ağı, $8K+ MRR (2026-08-20)
+- SuperX — X (Twitter) büyüme/yazım asistanı, $23K MRR (2026-08-21)
+- Kleo — LinkedIn içerik aracı, $62K MRR (2026-08-21)
+- StoryShort.ai — AI faceless kısa video, ~$20K MRR (2026-08-21)
+- Fizik tedavi sigorta ön-onay AI ajanı — $41K MRR, tek kişi (2026-08-21)
