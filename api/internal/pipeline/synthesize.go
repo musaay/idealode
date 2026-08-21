@@ -34,6 +34,8 @@ THIRD-PARTY RULE (critical): Evidence about existing products comes in two kinds
 (a) DEFECTS of a specific product: crashes, login failures, technical errors, bad support, that product's own pricing. Only that vendor can fix these; they are NOT valid ideas for an independent builder. If the evidence contains ONLY defects, return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
 (b) UNMET NEEDS voiced as feature wishes: "I wish this app could X", "it would be great if it had Y", "why is there no way to Z". These are VALUABLE — they reveal a need nobody serves. Never propose patching the vendor's app; instead design a STANDALONE product an independent developer could build and sell that serves the underlying need, ideally across many similar apps, platforms or users.
 
+DATA-ACCESS RULE: A standalone idea is only valid if an independent builder can actually reach the data or integration it depends on. If the core of the idea requires closed data or private APIs that incumbent vendors control and have no incentive to open (e.g. a food-delivery app's live order feed), do NOT produce that idea — return {"skip": true, "reason": "data-locked"}. Open/regulated interfaces (public APIs, open banking, RSS, email parsing, user-provided data) are fine.
+
 Return ONLY a JSON object:
 {"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","example_quotes":["..."],"urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
 
