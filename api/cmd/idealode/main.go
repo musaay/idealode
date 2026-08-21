@@ -86,6 +86,27 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 	case "generate":
 		return cmdGenerate(ctx, cfg)
 	case "run":
+		// Advisory lock (#15): çakışan koşu (örn. uzun süren önceki cron)
+		// varsa bu koşu sessizce atlanır — veri yarışı ve çift iş önlenir.
+		lockSt, err := store.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		release, ok, err := lockSt.AcquireRunLock(ctx)
+		if err != nil {
+			lockSt.Close()
+			return fmt.Errorf("koşu kilidi: %w", err)
+		}
+		if !ok {
+			log.Printf("run: başka bir koşu kilidi tutuyor — bu koşu atlandı")
+			lockSt.Close()
+			return nil
+		}
+		defer func() {
+			release()
+			lockSt.Close()
+		}()
+
 		if err := cmdIngest(ctx, cfg); err != nil {
 			return fmt.Errorf("ingest: %w", err)
 		}
