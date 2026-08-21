@@ -55,7 +55,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "generate", "run", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "generate", "fuse", "run", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -95,7 +95,12 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		if err := cmdSynthesize(ctx, cfg); err != nil {
 			return fmt.Errorf("synthesize: %w", err)
 		}
+		if err := cmdFuse(ctx, cfg); err != nil {
+			return fmt.Errorf("fuse: %w", err)
+		}
 		return nil
+	case "fuse":
+		return cmdFuse(ctx, cfg)
 	case "dump":
 		return cmdDump(ctx, cfg)
 	case "migrate":
@@ -143,6 +148,26 @@ func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 	n, err := pipeline.Analyze(ctx, cfg, st, chat)
 	log.Printf("analyze tamam: %d post işlendi", n)
 	return err
+}
+
+// cmdFuse, market_derived kartlara yerel talep kanıtı eşleştirir (#43).
+func cmdFuse(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	n, err := pipeline.FuseEvidence(ctx, cfg, st, chat)
+	if err != nil {
+		return err
+	}
+	log.Printf("fuse tamam: %d kart işlendi", n)
+	return nil
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
