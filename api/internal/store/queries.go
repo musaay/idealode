@@ -148,6 +148,75 @@ func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis
 	return out, rows.Err()
 }
 
+// IdeasNeedingFusion, henüz füzyon denenmemiş market_derived kartları döner.
+func (s *Store) IdeasNeedingFusion(ctx context.Context, limit int) ([]Idea, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, title, problem_statement, proposed_solution, domain_tags
+		FROM ideas
+		WHERE source_type = 'market_derived' AND fused_at IS NULL
+		ORDER BY id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Idea
+	for rows.Next() {
+		var i Idea
+		if err := rows.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution, &i.DomainTags); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+// FusionCandidates, karta aday yerel talep kanıtlarını döner: tag kesişimi
+// ya da başlık benzerliği olan, sinyalli (pain_point/feature_request)
+// post'lar, benzerliğe göre sıralı.
+func (s *Store) FusionCandidates(ctx context.Context, tags []string, problem string, limit int) ([]RawPost, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT p.id, p.platform, p.community, p.title, p.body, p.url,
+		       GREATEST(similarity(p.title, $2), CASE WHEN a.domain_tags && $1 THEN 0.5 ELSE 0 END) AS sim
+		FROM raw_posts p
+		JOIN post_analysis a ON a.post_id = p.id
+		WHERE a.classification IN ('pain_point', 'feature_request')
+		  AND (a.domain_tags && $1 OR similarity(p.title, $2) > 0.15)
+		ORDER BY sim DESC, p.id DESC
+		LIMIT $3`, tags, problem, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RawPost
+	for rows.Next() {
+		var p RawPost
+		var sim float64
+		if err := rows.Scan(&p.ID, &p.Platform, &p.Community, &p.Title, &p.Body, &p.URL, &sim); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SetIdeaLocalEvidence, füzyon sonucunu karta yazar; kanıt bulunamasa da
+// fused_at damgalanır (her koşuda yeniden denenmesin).
+func (s *Store) SetIdeaLocalEvidence(ctx context.Context, ideaID int64, evidence []string) error {
+	if evidence == nil {
+		evidence = []string{}
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE ideas SET local_evidence = $2, fused_at = now(), updated_at = now()
+		WHERE id = $1`, ideaID, evidence)
+	return err
+}
+
 // FindSimilarIdea, verilen başlık+probleme pg_trgm ile en çok benzeyen
 // mevcut kartı ve benzerlik skorunu döner (kart yoksa sim=0, id=0).
 func (s *Store) FindSimilarIdea(ctx context.Context, title, problem string) (Idea, float64, error) {
