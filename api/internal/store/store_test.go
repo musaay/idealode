@@ -47,6 +47,43 @@ func TestInsertRawPostsIdempotent(t *testing.T) {
 	}
 }
 
+// TestUnanalyzedPostsExcludesRadarSeed, ProcessSeeds'in işaret satırlarının
+// (#56) analiz kuyruğuna hiç girmediğini doğrular.
+func TestUnanalyzedPostsExcludesRadarSeed(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	posts := []RawPost{
+		{Platform: "test-radar-seed", SourceRef: "trs-1", Community: "c", Title: "normal post"},
+		{Platform: "radar_seed", SourceRef: "trs-2", Community: "radar", Title: "tohum işaret"},
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform IN ('test-radar-seed', 'radar_seed') AND source_ref LIKE 'trs-%'")
+	})
+	if _, err := s.InsertRawPosts(ctx, posts); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	out, err := s.UnanalyzedPosts(ctx, 1000)
+	if err != nil {
+		t.Fatalf("UnanalyzedPosts: %v", err)
+	}
+	for _, p := range out {
+		if p.Platform == "radar_seed" {
+			t.Fatalf("radar_seed post analiz kuyruğuna girmemeli: %+v", p)
+		}
+	}
+	found := false
+	for _, p := range out {
+		if p.SourceRef == "trs-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("normal post analiz kuyruğunda görünmeli")
+	}
+}
+
 func TestConnectSearchPath(t *testing.T) {
 	s := testStore(t)
 

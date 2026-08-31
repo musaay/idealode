@@ -5,6 +5,7 @@
 //	ingest      aktif kaynaklardan yeni post'ları çek ve raw_posts'a yaz
 //	analyze     ön-filtre + Groq classification -> post_analysis
 //	synthesize  tema gruplama + idea synthesis -> themes/ideas
+//	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
 //	run         ingest -> analyze -> synthesize sırayla
 //	dump        idea card'ları JSON olarak stdout'a dök
@@ -33,8 +34,9 @@ Komutlar:
   ingest      aktif kaynaklardan yeni post'ları çek (raw_posts)
   analyze     ön-filtre + Groq classification (post_analysis)
   synthesize  tema gruplama + idea synthesis (themes, ideas)
+  seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
-  run         ingest -> analyze -> synthesize sırayla çalıştırır
+  run         ingest -> analyze -> synthesize -> fuse -> seeds sırayla çalıştırır
   dump        idea card'ları JSON olarak stdout'a döker
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
 
@@ -55,7 +57,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "generate", "fuse", "run", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -83,6 +85,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return cmdAnalyze(ctx, cfg)
 	case "synthesize":
 		return cmdSynthesize(ctx, cfg)
+	case "seeds":
+		return cmdSeeds(ctx, cfg)
 	case "generate":
 		return cmdGenerate(ctx, cfg)
 	case "run":
@@ -118,6 +122,9 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		}
 		if err := cmdFuse(ctx, cfg); err != nil {
 			return fmt.Errorf("fuse: %w", err)
+		}
+		if err := cmdSeeds(ctx, cfg); err != nil {
+			return fmt.Errorf("seeds: %w", err)
 		}
 		return nil
 	case "fuse":
@@ -208,6 +215,27 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)
 	log.Printf("synthesize tamam: %d yeni idea", n)
 	return err
+}
+
+// cmdSeeds, elle küratörlüğü yapılan pazar tohumlarını (radar-seeds.jsonl)
+// 3 mercekten geçirip market_derived kart üretir (#56).
+func cmdSeeds(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL)
+	if err != nil {
+		return err
+	}
+	log.Printf("seeds tamam: %d yeni idea", n)
+	return nil
 }
 
 func cmdGenerate(ctx context.Context, cfg *config.Config) error {
