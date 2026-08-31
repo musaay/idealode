@@ -59,8 +59,23 @@ func (s *Store) InsertRawPosts(ctx context.Context, posts []RawPost) (int, error
 	return inserted, nil
 }
 
+// RawPostExists, verilen platform+source_ref eşleşen bir raw_post olup
+// olmadığını döner (tohum idempotency kontrolü, #56 — mark yazımından
+// AYRI: bir tohumun daha önce "işlenip işlenmediğini" LLM'e hiç gitmeden
+// anlamak için kullanılır; mark'ın kendisi InsertRawPosts ile ayrıca yazılır).
+func (s *Store) RawPostExists(ctx context.Context, platform, sourceRef string) (bool, error) {
+	var exists bool
+	err := s.Pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM raw_posts WHERE platform = $1 AND source_ref = $2)`,
+		platform, sourceRef).Scan(&exists)
+	return exists, err
+}
+
 // UnanalyzedPosts, henüz post_analysis kaydı olmayan post'ları döner
-// (eskiden yeniye — imleç mantığıyla uyumlu).
+// (eskiden yeniye — imleç mantığıyla uyumlu). radar_seed platformu hariç
+// tutulur: tohum satırları raw_posts'a yalnızca "işlendi" imleci olarak
+// yazılır (#56), analiz kuyruğuna hiç girmemeli — pending sayacı da bu
+// satırlarla şişmesin.
 func (s *Store) UnanalyzedPosts(ctx context.Context, limit int) ([]RawPost, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT rp.id, rp.platform, rp.source_ref, rp.community, rp.title, rp.body,
@@ -69,6 +84,7 @@ func (s *Store) UnanalyzedPosts(ctx context.Context, limit int) ([]RawPost, erro
 		FROM raw_posts rp
 		LEFT JOIN post_analysis pa ON pa.post_id = rp.id
 		WHERE pa.id IS NULL
+		  AND rp.platform <> 'radar_seed'
 		ORDER BY rp.id
 		LIMIT $1`, limit)
 	if err != nil {
