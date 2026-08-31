@@ -45,3 +45,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Inspired — reklam swipe-file Chrome eklentisi, $3.9K MRR (Flippa) (2026-08-29)
 - Niş içerik-üyelik platformu (Spencer Patterson) — $125-142K MRR, $3.5M exit (2026-08-30)
 - HelpKit — Notion'dan yardım merkezi, $10K+ MRR (2026-08-30)
+- systeme.io — all-in-one pazarlama/kurs/e-posta funnel SaaS'ı, $1M ARR (2026-08-31)
+- 30 uygulamalık mobil portföy (Max Artemov) — ASO-öncelikli mikro-uygulama stratejisi, $22K/ay (2026-08-31)
+- Codex API sarmalayıcı kodlama asistanı (Emanuele Di Pietro) — $9K/ay (platform riskiyle düştü) (2026-08-31)
