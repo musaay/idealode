@@ -48,3 +48,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - systeme.io — all-in-one pazarlama/kurs/e-posta funnel SaaS'ı, $1M ARR (2026-08-31)
 - 30 uygulamalık mobil portföy (Max Artemov) — ASO-öncelikli mikro-uygulama stratejisi, $22K/ay (2026-08-31)
 - Codex API sarmalayıcı kodlama asistanı (Emanuele Di Pietro) — $9K/ay (platform riskiyle düştü) (2026-08-31)
+- Cloakist & Sotion (Bruce McLachlan) — Notion/ClickUp/Coda sayfalarına özel alan adı (reverse proxy), $60K'lık alımdan $12K+ MRR portföyüne (2026-09-01)
+- AngelMatch (Rashid Khasanov) — 125K'lık melek yatırımcı/VC veritabanı, $37.3K/ay (2026-09-01)
+- Magai (Dustin Stout) — 50+ AI modelini tek arayüzde birleştiren platform, $1M ARR / ~$100K MRR (2026-09-01)
+- Meerkats.ai (Santanu Dasgupta) — sohbetten yönetilen AI büyüme/SDR ajanı, 4 haftada $3K MRR (2026-09-01)
