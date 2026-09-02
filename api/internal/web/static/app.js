@@ -66,3 +66,263 @@
     el.addEventListener("click", onClick);
   });
 })();
+
+// --------------------------------------------------------- Idea Copilot
+// Panel JS olmadan da tam çalışır: hızlı komut çipleri ve giriş alanı
+// gerçek <form method="post"> gönderimidir, sunucu 303 ile karta döner.
+// Buradaki iş üç başlık: (1) mobil/tablet çekmecesi, (2) sayfa yenilemeden
+// mesaj gönderimi, (3) cevapla gelen öneri çipleri. Inline script yoktur.
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+  // Çekmece yalnız JS varken devreye girer; CSS bu sınıfa bakar.
+  root.classList.add("has-js");
+
+  var panel = document.querySelector("[data-chat-panel]");
+  if (!panel) return;
+
+  var body = document.body;
+  var log = panel.querySelector("[data-chat-log]");
+  var form = panel.querySelector("[data-chat-form]");
+  var blendForm = panel.querySelector("[data-chat-blend]");
+  var status = panel.querySelector("[data-chat-status]");
+  var input = panel.querySelector(".chat-input");
+  var sendButton = panel.querySelector(".chat-send");
+  var openers = document.querySelectorAll("[data-chat-open]");
+  var closers = document.querySelectorAll("[data-chat-close]");
+  var backdrop = document.querySelector(".chat-backdrop");
+  var lastOpener = null;
+  var busy = false;
+
+  // Sayfa açılışında en yeni mesaj görünür olsun (referans: scrollToBottom).
+  if (log) log.scrollTop = log.scrollHeight;
+
+  function isDrawerViewport() {
+    return window.matchMedia("(max-width: 1023.98px)").matches;
+  }
+
+  function openChat(trigger) {
+    lastOpener = trigger || null;
+    if (isDrawerViewport()) {
+      body.classList.add("chat-open");
+      if (backdrop) backdrop.hidden = false;
+    } else {
+      panel.scrollIntoView({ block: "nearest" });
+    }
+    if (input) input.focus();
+  }
+
+  function closeChat() {
+    if (!body.classList.contains("chat-open")) return;
+    body.classList.remove("chat-open");
+    if (backdrop) backdrop.hidden = true;
+    if (lastOpener && typeof lastOpener.focus === "function") lastOpener.focus();
+  }
+
+  Array.prototype.forEach.call(openers, function (el) {
+    el.addEventListener("click", function (event) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      openChat(el);
+    });
+  });
+
+  Array.prototype.forEach.call(closers, function (el) {
+    el.addEventListener("click", function (event) {
+      event.preventDefault();
+      closeChat();
+    });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeChat();
+  });
+
+  // Çekmece açıkken masaüstü genişliğine geçilirse durum sıfırlanır.
+  window.addEventListener("resize", function () {
+    if (!isDrawerViewport() && body.classList.contains("chat-open")) {
+      body.classList.remove("chat-open");
+      if (backdrop) backdrop.hidden = true;
+    }
+  });
+
+  // ---------------------------------------------------------- yardımcılar
+  function message(name) {
+    return panel.getAttribute("data-msg-" + name) || panel.getAttribute("data-msg-failed") || "";
+  }
+
+  function showStatus(text) {
+    if (!status) return;
+    status.textContent = text;
+    status.hidden = !text;
+  }
+
+  function setBusy(next) {
+    busy = next;
+    if (input) input.disabled = next;
+    if (sendButton) sendButton.disabled = next;
+    Array.prototype.forEach.call(panel.querySelectorAll(".chat-chip"), function (chip) {
+      chip.disabled = next;
+    });
+    var blendButton = panel.querySelector(".chat-blend-button");
+    if (blendButton) blendButton.disabled = next;
+  }
+
+  function clearEmptyState() {
+    var empty = log ? log.querySelector(".chat-empty") : null;
+    if (empty) empty.remove();
+  }
+
+  function clearSuggestions() {
+    Array.prototype.forEach.call(panel.querySelectorAll(".chat-suggestions"), function (el) {
+      el.remove();
+    });
+  }
+
+  function clockNow() {
+    var d = new Date();
+    function pad(n) { return (n < 10 ? "0" : "") + n; }
+    return pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes());
+  }
+
+  var ICON_USER =
+    '<svg viewBox="0 0 24 24" width="14" height="14" focusable="false">' +
+    '<circle cx="12" cy="8.5" r="3.6" fill="currentColor"/>' +
+    '<path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  var ICON_BOT =
+    '<svg viewBox="0 0 24 24" width="14" height="14" focusable="false">' +
+    '<path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" fill="currentColor"/></svg>';
+
+  // appendMessage, metni DÜĞÜM olarak basar (textContent): sunucu tarafındaki
+  // escape kuralının aynısı — hiçbir mesaj HTML olarak yorumlanmaz.
+  function appendMessage(role, text) {
+    if (!log) return;
+    clearEmptyState();
+
+    var isUser = role === "user";
+    var row = document.createElement("div");
+    row.className = "chat-msg" + (isUser ? " is-user" : "");
+
+    var avatar = document.createElement("span");
+    avatar.className = "chat-msg-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.innerHTML = isUser ? ICON_USER : ICON_BOT;
+
+    var wrap = document.createElement("div");
+    wrap.className = "chat-bubble-wrap";
+
+    var bubble = document.createElement("p");
+    bubble.className = "chat-bubble";
+    var label = document.createElement("span");
+    label.className = "sr-only";
+    label.textContent =
+      (isUser
+        ? panel.getAttribute("data-label-you")
+        : panel.getAttribute("data-label-assistant")) + ": ";
+    bubble.appendChild(label);
+    // Satır sonları CSS ile değil, sunucudaki gibi <br> ile korunur.
+    text.split(/\r\n|\r|\n/).forEach(function (line, idx) {
+      if (idx > 0) bubble.appendChild(document.createElement("br"));
+      bubble.appendChild(document.createTextNode(line));
+    });
+
+    var time = document.createElement("span");
+    time.className = "chat-time";
+    time.textContent = clockNow();
+
+    wrap.appendChild(bubble);
+    wrap.appendChild(time);
+    row.appendChild(avatar);
+    row.appendChild(wrap);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+    return wrap;
+  }
+
+  function appendSuggestions(host, items) {
+    if (!host || !items || !items.length) return;
+    var box = document.createElement("div");
+    box.className = "chat-suggestions";
+    items.slice(0, 3).forEach(function (text) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chat-chip chat-suggestion";
+      chip.textContent = text;
+      chip.addEventListener("click", function () {
+        send(text);
+      });
+      box.appendChild(chip);
+    });
+    host.appendChild(box);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ------------------------------------------------------------ gönderim
+  function send(text) {
+    if (busy || !form) return;
+    var msg = (text || "").trim();
+    if (!msg) return;
+
+    clearSuggestions();
+    appendMessage("user", msg);
+    if (input) input.value = "";
+    setBusy(true);
+    showStatus(message("generating"));
+
+    // urlencoded gövde: sunucu tarafı form gönderimiyle AYNI yolu kullanır
+    // (multipart olsaydı ParseForm okumazdı).
+    var payload = new URLSearchParams();
+    payload.append("message", msg);
+
+    fetch(form.action, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+      body: payload
+    })
+      .then(function (res) {
+        return res.json().then(
+          function (data) { return { ok: res.ok, data: data }; },
+          function () { return { ok: false, data: {} }; }
+        );
+      })
+      .then(function (result) {
+        setBusy(false);
+        if (!result.ok) {
+          showStatus(result.data.message || message(result.data.error || "failed"));
+          return;
+        }
+        showStatus("");
+        var reply = result.data.reply || {};
+        var host = appendMessage("assistant", reply.message || "");
+        appendSuggestions(host, result.data.suggestions);
+      })
+      .catch(function () {
+        setBusy(false);
+        showStatus(message("failed"));
+      });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    send(input ? input.value : "");
+  });
+
+  // Hızlı komut çipleri: JS varken sayfayı yenilemeden gönderilir.
+  Array.prototype.forEach.call(panel.querySelectorAll(".chat-quick .chat-chip"), function (chip) {
+    chip.addEventListener("click", function (event) {
+      event.preventDefault();
+      send(chip.value);
+    });
+  });
+
+  // "Kart olarak türet" doğal gönderimle gider (yeni karta yönlendirir);
+  // yalnız bekleme durumu gösterilir.
+  if (blendForm) {
+    blendForm.addEventListener("submit", function () {
+      setBusy(true);
+      showStatus(message("generating"));
+    });
+  }
+})();

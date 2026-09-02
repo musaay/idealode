@@ -40,6 +40,24 @@
         </span>
         {{ if .NavCount }}<span class="navlink-count">{{ .NavCount }}</span>{{ end }}
       </a>
+
+      {{ if .CopilotActive }}
+      <a class="navlink navlink-copilot" href="#chat" data-chat-open>
+        <span class="navlink-label">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+          <span>{{ .T "nav.copilot" }}</span>
+        </span>
+        <span class="navlink-badge">{{ .T "nav.copilot_badge" }}</span>
+      </a>
+      {{ else }}
+      <span class="navlink navlink-copilot is-muted" aria-disabled="true" title="{{ .T "nav.copilot_soon" }}">
+        <span class="navlink-label">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+          <span>{{ .T "nav.copilot" }}</span>
+        </span>
+        <span class="navlink-badge">{{ .T "nav.copilot_soon" }}</span>
+      </span>
+      {{ end }}
     </nav>
   </div>
 
@@ -158,11 +176,19 @@
         <span class="theme-toggle-mode">{{ if eq .NextTheme "dark" }}{{ .T "theme.mode_light" }}{{ else }}{{ .T "theme.mode_dark" }}{{ end }}</span>
       </a>
 
-      {{/* Sohbet ekranı henüz yok: referanstaki görünüm korunur, tıklama sayfayı değiştirmez. */}}
+      {{/* Kart detayında sohbet paneline odaklanır; galeride (kartsız global
+           sohbet henüz yok) referanstaki görünüm korunur ve pasiftir. */}}
+      {{ if .CopilotActive }}
+      <a class="copilot-button" href="#chat" data-chat-open>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+        <span>{{ .T "nav.copilot" }}</span>
+      </a>
+      {{ else }}
       <button class="copilot-button" type="button" aria-disabled="true" title="{{ .T "nav.copilot_soon" }}">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
         <span>{{ .T "nav.copilot" }}</span>
       </button>
+      {{ end }}
     </div>
   </header>
 
@@ -185,7 +211,18 @@
     <span>{{ .T "nav.gallery" }}</span>
   </a>
 
-  {{/* referans MobileBottomNav ikinci sekmesi; sohbet gelene kadar gezinmez */}}
+  {{/* referans MobileBottomNav ikinci sekmesi: kart detayında sohbet
+       çekmecesini açar (JS yoksa panel içeriğin altındadır, çapa oraya
+       kaydırır); galeride pasif kalır */}}
+  {{ if .CopilotActive }}
+  <a class="mobile-nav-item mobile-nav-copilot" href="#chat" data-chat-open>
+    <span class="mobile-nav-icon">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+      <span class="mobile-nav-dot" aria-hidden="true"></span>
+    </span>
+    <span>{{ .T "nav.copilot" }}</span>
+  </a>
+  {{ else }}
   <button class="mobile-nav-item mobile-nav-copilot" type="button"
           aria-disabled="true" title="{{ .T "nav.copilot_soon" }}">
     <span class="mobile-nav-icon">
@@ -194,6 +231,7 @@
     </span>
     <span>{{ .T "nav.copilot" }}</span>
   </button>
+  {{ end }}
 </nav>
 
 <script src="/static/app.js?v={{ .AssetVer }}" defer></script>

@@ -1211,3 +1211,506 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 }
 
 .meta-item dd { margin: var(--space-1) 0 0; color: var(--color-text); }
+
+/* ============================================================ Idea Copilot
+   Kart detayı yerleşimi: >=1024px sağ ray (sticky, 580px), <1024px çekmece.
+   Referans: IdeaDetailView sağ sütun (lg:w-84 / xl:w-96, sticky top-20,
+   h-[580px]) + IdeaCopilotChat (panel başlığı, balonlar, çipler, giriş).
+   JS yoksa panel içeriğin altında normal akışta durur ve #chat çapası
+   oraya kaydırır — çekmece yalnız JS varken devreye girer. */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.idea-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.idea-main {
+  flex: 1 1 auto;
+  min-width: 0; /* uzun alıntılar yatay kaydırma doğurmasın */
+  width: 100%;
+}
+
+.idea-rail {
+  width: 100%;
+  min-width: 0;
+}
+
+/* --- kaynak kart bağlantısı + "yalnız size görünür" notu (ai_blended) --- */
+.idea-parent,
+.idea-mine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  font-size: 0.9375rem;
+}
+
+.idea-parent { color: var(--color-copilot-fg); }
+.idea-parent a { color: inherit; font-weight: 600; }
+.idea-mine { color: var(--color-text-muted); }
+
+/* --------------------------------------------------------------- panel */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: var(--color-copilot-bg);
+  color: var(--color-copilot-fg);
+  border: 1px solid var(--color-copilot-bd);
+}
+
+.chat-avatar-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-dot);
+  border: 2px solid var(--color-surface-2);
+}
+
+.chat-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chat-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.chat-subtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-copilot-fg);
+}
+
+.chat-subtitle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.chat-close {
+  display: none; /* yalnız çekmece kipinde görünür */
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1)
+    calc(var(--space-2) * -1) 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chat-close:hover { color: var(--color-text); background: var(--color-bg); }
+
+/* ------------------------------------------------------- hızlı komutlar */
+.chat-quick {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  scrollbar-width: thin;
+}
+
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  /* Dokunma hedefi kuralı referansın küçük çipini ezer (galeri .chip ile
+     aynı: min 44px) — tasarım dili korunur, erişilebilirlik düşmez. */
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--color-text-body);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.chat-chip:hover {
+  color: var(--color-primary-strong);
+  border-color: var(--color-primary);
+}
+
+/* ---------------------------------------------------------- mesaj akışı */
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 180px;
+  padding: var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-msg {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.chat-msg.is-user { flex-direction: row-reverse; }
+
+.chat-msg-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--color-copilot-bg);
+  color: var(--color-copilot-fg);
+  border: 1px solid var(--color-copilot-bd);
+}
+
+.chat-msg.is-user .chat-msg-avatar {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-color: var(--color-primary);
+}
+
+.chat-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 85%;
+  min-width: 0;
+}
+
+.chat-msg.is-user .chat-bubble-wrap { align-items: flex-end; }
+
+.chat-bubble {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--color-text-body);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  border-top-left-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.chat-msg.is-user .chat-bubble {
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  border-top-left-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-sm);
+}
+
+.chat-time {
+  padding: 0 var(--space-1);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.chat-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-pill);
+  background: var(--color-copilot-bg);
+  color: var(--color-copilot-fg);
+}
+
+.chat-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.chat-empty-body {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------- durum/hata */
+.chat-error,
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.9375rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.chat-error {
+  color: var(--badge-market-fg);
+  background: var(--badge-market-bg);
+}
+
+.chat-status {
+  color: var(--color-copilot-fg);
+  background: var(--color-copilot-bg);
+}
+
+/* display:flex, tarayıcının [hidden] kuralını ezer — geri getirilir. */
+.chat-status[hidden] { display: none; }
+
+/* ------------------------------------------------------------ giriş */
+.chat-foot {
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.chat-form {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.chat-input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2) calc(var(--tap) + var(--space-2)) var(--space-2)
+    var(--space-4);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.chat-input::placeholder { color: var(--color-text-muted); }
+
+.chat-input:disabled { opacity: 0.6; }
+
+.chat-send {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.chat-send:hover { background: var(--color-primary-strong); }
+.chat-send:disabled { opacity: 0.5; cursor: default; }
+
+.chat-blend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.chat-blend-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-copilot-fg);
+  background: var(--color-copilot-bg);
+  border: 1px solid var(--color-copilot-bd);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.chat-blend-button:hover { background: var(--color-copilot-bg-hover); }
+.chat-blend-button:disabled { opacity: 0.6; cursor: default; }
+
+.chat-blend-note {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ----------------------------------------- sol nav Copilot girişi (>=768) */
+.navlink-copilot { color: var(--color-copilot-fg); }
+.navlink-copilot.is-muted { cursor: default; opacity: 0.85; }
+
+.navlink-badge {
+  padding: 2px var(--space-2);
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--color-copilot-fg);
+  background: var(--color-copilot-bg);
+  border: 1px solid var(--color-copilot-bd);
+  border-radius: var(--radius-pill);
+}
+
+/* ------------------------------------------- >=1024: sağ ray (sticky) */
+@media (min-width: 1024px) {
+  .idea-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-6);
+  }
+
+  .idea-rail {
+    /* referans: lg:w-84 (336px), sticky top-20, h-[580px] */
+    flex: 0 0 336px;
+    width: 336px;
+    position: sticky;
+    top: calc(var(--topbar-h) + var(--space-4));
+    height: 580px;
+    min-height: 500px;
+  }
+}
+
+@media (min-width: 1280px) {
+  /* referans: xl:w-96 (384px) */
+  .idea-rail { flex-basis: 384px; width: 384px; }
+}
+
+/* --------------------------------- <1024 + JS: alt çekmece (bottom sheet) */
+@media (max-width: 1023.98px) {
+  .has-js .idea-rail {
+    display: none;
+  }
+
+  .has-js .chat-open .idea-rail {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    height: min(86vh, 620px);
+    padding: 0;
+  }
+
+  .has-js .chat-open .chat-panel {
+    border-bottom: 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+  }
+
+  .has-js .chat-open .chat-close { display: inline-flex; }
+
+  .chat-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(2, 12, 8, 0.6);
+  }
+
+  /* çekmece açıkken arka plan kaymaz */
+  .chat-open {
+    overflow: hidden;
+  }
+}
+
+/* cevapla gelen öneri çipleri (yalnız JS yolunda) */
+.chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.chat-suggestion {
+  color: var(--color-copilot-fg);
+  background: var(--color-copilot-bg);
+  border-color: var(--color-copilot-bd);
+}
+
+.chat-suggestion:hover {
+  color: var(--color-copilot-fg);
+  background: var(--color-copilot-bg-hover);
+  border-color: var(--color-copilot-fg);
+}

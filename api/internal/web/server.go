@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -38,13 +39,46 @@ const cookieMaxAge = 365 * 24 * 60 * 60
 // dış kaynaklardan yalnız Google Fonts stili/fontu yüklenir.
 const contentSecurityPolicy = "default-src 'self'; style-src 'self' fonts.googleapis.com; font-src fonts.gstatic.com"
 
-// IdeaStore, web katmanının store'dan ihtiyaç duyduğu okuma yüzeyi.
-// Somut *store.Store yerine arayüz kullanılır ki handler testleri canlı
-// veritabanı olmadan fake ile koşsun.
+// ChatMessage, sohbet geçmişindeki tek mesaj (API sözleşmesindeki `Msg`).
+type ChatMessage struct {
+	ID        string
+	Role      string // "user" | "assistant"
+	Message   string
+	CreatedAt time.Time
+}
+
+// ChatReply, POST .../chat yanıtı: asistan mesajı + en fazla 3 öneri.
+type ChatReply struct {
+	Reply       ChatMessage
+	Suggestions []string
+}
+
+// Sohbet uçlarının tipli hataları. apiclient bunları döndürür, handler
+// errors.Is ile ayırıp kullanıcıya doğru mesajı gösterir. store.ErrNotFound
+// (404) ve sarılı ağ hataları (502 sayfası) önceki dilimlerdeki gibidir.
+var (
+	// ErrRateLimited, kota aşıldı (API 429).
+	ErrRateLimited = errors.New("kota aşıldı")
+	// ErrNoConversation, türetilecek sohbet yok (API 409).
+	ErrNoConversation = errors.New("sohbet boş")
+	// ErrUpstream, LLM tarafı hata verdi (API 502).
+	ErrUpstream = errors.New("llm yanıt vermedi")
+	// ErrBadRequest, istek sözleşmeye uymuyor (API 400).
+	ErrBadRequest = errors.New("geçersiz istek")
+)
+
+// IdeaStore, web katmanının API sürecinden ihtiyaç duyduğu yüzey.
+// Somut istemci yerine arayüz kullanılır ki handler testleri canlı
+// veritabanı/LLM olmadan fake ile koşsun.
 type IdeaStore interface {
 	ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]store.Idea, error)
 	GetIdea(ctx context.Context, id int64) (*store.Idea, error)
 	IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error)
+
+	// Sohbet (dilim 2). Oturum kimliği ctx'ten taşınır.
+	ListChat(ctx context.Context, ideaID int64) ([]ChatMessage, error)
+	SendChat(ctx context.Context, ideaID int64, message, lang string) (ChatReply, error)
+	Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error)
 }
 
 // Server, HTTP handler'larını ve önceden parse edilmiş şablonları taşır.
@@ -83,6 +117,8 @@ func NewServer(ideas IdeaStore) *Server {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /static/", s.handleStatic)
 	mux.HandleFunc("GET /ideas/{id}", s.handleIdea)
+	mux.HandleFunc("POST /ideas/{id}/chat", s.handleChat)
+	mux.HandleFunc("POST /ideas/{id}/blend", s.handleBlend)
 	mux.HandleFunc("GET /{$}", s.handleGallery)
 	mux.HandleFunc("/", s.handleNotFound) // eşleşmeyen her yol
 	s.mux = mux
@@ -125,9 +161,11 @@ func mustAssetVersion() string {
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
-// Handler, güvenlik başlıkları + log + recover sarmalıyla mux'ı döner.
+// Handler, güvenlik başlıkları + log + anonim oturum + recover sarmalıyla
+// mux'ı döner. Oturum katmanı recover'ın DIŞINDA durur: panic hâlinde bile
+// çerez yazılmış olur, hata sayfası oturumu düşürmez.
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(requestLog(s.recoverPanic(s.mux)))
+	return securityHeaders(requestLog(sessionMiddleware(s.recoverPanic(s.mux))))
 }
 
 // ListenAndServe, sunucuyu addr üzerinde çalıştırır ve ctx iptal edilince

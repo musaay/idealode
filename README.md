@@ -60,21 +60,31 @@ Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
 ## JSON API
 
 `./idealode api` — pipeline'ın ürettiği idea card'ları JSON olarak sunar
-(#18). `DATABASE_URL`'i gören TEK süreçtir; `serve` dahil hiçbir başka süreç
-veritabanına doğrudan bağlanmaz. Adres: `PORT` ortam değişkeni (varsayılan
-`8080`). Uçlar:
+(#18) ve kart sohbeti/"Idea Copilot"u (#66) çalıştırır. `DATABASE_URL`'i
+gören TEK süreçtir; `serve` dahil hiçbir başka süreç veritabanına doğrudan
+bağlanmaz. Groq'a yalnız bu süreç gider — `GROQ_API_KEY` (ve isteğe bağlı
+`GROQ_MODEL`) artık `api` için de zorunludur. Adres: `PORT` ortam değişkeni
+(varsayılan `8080`). Uçlar:
 
 ```
-GET /healthz                       → 200 {"status":"ok"}
-GET /api/ideas?source_type=&q=&limit=
-GET /api/ideas/{id}
-GET /api/ideas/{id}/sources
+GET  /healthz                       → 200 {"status":"ok"}
+GET  /api/ideas?source_type=&q=&limit=
+GET  /api/ideas/{id}
+GET  /api/ideas/{id}/sources
+GET  /api/ideas/{id}/chat           → kart sohbeti geçmişi
+POST /api/ideas/{id}/chat           → {"message","lang"} -> {"reply","suggestions"}
+POST /api/ideas/{id}/blend          → sohbetten yeni `ai_blended` kart türetir
 ```
 
-Tüm yanıtlar `application/json; charset=utf-8`; hata gövdesi
-`{"error":"not_found"|"bad_request"|"internal"}`. Boş liste her zaman `[]`
-döner, asla `null` (nil slice'lar sözleşme sınırında `[]`'e indirgenir).
-Ayrıntılı sözleşme: `docs/specs/faz2-dilim1b-api.md`.
+`/healthz` dışındaki tüm uçlar `X-Session-Id: <hex>` başlığı ister (girişsiz
+kimlik — anonim oturum çerezi; `serve` üretir). Tüm yanıtlar
+`application/json; charset=utf-8`; hata gövdesi `{"error":"not_found"|
+"bad_request"|"internal"|"rate_limited"|"upstream"|"no_conversation"}`. Boş
+liste her zaman `[]` döner, asla `null` (nil slice'lar sözleşme sınırında
+`[]`'e indirgenir). Sohbet kotaları (oturum başına, süreç belleğinde):
+30 mesaj/saat, 5 blend/gün. `ai_blended` kartlar yalnız üreten oturuma
+görünür (galeri + detay); başkasının kartı 404 döner. Ayrıntılı sözleşme:
+`docs/specs/faz2-dilim1b-api.md`, `docs/specs/faz2-dilim2-chat.md`.
 
 Public domain almaz — Railway'de yalnız iç ağda (`idealode-web` servisinden)
 erişilir; dışa açık uç `serve`'dür.

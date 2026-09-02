@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"html/template"
 	"net/url"
 	"regexp"
 	"strings"
@@ -42,6 +43,11 @@ type Page struct {
 	Breadcrumb  string // masaüstü üst çubukta kısaltılmış kart başlığı
 	NavCount    string // sol nav "Galeri" rozetindeki sayı; bilinmiyorsa boş
 	OnGallery   bool   // galeri sayfasındayız (nav "current" işareti)
+
+	// Copilot girişleri (sol nav ikinci sekmesi, üst çubuk düğmesi, mobil
+	// alt nav sekmesi). Kart detayında sohbet paneline götürür; galeride
+	// pasif "Yakında" olarak kalır (kartsız global sohbet henüz yok).
+	CopilotActive bool
 }
 
 // T, katalogdan çeviri döner; args verilirse fmt.Sprintf uygulanır.
@@ -177,6 +183,101 @@ type IdeaPage struct {
 	Monetization  int
 	CreatedAt     string
 	HasMeta       bool // meta paneli hiç satır taşımıyorsa hiç basılmaz
+
+	// Sohbet (dilim 2).
+	ParentHref string // ai_blended kartın kaynak kartı; boşsa satır basılmaz
+	Mine       bool   // yalnız bu oturuma görünen kart
+	Chat       ChatPanel
+}
+
+// ChatBubble, panelde basılan tek mesaj.
+type ChatBubble struct {
+	IsUser bool
+	Body   template.HTML // escape SONRASI satır sonları <br> yapılmış metin
+	Time   string        // HH:MM (yerel biçim yok; UTC damgası kısaltılır)
+}
+
+// QuickPrompt, panelin üstündeki sabit hızlı komut çipi. JS'siz de çalışır:
+// çip, forma ait `name="message"` taşıyan bir submit düğmesidir.
+type QuickPrompt struct {
+	Label string
+	Query string
+}
+
+// ChatPanel, kart sohbeti panelinin görünüm modeli.
+type ChatPanel struct {
+	IdeaID       int64
+	PostHref     string // POST hedefi (sohbet)
+	BlendHref    string // POST hedefi (kart olarak türet)
+	Title        string // "<kısaltılmış kart adı>… Copilot"
+	Messages     []ChatBubble
+	QuickPrompts []QuickPrompt
+	Error        string // gösterilecek hata metni (boşsa satır basılmaz)
+	Lang         string
+	MaxLen       int
+}
+
+// chatTitleMax, panel başlığındaki kart adının kırpma sınırı (referans:
+// idea.title.slice(0, 20) + "... Copilot").
+const chatTitleMax = 20
+
+// clipChatTitle, panel başlığı için kart adını kırpar.
+func clipChatTitle(s string) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= chatTitleMax {
+		return string(r)
+	}
+	return strings.TrimSpace(string(r[:chatTitleMax])) + "…"
+}
+
+// messageBody, sohbet mesajını güvenle HTML'e çevirir: ÖNCE tam escape,
+// SONRA satır sonu -> <br>. Sıra kritiktir — ham metin hiçbir aşamada
+// HTML olarak yorumlanmaz, yalnız satır yapısı korunur. LLM ve kullanıcı
+// metni bu yüzden `template.HTML` olarak basılsa da zararsızdır.
+func messageBody(s string) template.HTML {
+	esc := template.HTMLEscapeString(s)
+	esc = strings.ReplaceAll(esc, "\r\n", "\n")
+	esc = strings.ReplaceAll(esc, "\r", "\n")
+	esc = strings.ReplaceAll(esc, "\n", "<br>")
+	return template.HTML(esc) //nolint:gosec // içerik yukarıda escape edildi
+}
+
+// chatMaxLen, giriş alanının karakter tavanı (API sözleşmesiyle aynı).
+const chatMaxLen = 1000
+
+// buildChatPanel, geçmişi ve sabit çipleri panel modeline çevirir.
+func buildChatPanel(lang string, ideaID int64, title string, msgs []ChatMessage, errMsg string) ChatPanel {
+	bubbles := make([]ChatBubble, 0, len(msgs))
+	for _, m := range msgs {
+		bubbles = append(bubbles, ChatBubble{
+			IsUser: m.Role == "user",
+			Body:   messageBody(m.Message),
+			Time:   formatClock(m.CreatedAt),
+		})
+	}
+	return ChatPanel{
+		IdeaID:    ideaID,
+		PostHref:  fmt.Sprintf("/ideas/%d/chat", ideaID),
+		BlendHref: fmt.Sprintf("/ideas/%d/blend", ideaID),
+		Title:     translate(lang, "chat.title", clipChatTitle(title)),
+		Messages:  bubbles,
+		QuickPrompts: []QuickPrompt{
+			{Label: translate(lang, "chat.quick.arch"), Query: translate(lang, "chat.quick.arch_query")},
+			{Label: translate(lang, "chat.quick.market"), Query: translate(lang, "chat.quick.market_query")},
+			{Label: translate(lang, "chat.quick.risks"), Query: translate(lang, "chat.quick.risks_query")},
+		},
+		Error:  errMsg,
+		Lang:   lang,
+		MaxLen: chatMaxLen,
+	}
+}
+
+// formatClock, mesaj zaman damgasını HH:MM basar; sıfır zaman boş döner.
+func formatClock(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("15:04")
 }
 
 // ErrorPage, 404/500 görünüm modeli.
@@ -314,8 +415,9 @@ func buildChips(lang, active, query string) []FilterChip {
 	return chips
 }
 
-// buildIdea, tek kartı ve kaynaklarını görünüm modeline çevirir.
-func buildIdea(base Page, idea *store.Idea, sources []store.IdeaSource) IdeaPage {
+// buildIdea, tek kartı, kaynaklarını ve sohbet panelini görünüm modeline
+// çevirir. chatErr boş değilse panelde tasarlanmış hata satırı basılır.
+func buildIdea(base Page, idea *store.Idea, sources []store.IdeaSource, msgs []ChatMessage, chatErr string) IdeaPage {
 	links := make([]SourceLink, 0, len(sources))
 	for _, s := range sources {
 		l := SourceLink{
@@ -355,5 +457,10 @@ func buildIdea(base Page, idea *store.Idea, sources []store.IdeaSource) IdeaPage
 	}
 	page.HasMeta = page.Urgency > 0 || page.Monetization > 0 ||
 		page.SourceTheme != "" || page.Competitors != ""
+	if idea.ParentIdeaID != nil && *idea.ParentIdeaID > 0 {
+		page.ParentHref = fmt.Sprintf("/ideas/%d", *idea.ParentIdeaID)
+	}
+	page.Mine = idea.Mine
+	page.Chat = buildChatPanel(base.Lang, idea.ID, idea.Title, msgs, chatErr)
 	return page
 }
