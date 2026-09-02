@@ -19,7 +19,8 @@ ingest  →  analyze  →  synthesize
 ## Proje yapısı
 
 - `api/` — Go backend: pipeline + REST API
-- `ui/` — web arayüzü
+- `api/internal/web/` — sunucuda render edilen web arayüzü (`idealode serve`)
+- `ui/` — tasarım/prototip notları (arayüzün kendisi `api/internal/web/` altındadır)
 - `scripts/` — yardımcı scriptler
 
 ## Kurulum
@@ -40,10 +41,30 @@ cd api && go build -o idealode ./cmd/idealode
 # 4. Pipeline'ı çalıştır
 ./idealode run    # ingest -> analyze -> synthesize
 ./idealode dump   # üretilen idea card'ları JSON olarak incele
+
+# 5. Web arayüzünü aç (salt okunur galeri + kart detayı)
+./idealode serve  # http://localhost:8080
 ```
 
 Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
 `synthesize`.
+
+## Web arayüzü
+
+`./idealode serve` kart havuzunu web'den okunur kılar: galeri (kaynak türü
+filtresi + arama) ve kart detayı (problem, çözüm, birebir alıntılar, yerel
+talep kanıtı, kaynak linkleri). Salt okunurdur — giriş, tepki ve sohbet
+sonraki dilimlerde.
+
+- Adres: `PORT` ortam değişkeni, varsayılan `8080`. Sağlık kontrolü:
+  `GET /healthz`.
+- Sunucuda render edilir (Go `html/template`); şablonlar, CSS/JS ve TR/EN
+  mesaj katalogları binary'ye gömülüdür — ayrı bir frontend build'i yoktur.
+- Arayüz dili TR/EN olarak değiştirilebilir (`?lang=`, cookie'de saklanır);
+  kart içeriği ve alıntılar çevrilmez. Tema `prefers-color-scheme` ile gelir,
+  kullanıcı seçimi (`?theme=`) bunu ezer.
+- JavaScript kapalıyken de tam çalışır: filtreler, arama, dil ve tema
+  bağlantıları düz `<a>`/`<form>` öğeleridir.
 
 ## Konfigürasyon
 

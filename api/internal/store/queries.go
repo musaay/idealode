@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -433,7 +435,7 @@ func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
 		       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
 		       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
 		       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
-		       COALESCE(t.theme_name, ''), i.created_at
+		       i.local_evidence, COALESCE(t.theme_name, ''), i.created_at
 		FROM ideas i
 		LEFT JOIN themes t ON t.id = i.source_theme_id
 		ORDER BY i.created_at DESC, i.id DESC
@@ -446,10 +448,7 @@ func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
 	var out []Idea
 	for rows.Next() {
 		var i Idea
-		if err := rows.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
-			&i.TargetUser, &i.EvidenceCount, &i.ExampleQuotes, &i.SourceType,
-			&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
-			&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.SourceTheme, &i.CreatedAt); err != nil {
+		if err := scanIdea(rows, &i); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -463,4 +462,185 @@ func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref st
 		`UPDATE sources SET last_seen_ref = $2, updated_at = now() WHERE id = $1`,
 		sourceID, ref)
 	return err
+}
+
+// ErrNotFound, tekil kayıt sorgularının (GetIdea) kayıt bulunamadığında
+// döndürdüğü sentinel hata — web katmanı bunu 404'e çevirir.
+var ErrNotFound = errors.New("kayıt bulunamadı")
+
+// IdeaFilter, galeri listelemesinin filtreleri. Sıfır değer = filtresiz.
+type IdeaFilter struct {
+	SourceType string // boş = hepsi
+	Query      string // title/problem_statement ILIKE araması; boş = arama yok
+	Limit      int    // <= 0 ise DefaultIdeaLimit
+}
+
+// DefaultIdeaLimit, galeri listelemesinin varsayılan üst sınırı.
+const DefaultIdeaLimit = 60
+
+// maxIdeaLimit, dışarıdan gelen limit'in tavanı (kaynak koruması).
+const maxIdeaLimit = 200
+
+// ideaSelect, Idea satırını okuyan ortak SELECT gövdesi. Kolon sırası
+// scanIdea ile birebir eşleşir; iki yerde değiştirilmelidir.
+const ideaSelect = `
+	SELECT i.id, i.title, i.problem_statement, i.proposed_solution, i.target_user,
+	       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
+	       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
+	       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
+	       i.local_evidence, COALESCE(t.theme_name, ''), i.created_at
+	FROM ideas i
+	LEFT JOIN themes t ON t.id = i.source_theme_id`
+
+// scanIdea, ideaSelect kolon sırasını Idea'ya okur ve nil slice'ları boş
+// diziye indirger (şablon `range` ve len() güvenliği).
+func scanIdea(row pgx.Row, i *Idea) error {
+	if err := row.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
+		&i.TargetUser, &i.EvidenceCount, &i.ExampleQuotes, &i.SourceType,
+		&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
+		&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.LocalEvidence,
+		&i.SourceTheme, &i.CreatedAt); err != nil {
+		return err
+	}
+	if i.ExampleQuotes == nil {
+		i.ExampleQuotes = []string{}
+	}
+	if i.DomainTags == nil {
+		i.DomainTags = []string{}
+	}
+	if i.LocalEvidence == nil {
+		i.LocalEvidence = []string{}
+	}
+	return nil
+}
+
+// ListIdeasFiltered, galeri listesini kaynak türü ve serbest metin
+// filtresiyle döner (yeniden eskiye). Filtreler SQL parametresi olarak
+// geçer; ILIKE deseni kaçışlanır.
+func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = DefaultIdeaLimit
+	}
+	if limit > maxIdeaLimit {
+		limit = maxIdeaLimit
+	}
+
+	// $1 boşsa kaynak türü filtresi devre dışı; $2 boşsa arama devre dışı.
+	q := ideaSelect + `
+		WHERE ($1 = '' OR i.source_type = $1)
+		  AND ($2 = '' OR i.title ILIKE $2 OR i.problem_statement ILIKE $2
+		       OR i.proposed_solution ILIKE $2)
+		ORDER BY i.created_at DESC, i.id DESC
+		LIMIT $3`
+
+	pattern := ""
+	if t := strings.TrimSpace(f.Query); t != "" {
+		pattern = "%" + escapeLike(t) + "%"
+	}
+
+	rows, err := s.Pool.Query(ctx, q, f.SourceType, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Idea{}
+	for rows.Next() {
+		var i Idea
+		if err := scanIdea(rows, &i); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+// escapeLike, ILIKE deseninde joker karakterleri etkisizleştirir; desen
+// varsayılan ESCAPE ('\') ile yorumlanır.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// GetIdea, tek kartı döner; kayıt yoksa ErrNotFound.
+func (s *Store) GetIdea(ctx context.Context, id int64) (*Idea, error) {
+	var i Idea
+	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1`, id), &i)
+	if err == pgx.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// maxIdeaSources, kart detayında listelenen kaynak satırı sayısı.
+const maxIdeaSources = 10
+
+// IdeaSources, kartın arkasındaki kaynak gönderileri döner (yeniden eskiye).
+//
+// İki yol vardır:
+//   - Temalı kart (pain_point): ideas.source_theme_id -> theme_posts -> raw_posts.
+//   - market_derived kart: temaya bağlı değildir. seeds.go tohumu raw_posts'a
+//     platform='radar_seed', source_ref=<tohumun source_url'i> olarak yazar ve
+//     aynı URL kartın example_quotes satırının SONUNDA durur
+//     ("Kanıt (ad): kanıt — <url>"). Eşleşme bu URL üzerinden kurulur; uydurma
+//     yok, birebir source_ref eşitliği aranır.
+//
+// Tarih: raw_posts.created_at hem NULL hem de "sıfır zaman" (0001-01-01)
+// olabilir — radar_seed satırları platformda yayın zamanı taşımadığı için
+// created_at'i sıfır yazılır. İki durumda da fetched_at'e düşülür.
+//
+// Her iki yol da tek sorgudur (N+1 yok).
+func (s *Store) IdeaSources(ctx context.Context, ideaID int64) ([]IdeaSource, error) {
+	themed, err := s.queryIdeaSources(ctx, `
+		SELECT rp.platform, rp.community, COALESCE(rp.url, ''),
+		       CASE WHEN rp.created_at IS NULL OR rp.created_at < '1970-01-01'::timestamptz
+		            THEN rp.fetched_at ELSE rp.created_at END AS ts
+		FROM ideas i
+		JOIN theme_posts tp ON tp.theme_id = i.source_theme_id
+		JOIN raw_posts rp ON rp.id = tp.post_id
+		WHERE i.id = $1
+		ORDER BY ts DESC, rp.id DESC
+		LIMIT $2`, ideaID)
+	if err != nil {
+		return nil, err
+	}
+	if len(themed) > 0 {
+		return themed, nil
+	}
+
+	// radar_seed yolu: alıntının sonundaki URL = tohumun source_ref'i.
+	return s.queryIdeaSources(ctx, `
+		SELECT rp.platform, rp.community, COALESCE(rp.url, ''),
+		       CASE WHEN rp.created_at IS NULL OR rp.created_at < '1970-01-01'::timestamptz
+		            THEN rp.fetched_at ELSE rp.created_at END AS ts
+		FROM ideas i
+		CROSS JOIN LATERAL unnest(i.example_quotes) AS q(quote)
+		JOIN raw_posts rp
+		  ON rp.platform = 'radar_seed'
+		 AND rp.source_ref = substring(q.quote from '(https?://[^[:space:]]+)$')
+		WHERE i.id = $1
+		ORDER BY ts DESC, rp.id DESC
+		LIMIT $2`, ideaID)
+}
+
+func (s *Store) queryIdeaSources(ctx context.Context, sql string, ideaID int64) ([]IdeaSource, error) {
+	rows, err := s.Pool.Query(ctx, sql, ideaID, maxIdeaSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []IdeaSource{}
+	for rows.Next() {
+		var src IdeaSource
+		if err := rows.Scan(&src.Platform, &src.Community, &src.URL, &src.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, src)
+	}
+	return out, rows.Err()
 }

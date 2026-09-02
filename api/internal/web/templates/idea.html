@@ -1,0 +1,133 @@
+{{ define "content" }}
+<article class="idea" aria-labelledby="idea-title">
+
+  <p class="idea-back">
+    <a class="btn btn-ghost" href="/">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      {{ .T "idea.back" }}
+    </a>
+  </p>
+
+  <header class="idea-head">
+    <p class="idea-head-meta">
+      <span class="badge badge-{{ .Badge.Kind }}">{{ .Badge.Label }}</span>
+      <span class="pill">{{ .T "card.evidence" .EvidenceCount }}</span>
+      {{ if .CreatedAt }}
+      <span class="idea-date">{{ .T "idea.created_at" }}:
+        <time datetime="{{ .CreatedAt }}">{{ .CreatedAt }}</time>
+      </span>
+      {{ end }}
+    </p>
+
+    <h1 id="idea-title">{{ .Heading }}</h1>
+
+    {{ if .TargetUser }}
+    <p class="idea-target"><span class="idea-target-label">{{ .T "idea.target_user" }}:</span> {{ .TargetUser }}</p>
+    {{ end }}
+
+    {{ if .DomainTags }}
+    <ul class="tag-row" role="list" aria-label="{{ .T "idea.tags" }}">
+      {{ range .DomainTags }}<li class="tag">#{{ . }}</li>{{ end }}
+    </ul>
+    {{ end }}
+  </header>
+
+  {{ if .Problem }}
+  <section class="panel" aria-labelledby="sec-problem">
+    <h2 class="panel-title" id="sec-problem">{{ .T "idea.problem" }}</h2>
+    <p class="panel-body">{{ .Problem }}</p>
+  </section>
+  {{ end }}
+
+  {{ if .Solution }}
+  <section class="panel" aria-labelledby="sec-solution">
+    <h2 class="panel-title" id="sec-solution">{{ .T "idea.solution" }}</h2>
+    <p class="panel-body">{{ .Solution }}</p>
+  </section>
+  {{ end }}
+
+  <section class="panel" aria-labelledby="sec-evidence">
+    <h2 class="panel-title" id="sec-evidence">{{ .T "idea.evidence" }}</h2>
+    {{ if .Quotes }}
+    <ul class="quote-list" role="list">
+      {{ range .Quotes }}
+      <li class="quote"><blockquote class="quote-text">{{ . }}</blockquote></li>
+      {{ end }}
+    </ul>
+    {{ else }}
+    <p class="note">{{ .T "idea.evidence.empty" }}</p>
+    {{ end }}
+
+    <h3 class="subhead">{{ .T "idea.sources" }}</h3>
+    {{ if .Sources }}
+    <ul class="source-list" role="list">
+      {{ range .Sources }}
+      <li class="source">
+        <span class="source-platform">{{ .Platform }}</span>
+        {{ if .Community }}<span class="source-community">{{ .Community }}</span>{{ end }}
+        {{ if .Date }}<time class="source-date" datetime="{{ .Date }}">{{ .Date }}</time>{{ end }}
+        {{ if .URL }}
+        <a class="source-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer"
+           aria-label="{{ $.T "idea.open_source_aria" .URL }}">{{ .Host }}
+          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        {{ end }}
+      </li>
+      {{ end }}
+    </ul>
+    {{ else }}
+    <p class="note">{{ .T "idea.sources.empty" }}</p>
+    {{ end }}
+  </section>
+
+  <section class="panel" aria-labelledby="sec-local">
+    <h2 class="panel-title" id="sec-local">{{ .T "idea.local_evidence" }}</h2>
+    {{ if .LocalEvidence }}
+    <ul class="quote-list" role="list">
+      {{ range .LocalEvidence }}
+      <li class="quote quote-local">
+        <blockquote class="quote-text">{{ .Quote }}</blockquote>
+        {{ if or .Platform .URL }}
+        <p class="quote-meta">
+          {{ if .Platform }}<span class="source-platform">{{ .Platform }}</span>{{ end }}
+          {{ if .URL }}
+          <a class="source-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer"
+             aria-label="{{ $.T "idea.open_source_aria" .URL }}">{{ $.T "idea.open_source" }}
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          {{ end }}
+        </p>
+        {{ end }}
+      </li>
+      {{ end }}
+    </ul>
+    {{ else }}
+    <p class="note note-dashed">{{ .T "idea.local_evidence.empty" }}</p>
+    {{ end }}
+  </section>
+
+  {{ if .HasMeta }}
+  <section class="panel panel-meta" aria-labelledby="sec-meta">
+    <h2 class="panel-title" id="sec-meta">{{ .T "idea.meta" }}</h2>
+    <dl class="meta-grid">
+      {{ if .Urgency }}
+      <div class="meta-item"><dt>{{ .T "idea.urgency" }}</dt><dd>{{ .T "idea.score_of_five" .Urgency }}</dd></div>
+      {{ end }}
+      {{ if .Monetization }}
+      <div class="meta-item"><dt>{{ .T "idea.monetization" }}</dt><dd>{{ .T "idea.score_of_five" .Monetization }}</dd></div>
+      {{ end }}
+      {{ if .SourceTheme }}
+      <div class="meta-item"><dt>{{ .T "idea.source_theme" }}</dt><dd>{{ .SourceTheme }}</dd></div>
+      {{ end }}
+      {{ if .Competitors }}
+      <div class="meta-item meta-item-wide">
+        <dt>{{ .T "idea.competitors" }}</dt>
+        <dd>{{ .Competitors }} <span class="note-inline">{{ .T "idea.competitors.note" }}</span></dd>
+      </div>
+      {{ end }}
+    </dl>
+  </section>
+  {{ end }}
+
+</article>
+{{ end }}
