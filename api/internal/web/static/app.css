@@ -1671,7 +1671,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
     right: 0;
     bottom: 0;
     z-index: 60;
-    height: min(86vh, 620px);
+    height: min(92vh, 760px);
     padding: 0;
   }
 
