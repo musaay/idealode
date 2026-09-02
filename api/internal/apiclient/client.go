@@ -8,6 +8,7 @@
 package apiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/musaay/idealode/api/internal/store"
+	"github.com/musaay/idealode/api/internal/web"
 )
 
 // maxBodyBytes, okunacak yanıt gövdesinin tavanı (bozuk/uçsuz yanıt koruması).
@@ -66,6 +68,7 @@ func (c *Client) ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]s
 }
 
 // GetIdea, `GET /api/ideas/{id}` — tek kart; yoksa store.ErrNotFound.
+// `parent_idea_id` ve `mine` alanları store.Idea üzerinde çözülür.
 func (c *Client) GetIdea(ctx context.Context, id int64) (*store.Idea, error) {
 	var body struct {
 		Idea *store.Idea `json:"idea"`
@@ -76,6 +79,64 @@ func (c *Client) GetIdea(ctx context.Context, id int64) (*store.Idea, error) {
 	}
 	if body.Idea == nil {
 		// 200 döndü ama gövdede kart yok — sözleşme ihlali, 404 değil.
+		return nil, fmt.Errorf("api yanıtında kart alanı yok (%s)", path)
+	}
+	return body.Idea, nil
+}
+
+// msgDTO, sohbet mesajının tel üzerindeki biçimi (sözleşmedeki `Msg`).
+type msgDTO struct {
+	ID        string    `json:"id"`
+	Role      string    `json:"role"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (m msgDTO) toWeb() web.ChatMessage {
+	return web.ChatMessage{ID: m.ID, Role: m.Role, Message: m.Message, CreatedAt: m.CreatedAt}
+}
+
+// ListChat, `GET /api/ideas/{id}/chat` — bu oturumun kart sohbeti.
+func (c *Client) ListChat(ctx context.Context, ideaID int64) ([]web.ChatMessage, error) {
+	var body struct {
+		Messages []msgDTO `json:"messages"`
+	}
+	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/chat"
+	if err := c.get(ctx, path, nil, &body); err != nil {
+		return nil, err
+	}
+	out := make([]web.ChatMessage, 0, len(body.Messages))
+	for _, m := range body.Messages {
+		out = append(out, m.toWeb())
+	}
+	return out, nil
+}
+
+// SendChat, `POST /api/ideas/{id}/chat` — mesaj gönderir, cevabı ve en
+// fazla 3 öneriyi döner.
+func (c *Client) SendChat(ctx context.Context, ideaID int64, message, lang string) (web.ChatReply, error) {
+	var body struct {
+		Reply       msgDTO   `json:"reply"`
+		Suggestions []string `json:"suggestions"`
+	}
+	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/chat"
+	req := map[string]string{"message": message, "lang": lang}
+	if err := c.post(ctx, path, req, &body); err != nil {
+		return web.ChatReply{}, err
+	}
+	return web.ChatReply{Reply: body.Reply.toWeb(), Suggestions: body.Suggestions}, nil
+}
+
+// Blend, `POST /api/ideas/{id}/blend` — sohbetten yeni `ai_blended` kart.
+func (c *Client) Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error) {
+	var body struct {
+		Idea *store.Idea `json:"idea"`
+	}
+	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/blend"
+	if err := c.post(ctx, path, map[string]string{"lang": lang}, &body); err != nil {
+		return nil, err
+	}
+	if body.Idea == nil || body.Idea.ID <= 0 {
 		return nil, fmt.Errorf("api yanıtında kart alanı yok (%s)", path)
 	}
 	return body.Idea, nil
@@ -112,18 +173,47 @@ func (c *Client) IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSou
 }
 
 // get, tek GET isteğini yapar ve JSON gövdesini out'a çözer.
-// 404 → store.ErrNotFound (sarılı; errors.Is çalışır).
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+	return c.do(ctx, http.MethodGet, path, q, nil, out)
+}
+
+// post, JSON gövdeli POST isteğini yapar ve yanıtı out'a çözer.
+func (c *Client) post(ctx context.Context, path string, in any, out any) error {
+	return c.do(ctx, http.MethodPost, path, nil, in, out)
+}
+
+// do, tek isteği yapar. Oturum kimliği ctx'ten okunup `X-Session-Id`
+// başlığına yazılır (api başlıksız isteği 400 ile reddeder).
+//
+// Durum eşlemesi: 404 -> store.ErrNotFound; 400 -> web.ErrBadRequest;
+// 409 -> web.ErrNoConversation; 429 -> web.ErrRateLimited;
+// 502 -> web.ErrUpstream; diğer her şey sarılı hata (web 502 sayfası).
+func (c *Client) do(ctx context.Context, method, path string, q url.Values, in any, out any) error {
 	endpoint := c.baseURL + path
 	if len(q) > 0 {
 		endpoint += "?" + q.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	var payload io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("api isteği hazırlanamadı (%s): %w", path, err)
+		}
+		payload = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, payload)
 	if err != nil {
 		return fmt.Errorf("api isteği hazırlanamadı (%s): %w", path, err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if sid := web.SessionFromContext(ctx); sid != "" {
+		req.Header.Set("X-Session-Id", sid)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -135,11 +225,8 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("api (%s): %w", path, store.ErrNotFound)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("api beklenmeyen durum (%s): %d", path, resp.StatusCode)
+	if err := statusError(path, resp.StatusCode); err != nil {
+		return err
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
@@ -150,4 +237,25 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		return fmt.Errorf("api yanıtı çözümlenemedi (%s): %w", path, err)
 	}
 	return nil
+}
+
+// statusError, HTTP durumunu sözleşmedeki tipli hataya çevirir; başarı
+// durumlarında (200/201) nil döner.
+func statusError(path string, code int) error {
+	switch code {
+	case http.StatusOK, http.StatusCreated:
+		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("api (%s): %w", path, store.ErrNotFound)
+	case http.StatusBadRequest:
+		return fmt.Errorf("api (%s): %w", path, web.ErrBadRequest)
+	case http.StatusConflict:
+		return fmt.Errorf("api (%s): %w", path, web.ErrNoConversation)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("api (%s): %w", path, web.ErrRateLimited)
+	case http.StatusBadGateway:
+		return fmt.Errorf("api (%s): %w", path, web.ErrUpstream)
+	default:
+		return fmt.Errorf("api beklenmeyen durum (%s): %d", path, code)
+	}
 }

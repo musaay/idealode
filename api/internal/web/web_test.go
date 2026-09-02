@@ -1,11 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +24,17 @@ type fakeStore struct {
 	err     error
 
 	lastFilter store.IdeaFilter
+
+	// Sohbet (dilim 2).
+	chat        map[int64][]ChatMessage
+	suggestions []string
+	listChatErr error
+	sendErr     error
+	blendErr    error
+	blended     *store.Idea
+	sent        []string
+	langs       []string
+	sids        []string
 }
 
 func (f *fakeStore) ListIdeasFiltered(ctx context.Context, flt store.IdeaFilter) ([]store.Idea, error) {
@@ -53,6 +68,68 @@ func (f *fakeStore) GetIdea(ctx context.Context, id int64) (*store.Idea, error) 
 		}
 	}
 	return nil, store.ErrNotFound
+}
+
+// hasIdea, gerçek API'nin görünürlük kuralını taklit eder: bilinmeyen kart
+// (ya da başkasının ai_blended kartı) 404 döner.
+func (f *fakeStore) hasIdea(id int64) bool {
+	for i := range f.ideas {
+		if f.ideas[i].ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeStore) ListChat(ctx context.Context, ideaID int64) ([]ChatMessage, error) {
+	f.sids = append(f.sids, SessionFromContext(ctx))
+	if f.listChatErr != nil {
+		return nil, f.listChatErr
+	}
+	if !f.hasIdea(ideaID) {
+		return nil, store.ErrNotFound
+	}
+	return f.chat[ideaID], nil
+}
+
+func (f *fakeStore) SendChat(ctx context.Context, ideaID int64, message, lang string) (ChatReply, error) {
+	f.sids = append(f.sids, SessionFromContext(ctx))
+	if !f.hasIdea(ideaID) {
+		return ChatReply{}, store.ErrNotFound
+	}
+	f.sent = append(f.sent, message)
+	f.langs = append(f.langs, lang)
+	if f.sendErr != nil {
+		return ChatReply{}, f.sendErr
+	}
+	reply := ChatMessage{
+		ID:        "m-reply",
+		Role:      "assistant",
+		Message:   "Cevap: " + message,
+		CreatedAt: time.Date(2026, 9, 2, 10, 30, 0, 0, time.UTC),
+	}
+	if f.chat == nil {
+		f.chat = map[int64][]ChatMessage{}
+	}
+	f.chat[ideaID] = append(f.chat[ideaID],
+		ChatMessage{ID: "m-user", Role: "user", Message: message},
+		reply)
+	return ChatReply{Reply: reply, Suggestions: f.suggestions}, nil
+}
+
+func (f *fakeStore) Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error) {
+	f.sids = append(f.sids, SessionFromContext(ctx))
+	f.langs = append(f.langs, lang)
+	if !f.hasIdea(ideaID) {
+		return nil, store.ErrNotFound
+	}
+	if f.blendErr != nil {
+		return nil, f.blendErr
+	}
+	if f.blended != nil {
+		return f.blended, nil
+	}
+	return &store.Idea{ID: 77, Title: "Türetilmiş kart", SourceType: "ai_blended"}, nil
 }
 
 func (f *fakeStore) IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error) {
@@ -557,8 +634,11 @@ func TestAcceptLanguageFallback(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `<html lang="en"`) {
 		t.Error("Accept-Language dikkate alınmadı")
 	}
-	if len(rec.Result().Cookies()) != 0 {
-		t.Error("Accept-Language için cookie yazılmamalı")
+	for _, c := range rec.Result().Cookies() {
+		// sid çerezi her istekte yazılabilir; tercih cookie'si yazılmamalı.
+		if c.Name != cookieSession {
+			t.Errorf("Accept-Language için %q cookie'si yazılmamalı", c.Name)
+		}
 	}
 }
 
@@ -846,14 +926,23 @@ func TestTopbarHasControls(t *testing.T) {
 }
 
 func TestTopbarControlsEN(t *testing.T) {
-	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1?lang=en").Body.String()
-	rest := body[strings.Index(body, `class="topbar-actions"`):]
+	h := newTestServer(t, sampleStore())
 
+	body := do(t, h, http.MethodGet, "/ideas/1?lang=en").Body.String()
+	rest := body[strings.Index(body, `class="topbar-actions"`):]
 	if !strings.Contains(rest, "Light Mode") {
 		t.Error("EN tema etiketi yok")
 	}
-	if !strings.Contains(rest, `title="Coming soon"`) {
-		t.Error("EN Idea Copilot ipucu yok")
+	// Kart detayında düğme sohbete götürür (dilim 2).
+	if !strings.Contains(rest, `class="copilot-button" href="#chat"`) {
+		t.Error("EN kart detayında Copilot düğmesi sohbete bağlı değil")
+	}
+
+	// Galeride kartsız sohbet yok: düğme pasif "Coming soon" kalır.
+	gallery := do(t, h, http.MethodGet, "/?lang=en").Body.String()
+	grest := gallery[strings.Index(gallery, `class="topbar-actions"`):]
+	if !strings.Contains(grest, `title="Coming soon"`) {
+		t.Error("EN galeride Idea Copilot ipucu yok")
 	}
 }
 
@@ -914,5 +1003,563 @@ func TestMobileBottomNavCopilotEN(t *testing.T) {
 	}
 	if !strings.Contains(nav, "Gallery") {
 		t.Error("EN galeri etiketi yok")
+	}
+}
+
+// ------------------------------------------------------- Idea Copilot (dilim 2)
+
+// postForm, tarayıcı form gönderimini taklit eder: aynı köken Origin başlığı
+// + urlencoded gövde. accept boş değilse Accept başlığı da set edilir
+// (app.js'in fetch yolu).
+func postForm(t *testing.T, h http.Handler, target string, form url.Values, accept string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func chatStore() *fakeStore {
+	fs := sampleStore()
+	fs.chat = map[int64][]ChatMessage{}
+	return fs
+}
+
+func TestIdeaPageRendersChatPanel(t *testing.T) {
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d, beklenen 200", rec.Code)
+	}
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`id="chat"`,
+		`action="/ideas/1/chat"`,
+		`action="/ideas/1/blend"`,
+		`data-chat-panel`,
+		`Randevu hatırlatma botu`, // panel başlığı kart adını taşır
+		translate("tr", "chat.subtitle"),
+		translate("tr", "chat.placeholder"),
+		translate("tr", "chat.blend"),
+		translate("tr", "chat.empty.title"),
+		translate("tr", "chat.quick.arch"),
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sohbet paneli %q içermiyor", want)
+		}
+	}
+
+	// Hızlı komut çipleri JS'siz de gönderilebilmeli: form dışındaki submit
+	// düğmesi `form=` ile forma bağlanır.
+	if !strings.Contains(body, `type="submit" form="chat-form" name="message"`) {
+		t.Error("hızlı komut çipi JS'siz gönderim için forma bağlı değil")
+	}
+}
+
+func TestChatPanelEnglish(t *testing.T) {
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1?lang=en")
+	body := rec.Body.String()
+	for _, want := range []string{
+		translate("en", "chat.subtitle"),
+		translate("en", "chat.send"),
+		translate("en", "chat.blend"),
+		translate("en", "chat.empty.title"),
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("EN sohbet paneli %q içermiyor", want)
+		}
+	}
+	if strings.Contains(body, translate("tr", "chat.subtitle")) {
+		t.Error("EN sayfada TR sohbet metni var")
+	}
+}
+
+func TestChatHistoryRendersEscapedWithLineBreaks(t *testing.T) {
+	fs := chatStore()
+	fs.chat[1] = []ChatMessage{
+		{ID: "1", Role: "user", Message: "İlk satır\nİkinci satır"},
+		{ID: "2", Role: "assistant", Message: `<script>alert(1)</script> güvenli mi?`},
+	}
+
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "İlk satır<br>İkinci satır") {
+		t.Error("satır sonu <br> olarak basılmadı")
+	}
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatal("mesaj içindeki script etiketi escape edilmemiş")
+	}
+	if !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Error("mesaj escape'li biçimde görünmüyor")
+	}
+	if !strings.Contains(body, "chat-msg is-user") {
+		t.Error("kullanıcı balonu işaretlenmemiş")
+	}
+}
+
+func TestChatFormPostRedirectsToAnchor(t *testing.T) {
+	fs := chatStore()
+	h := newTestServer(t, fs)
+
+	rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"Bunu nasıl ölçerim?"}}, "")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("durum = %d, beklenen 303", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/ideas/1#chat" {
+		t.Errorf("Location = %q, beklenen /ideas/1#chat", got)
+	}
+	if len(fs.sent) != 1 || fs.sent[0] != "Bunu nasıl ölçerim?" {
+		t.Errorf("gönderilen mesaj = %v", fs.sent)
+	}
+	if len(fs.langs) == 0 || fs.langs[0] != "tr" {
+		t.Errorf("dil taşınmadı: %v", fs.langs)
+	}
+}
+
+func TestChatQuickPromptUsesFirstNonEmptyField(t *testing.T) {
+	fs := chatStore()
+	// Boş metin girişi + çipin taşıdığı değer aynı adla gelir.
+	rec := postForm(t, newTestServer(t, fs), "/ideas/1/chat",
+		url.Values{"message": {"", "Mimari sorusu"}}, "")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("durum = %d, beklenen 303", rec.Code)
+	}
+	if len(fs.sent) != 1 || fs.sent[0] != "Mimari sorusu" {
+		t.Errorf("çip değeri kullanılmadı: %v", fs.sent)
+	}
+}
+
+func TestChatJSONPathReturnsReplyAndSuggestions(t *testing.T) {
+	fs := chatStore()
+	fs.suggestions = []string{"Öneri 1", "Öneri 2", "Öneri 3", "Öneri 4"}
+
+	rec := postForm(t, newTestServer(t, fs), "/ideas/1/chat",
+		url.Values{"message": {"Merhaba"}}, "application/json")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d, beklenen 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q", ct)
+	}
+
+	var got struct {
+		Reply struct {
+			Role    string `json:"role"`
+			Message string `json:"message"`
+		} `json:"reply"`
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("yanıt çözümlenemedi: %v", err)
+	}
+	if got.Reply.Role != "assistant" || got.Reply.Message != "Cevap: Merhaba" {
+		t.Errorf("cevap = %+v", got.Reply)
+	}
+	if len(got.Suggestions) != 3 {
+		t.Errorf("öneri sayısı = %d, beklenen 3 (tavan)", len(got.Suggestions))
+	}
+}
+
+func TestChatValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  string
+		wantCode string
+	}{
+		{"boş", "   ", "empty"},
+		{"uzun", strings.Repeat("ö", chatMaxLen+1), "too_long"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := chatStore()
+			h := newTestServer(t, fs)
+
+			rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {tt.message}}, "")
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("durum = %d, beklenen 303", rec.Code)
+			}
+			if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error="+tt.wantCode+"#chat"; got != want {
+				t.Errorf("Location = %q, beklenen %q", got, want)
+			}
+			if len(fs.sent) != 0 {
+				t.Errorf("geçersiz mesaj API'ye gitti: %v", fs.sent)
+			}
+
+			jrec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {tt.message}}, "application/json")
+			if jrec.Code != http.StatusBadRequest {
+				t.Errorf("JSON durum = %d, beklenen 400", jrec.Code)
+			}
+		})
+	}
+}
+
+func TestChatUpstreamErrorsMapToCodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantCode   string
+		wantStatus int
+	}{
+		{"kota", ErrRateLimited, "rate_limited", http.StatusTooManyRequests},
+		{"llm", ErrUpstream, "upstream", http.StatusBadGateway},
+		{"bilinmeyen", fmt.Errorf("ağ koptu"), "failed", http.StatusBadGateway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := chatStore()
+			fs.sendErr = fmt.Errorf("api: %w", tt.err)
+			h := newTestServer(t, fs)
+
+			rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"soru"}}, "")
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("durum = %d, beklenen 303", rec.Code)
+			}
+			if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error="+tt.wantCode+"#chat"; got != want {
+				t.Errorf("Location = %q, beklenen %q", got, want)
+			}
+
+			jrec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"soru"}}, "application/json")
+			if jrec.Code != tt.wantStatus {
+				t.Errorf("JSON durum = %d, beklenen %d", jrec.Code, tt.wantStatus)
+			}
+			if !strings.Contains(jrec.Body.String(), tt.wantCode) {
+				t.Errorf("JSON gövdesinde kod yok: %s", jrec.Body.String())
+			}
+		})
+	}
+}
+
+func TestChatErrorMessageRenderedOnPage(t *testing.T) {
+	h := newTestServer(t, chatStore())
+
+	rec := do(t, h, http.MethodGet, "/ideas/1?chat_error=rate_limited")
+	if !strings.Contains(rec.Body.String(), translate("tr", "chat.error.rate_limited")) {
+		t.Error("kota mesajı sayfada görünmüyor")
+	}
+
+	// Beyaz liste dışı kod sessizce yok sayılır (URL'den metin enjekte edilemez).
+	rec = do(t, h, http.MethodGet, "/ideas/1?chat_error=%3Cscript%3E")
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>alert") || strings.Contains(body, `class="chat-error"`) {
+		t.Error("bilinmeyen hata kodu sayfaya basıldı")
+	}
+}
+
+func TestChatHistoryFailureStillRendersCard(t *testing.T) {
+	fs := chatStore()
+	fs.listChatErr = fmt.Errorf("api kapalı")
+
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d, beklenen 200 (kart yan bilgiden ötürü düşmemeli)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), translate("tr", "chat.error.history")) {
+		t.Error("geçmiş hatası panelde bildirilmiyor")
+	}
+}
+
+func TestBlendRedirectsToNewIdea(t *testing.T) {
+	fs := chatStore()
+	rec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("durum = %d, beklenen 303", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/ideas/77" {
+		t.Errorf("Location = %q, beklenen /ideas/77", got)
+	}
+}
+
+func TestBlendWithoutConversation(t *testing.T) {
+	fs := chatStore()
+	fs.blendErr = fmt.Errorf("api: %w", ErrNoConversation)
+
+	rec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "")
+	if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error=no_conversation#chat"; got != want {
+		t.Errorf("Location = %q, beklenen %q", got, want)
+	}
+
+	jrec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "application/json")
+	if jrec.Code != http.StatusConflict {
+		t.Errorf("JSON durum = %d, beklenen 409", jrec.Code)
+	}
+}
+
+func TestChatPostCSRFRejected(t *testing.T) {
+	fs := chatStore()
+	h := newTestServer(t, fs)
+
+	// Origin/Referer yok → reddedilir.
+	req := httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+		strings.NewReader("message=selam"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("başlıksız POST durumu = %d, beklenen 403", rec.Code)
+	}
+
+	// Yabancı köken → reddedilir.
+	req = httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+		strings.NewReader("message=selam"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://kotu.example")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("çapraz köken POST durumu = %d, beklenen 403", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), translate("tr", "error.403.title")) {
+		t.Error("403 sayfası tasarlanmış metni taşımıyor")
+	}
+	if len(fs.sent) != 0 {
+		t.Errorf("CSRF isteği API'ye geçti: %v", fs.sent)
+	}
+
+	// Referer aynı kökende ise kabul edilir.
+	req = httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+		strings.NewReader("message=selam"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", "http://"+req.Host+"/ideas/1")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("aynı köken Referer durumu = %d, beklenen 303", rec.Code)
+	}
+}
+
+func TestChatPostUnknownIdea(t *testing.T) {
+	h := newTestServer(t, chatStore())
+
+	rec := postForm(t, h, "/ideas/999/chat", url.Values{"message": {"selam"}}, "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("durum = %d, beklenen 404", rec.Code)
+	}
+
+	rec = postForm(t, h, "/ideas/abc/chat", url.Values{"message": {"selam"}}, "application/json")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("JSON durum = %d, beklenen 404", rec.Code)
+	}
+}
+
+// --------------------------------------------------------------- oturum
+
+func TestSessionCookieIssuedAndReused(t *testing.T) {
+	fs := chatStore()
+	h := newTestServer(t, fs)
+
+	rec := do(t, h, http.MethodGet, "/ideas/1")
+	var sid *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieSession {
+			sid = c
+		}
+	}
+	if sid == nil {
+		t.Fatal("sid çerezi yazılmadı")
+	}
+	if !sid.HttpOnly || sid.SameSite != http.SameSiteLaxMode || sid.MaxAge != sessionCookieMaxAge {
+		t.Errorf("sid çerez nitelikleri hatalı: %+v", sid)
+	}
+	if !validSessionID(sid.Value) {
+		t.Fatalf("sid biçimi hatalı: %q", sid.Value)
+	}
+	if len(fs.sids) == 0 || fs.sids[0] != sid.Value {
+		t.Errorf("oturum kimliği ctx üzerinden store'a taşınmadı: %v", fs.sids)
+	}
+
+	// İkinci istekte aynı kimlik kullanılır, yeni çerez yazılmaz.
+	fs.sids = nil
+	rec2 := do(t, h, http.MethodGet, "/ideas/1", sid)
+	for _, c := range rec2.Result().Cookies() {
+		if c.Name == cookieSession {
+			t.Error("var olan oturum için yeni sid yazıldı")
+		}
+	}
+	if len(fs.sids) == 0 || fs.sids[0] != sid.Value {
+		t.Errorf("aynı oturum kimliği taşınmadı: %v", fs.sids)
+	}
+}
+
+func TestInvalidSessionCookieReplaced(t *testing.T) {
+	fs := chatStore()
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1",
+		&http.Cookie{Name: cookieSession, Value: "elle-yazilmis"})
+
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieSession && validSessionID(c.Value) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("biçimsiz sid yenisiyle değiştirilmedi")
+	}
+}
+
+func TestNewSessionIDIsUnique(t *testing.T) {
+	a, b := newSessionID(), newSessionID()
+	if a == "" || b == "" || a == b {
+		t.Fatalf("oturum kimliği üretimi hatalı: %q %q", a, b)
+	}
+	if !validSessionID(a) || len(a) != sessionIDLen {
+		t.Errorf("oturum kimliği biçimi hatalı: %q", a)
+	}
+	for _, bad := range []string{"", "abc", strings.Repeat("g", sessionIDLen), strings.Repeat("A", sessionIDLen)} {
+		if validSessionID(bad) {
+			t.Errorf("%q geçerli sayıldı", bad)
+		}
+	}
+}
+
+// ------------------------------------------------- ai_blended görünürlüğü
+
+func TestBlendedCardShowsParentAndOwnership(t *testing.T) {
+	fs := chatStore()
+	parent := int64(1)
+	fs.ideas = append(fs.ideas, store.Idea{
+		ID:               9,
+		Title:            "Türetilmiş kart",
+		ProblemStatement: "Sohbetten çıkan problem.",
+		SourceType:       "ai_blended",
+		EvidenceCount:    4,
+		ParentIdeaID:     &parent,
+		Mine:             true,
+	})
+
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/9")
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `href="/ideas/1"`) {
+		t.Error("kaynak kart bağlantısı yok")
+	}
+	if !strings.Contains(body, translate("tr", "chat.parent_link")) {
+		t.Error("kaynak kart etiketi yok")
+	}
+	if !strings.Contains(body, translate("tr", "chat.mine_note")) {
+		t.Error("yalnız size görünür notu yok")
+	}
+	if !strings.Contains(body, translate("tr", "source_type.ai_blended")) {
+		t.Error("ai_blended rozeti yok")
+	}
+}
+
+func TestPlainCardHasNoParentRow(t *testing.T) {
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1")
+	if strings.Contains(rec.Body.String(), translate("tr", "chat.parent_link")) {
+		t.Error("kaynak kart satırı ilgisiz kartta basıldı")
+	}
+}
+
+// ------------------------------------------------------ Copilot girişleri
+
+func TestCopilotEntriesActiveOnIdeaOnly(t *testing.T) {
+	h := newTestServer(t, chatStore())
+
+	idea := do(t, h, http.MethodGet, "/ideas/1").Body.String()
+	if strings.Count(idea, `data-chat-open`) < 3 {
+		t.Error("kart detayında Copilot girişleri (sol nav + üst çubuk + mobil sekme) sohbete bağlanmamış")
+	}
+	if strings.Contains(idea, translate("tr", "nav.copilot_soon")) {
+		t.Error("kart detayında Copilot girişi hâlâ 'Yakında' diyor")
+	}
+
+	gallery := do(t, h, http.MethodGet, "/").Body.String()
+	if strings.Contains(gallery, `data-chat-open`) {
+		t.Error("galeride Copilot girişi sohbete bağlanmış (kartsız sohbet yok)")
+	}
+	if !strings.Contains(gallery, translate("tr", "nav.copilot_soon")) {
+		t.Error("galeride 'Yakında' etiketi kayboldu")
+	}
+}
+
+// ------------------------------------------------------------ birim testler
+
+func TestMessageBodyEscapesBeforeBreaks(t *testing.T) {
+	got := string(messageBody("a <b>\r\nb & c\nd"))
+	want := "a &lt;b&gt;<br>b &amp; c<br>d"
+	if got != want {
+		t.Errorf("messageBody = %q, beklenen %q", got, want)
+	}
+	if strings.Contains(string(messageBody("<br>")), "<br>x") {
+		t.Error("ham <br> metni etikete dönüşmemeli")
+	}
+	if got := string(messageBody("<br>")); got != "&lt;br&gt;" {
+		t.Errorf("ham <br> metni = %q", got)
+	}
+}
+
+func TestSuggestionListCapsAndTrims(t *testing.T) {
+	got := suggestionList([]string{" a ", "", "b", "c", "d"})
+	if len(got) != 3 || got[0] != "a" || got[2] != "c" {
+		t.Errorf("suggestionList = %#v", got)
+	}
+	if got := suggestionList(nil); got == nil || len(got) != 0 {
+		t.Errorf("nil giriş boş dilim dönmeli, %#v geldi", got)
+	}
+}
+
+func TestFirstNonEmpty(t *testing.T) {
+	if got := firstNonEmpty([]string{"", "  ", "x", "y"}); got != "x" {
+		t.Errorf("firstNonEmpty = %q", got)
+	}
+	if got := firstNonEmpty(nil); got != "" {
+		t.Errorf("firstNonEmpty(nil) = %q", got)
+	}
+}
+
+func TestClipChatTitle(t *testing.T) {
+	if got := clipChatTitle("kısa"); got != "kısa" {
+		t.Errorf("clipChatTitle = %q", got)
+	}
+	long := strings.Repeat("ö", chatTitleMax+5)
+	got := clipChatTitle(long)
+	if len([]rune(got)) != chatTitleMax+1 || !strings.HasSuffix(got, "…") {
+		t.Errorf("clipChatTitle uzun başlığı kırpmadı: %q", got)
+	}
+}
+
+func TestWantsJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	if wantsJSON(req) {
+		t.Error("Accept yokken JSON istenmiş sayıldı")
+	}
+	req.Header.Set("Accept", "application/json, text/plain")
+	if !wantsJSON(req) {
+		t.Error("Accept: application/json algılanmadı")
+	}
+}
+
+func TestChatAcceptsMultipartBody(t *testing.T) {
+	fs := chatStore()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("message", "multipart mesajı"); err != nil {
+		t.Fatalf("form yazılamadı: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("form kapatılamadı: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/ideas/1/chat", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Origin", "http://"+req.Host)
+	rec := httptest.NewRecorder()
+	newTestServer(t, fs).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("durum = %d, beklenen 303", rec.Code)
+	}
+	if len(fs.sent) != 1 || fs.sent[0] != "multipart mesajı" {
+		t.Errorf("multipart gövde okunmadı: %v", fs.sent)
 	}
 }

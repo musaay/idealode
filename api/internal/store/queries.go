@@ -430,14 +430,7 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 // ListIdeas, idea card'ları tema adıyla birlikte döner (yeniden eskiye) —
 // Faz 0'da `dump` komutu ve kalite kapısı değerlendirmesi bununla beslenir.
 func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT i.id, i.title, i.problem_statement, i.proposed_solution, i.target_user,
-		       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
-		       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
-		       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
-		       i.local_evidence, COALESCE(t.theme_name, ''), i.created_at
-		FROM ideas i
-		LEFT JOIN themes t ON t.id = i.source_theme_id
+	rows, err := s.Pool.Query(ctx, ideaSelect+`
 		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT $1`, limit)
 	if err != nil {
@@ -473,6 +466,7 @@ type IdeaFilter struct {
 	SourceType string // boş = hepsi
 	Query      string // title/problem_statement ILIKE araması; boş = arama yok
 	Limit      int    // <= 0 ise DefaultIdeaLimit
+	SessionID  string // ai_blended görünürlük kuralı için istek sahibinin oturumu
 }
 
 // DefaultIdeaLimit, galeri listelemesinin varsayılan üst sınırı.
@@ -488,17 +482,20 @@ const ideaSelect = `
 	       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
 	       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
 	       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
-	       i.local_evidence, COALESCE(t.theme_name, ''), i.created_at
+	       i.local_evidence, i.parent_idea_id, COALESCE(i.created_by_session_id, ''),
+	       COALESCE(t.theme_name, ''), i.created_at
 	FROM ideas i
 	LEFT JOIN themes t ON t.id = i.source_theme_id`
 
 // scanIdea, ideaSelect kolon sırasını Idea'ya okur ve nil slice'ları boş
-// diziye indirger (şablon `range` ve len() güvenliği).
+// diziye indirger (şablon `range` ve len() güvenliği). Mine alanı burada
+// DOLDURULMAZ — çağıran (oturuma göre) ayrıca hesaplar (bkz. setMine).
 func scanIdea(row pgx.Row, i *Idea) error {
 	if err := row.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
 		&i.TargetUser, &i.EvidenceCount, &i.ExampleQuotes, &i.SourceType,
 		&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
 		&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.LocalEvidence,
+		&i.ParentIdeaID, &i.CreatedBySessionID,
 		&i.SourceTheme, &i.CreatedAt); err != nil {
 		return err
 	}
@@ -514,6 +511,13 @@ func scanIdea(row pgx.Row, i *Idea) error {
 	return nil
 }
 
+// setMine, ai_blended kart görünürlük kuralını uygular: Mine yalnız
+// source_type='ai_blended' VE created_by_session_id oturumla eşleşiyorsa
+// true olur. Diğer kart türlerinde her zaman false (herkese açık).
+func setMine(i *Idea, sid string) {
+	i.Mine = i.SourceType == "ai_blended" && sid != "" && i.CreatedBySessionID == sid
+}
+
 // ListIdeasFiltered, galeri listesini kaynak türü ve serbest metin
 // filtresiyle döner (yeniden eskiye). Filtreler SQL parametresi olarak
 // geçer; ILIKE deseni kaçışlanır.
@@ -527,10 +531,13 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 	}
 
 	// $1 boşsa kaynak türü filtresi devre dışı; $2 boşsa arama devre dışı.
+	// $4 (SessionID): ai_blended kart yalnız üreten oturuma görünür — herkese
+	// açık galeriye anonim kart girmez (doğrulanmışlık ilkesi).
 	q := ideaSelect + `
 		WHERE ($1 = '' OR i.source_type = $1)
 		  AND ($2 = '' OR i.title ILIKE $2 OR i.problem_statement ILIKE $2
 		       OR i.proposed_solution ILIKE $2)
+		  AND (i.source_type <> 'ai_blended' OR i.created_by_session_id = $4)
 		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT $3`
 
@@ -539,7 +546,7 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		pattern = "%" + escapeLike(t) + "%"
 	}
 
-	rows, err := s.Pool.Query(ctx, q, f.SourceType, pattern, limit)
+	rows, err := s.Pool.Query(ctx, q, f.SourceType, pattern, limit, f.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -551,6 +558,7 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		if err := scanIdea(rows, &i); err != nil {
 			return nil, err
 		}
+		setMine(&i, f.SessionID)
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -563,8 +571,10 @@ func escapeLike(s string) string {
 	return r.Replace(s)
 }
 
-// GetIdea, tek kartı döner; kayıt yoksa ErrNotFound.
-func (s *Store) GetIdea(ctx context.Context, id int64) (*Idea, error) {
+// GetIdea, tek kartı döner; kayıt yoksa ErrNotFound. Görünürlük kuralı:
+// başkasının ai_blended kartı da ErrNotFound döner (var olduğu sızdırılmaz,
+// 404 — bkz. spec kabul kriteri 4).
+func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error) {
 	var i Idea
 	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1`, id), &i)
 	if err == pgx.ErrNoRows {
@@ -572,6 +582,10 @@ func (s *Store) GetIdea(ctx context.Context, id int64) (*Idea, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	setMine(&i, sid)
+	if i.SourceType == "ai_blended" && !i.Mine {
+		return nil, ErrNotFound
 	}
 	return &i, nil
 }
@@ -643,4 +657,98 @@ func (s *Store) queryIdeaSources(ctx context.Context, sql string, ideaID int64) 
 		out = append(out, src)
 	}
 	return out, rows.Err()
+}
+
+// ------------------------------------------------------------- kart sohbeti
+
+// ListChat, (kart, oturum) çiftinin sohbet geçmişini eskiden yeniye döner
+// (en fazla `limit` mesaj — en YENİ `limit` mesaj alınır, sonra kronolojik
+// sıraya çevrilir). Girişsiz kimlik: user_id yerine session_id ile filtrelenir.
+func (s *Store) ListChat(ctx context.Context, ideaID int64, sid string, limit int) ([]ChatMessage, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, role, message, created_at
+		FROM idea_conversations
+		WHERE idea_id = $1 AND session_id = $2
+		ORDER BY created_at DESC, id DESC
+		LIMIT $3`, ideaID, sid, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var desc []ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.Role, &m.Message, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		desc = append(desc, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Eskiden yeniye çevir (sözleşme: GET /chat "messages" kronolojik sırada).
+	out := make([]ChatMessage, len(desc))
+	for i, m := range desc {
+		out[len(desc)-1-i] = m
+	}
+	return out, nil
+}
+
+// AppendChat, (kart, oturum) sohbetine tek satır ekler ve eklenen satırı
+// (id/created_at dahil) döner.
+func (s *Store) AppendChat(ctx context.Context, ideaID int64, sid, role, message string) (ChatMessage, error) {
+	m := ChatMessage{Role: role, Message: message}
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO idea_conversations (idea_id, session_id, role, message)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at`, ideaID, sid, role, message).Scan(&m.ID, &m.CreatedAt)
+	if err != nil {
+		return ChatMessage{}, fmt.Errorf("idea_conversations insert: %w", err)
+	}
+	return m, nil
+}
+
+// InsertBlendedIdea, sohbetten türeyen yeni `ai_blended` kartı yazar. Kanıt
+// alanları (example_quotes/evidence_count/source_theme_id/local_evidence)
+// LLM'den GELMEZ — kaynak karttan (parent) birebir kopyalanır (kart tohumu
+// değişmez ilkesi, 001_init yorumu). Tek INSERT ... RETURNING zaten atomik
+// (tek tx); ayrı bir Begin/Commit gerekmez.
+func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft BlendDraft, sid string) (*Idea, error) {
+	// nil slice guard: pgx nil []string'i SQL NULL yazar, NOT NULL
+	// kolonları kırar (bkz. InsertPostAnalyses'teki aynı koruma).
+	quotes := parent.ExampleQuotes
+	if quotes == nil {
+		quotes = []string{}
+	}
+	localEvidence := parent.LocalEvidence
+	if localEvidence == nil {
+		localEvidence = []string{}
+	}
+	tags := draft.DomainTags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	var id int64
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO ideas
+			(title, problem_statement, proposed_solution, target_user, evidence_count,
+			 example_quotes, source_type, source_theme_id, local_evidence,
+			 parent_idea_id, created_by_session_id,
+			 urgency_score, monetization_signal, domain_tags)
+		VALUES ($1, $2, $3, $4, $5, $6, 'ai_blended', $7, $8, $9, $10, $11, $12, $13)
+		RETURNING id`,
+		draft.Title, draft.ProblemStatement, draft.ProposedSolution, draft.TargetUser,
+		parent.EvidenceCount, quotes, parent.SourceThemeID, localEvidence,
+		parent.ID, sid, draft.UrgencyScore, draft.MonetizationSignal, tags).Scan(&id)
+	if err != nil {
+		return nil, fmt.Errorf("ai_blended ideas insert: %w", err)
+	}
+
+	return s.GetIdea(ctx, id, sid)
 }

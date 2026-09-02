@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/store"
 )
 
@@ -26,32 +27,51 @@ const apiTimeout = 5 * time.Second
 // paketi kendi eşdeğerini tanımlar, web paketine bağımlı değildir).
 type IdeaStore interface {
 	ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]store.Idea, error)
-	GetIdea(ctx context.Context, id int64) (*store.Idea, error)
+	GetIdea(ctx context.Context, id int64, sid string) (*store.Idea, error)
 	IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error)
+
+	// Kart sohbeti (Idea Copilot, #66) — girişsiz kimlik: anonim oturum
+	// çerezi (sid). Bkz. docs/specs/faz2-dilim2-chat.md.
+	ListChat(ctx context.Context, ideaID int64, sid string, limit int) ([]store.ChatMessage, error)
+	AppendChat(ctx context.Context, ideaID int64, sid, role, message string) (store.ChatMessage, error)
+	InsertBlendedIdea(ctx context.Context, parent *store.Idea, draft store.BlendDraft, sid string) (*store.Idea, error)
 }
 
 // Server, JSON API handler'larını taşır.
 type Server struct {
 	ideas   IdeaStore
+	chat    llm.Chat // Groq istemcisi (Idea Copilot); RequireGroq `api` komutunda garanti eder
 	mux     *http.ServeMux
 	timeout time.Duration
+
+	chatLimiter  *rateLimiter // oturum başına 30 mesaj/saat
+	blendLimiter *rateLimiter // oturum başına 5 blend/gün
 }
 
 // NewServer, handler'ları kurar.
-func NewServer(ideas IdeaStore) *Server {
-	return newServer(ideas, apiTimeout)
+func NewServer(ideas IdeaStore, chat llm.Chat) *Server {
+	return newServer(ideas, chat, apiTimeout)
 }
 
 // newServer, testlerin gerçek bir sunucuda (httptest.NewServer) kısa
 // zaman aşımıyla deneyebilmesi için NewServer'ın iç uygulaması.
-func newServer(ideas IdeaStore, timeout time.Duration) *Server {
-	s := &Server{ideas: ideas, timeout: timeout}
+func newServer(ideas IdeaStore, chat llm.Chat, timeout time.Duration) *Server {
+	s := &Server{
+		ideas:        ideas,
+		chat:         chat,
+		timeout:      timeout,
+		chatLimiter:  newRateLimiter(chatRateLimit, time.Hour),
+		blendLimiter: newRateLimiter(blendRateLimit, 24*time.Hour),
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/ideas", s.handleListIdeas)
 	mux.HandleFunc("GET /api/ideas/{id}", s.handleGetIdea)
 	mux.HandleFunc("GET /api/ideas/{id}/sources", s.handleIdeaSources)
+	mux.HandleFunc("GET /api/ideas/{id}/chat", s.handleGetChat)
+	mux.HandleFunc("POST /api/ideas/{id}/chat", s.handlePostChat)
+	mux.HandleFunc("POST /api/ideas/{id}/blend", s.handlePostBlend)
 	mux.HandleFunc("/", s.handleNotFound) // eşleşmeyen her yol
 	s.mux = mux
 	return s

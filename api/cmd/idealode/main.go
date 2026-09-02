@@ -273,8 +273,12 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 
 // cmdAPI, JSON API sunucusunu ayağa kaldırır (#18). DATABASE_URL'i gören TEK
 // süreçtir; `serve` (web) buraya HTTP ile bağlanır. Public domain almaz —
-// yalnız Railway iç ağında (idealode-web) erişilir.
+// yalnız Railway iç ağında (idealode-web) erişilir. Kart sohbeti/blend
+// (#66) Groq'a yalnız BU süreçten gider — RequireGroq bu yüzden zorunlu.
 func cmdAPI(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
 		return err
 	}
@@ -284,11 +288,13 @@ func cmdAPI(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
+	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	return api.NewServer(st).ListenAndServe(ctx, ":"+port)
+	return api.NewServer(st, chat).ListenAndServe(ctx, ":"+port)
 }
 
 // cmdServe, salt okunur web arayüzünü ayağa kaldırır (#21). Pipeline

@@ -1,5 +1,6 @@
 {{ define "content" }}
-<article class="idea" aria-labelledby="idea-title">
+<div class="idea-layout">
+<article class="idea idea-main" aria-labelledby="idea-title">
 
   <p class="idea-back">
     <a class="btn btn-ghost" href="/">
@@ -20,6 +21,20 @@
     </p>
 
     <h1 id="idea-title">{{ .Heading }}</h1>
+
+    {{ if .ParentHref }}
+    <p class="idea-parent">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <a href="{{ .ParentHref }}">{{ .T "chat.parent_link" }}</a>
+    </p>
+    {{ end }}
+
+    {{ if .Mine }}
+    <p class="idea-mine">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M12 4.5c-4.2 0-7 4-7.5 7.5.5 3.5 3.3 7.5 7.5 7.5s7-4 7.5-7.5c-.5-3.5-3.3-7.5-7.5-7.5Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></svg>
+      {{ .T "chat.mine_note" }}
+    </p>
+    {{ end }}
 
     {{ if .TargetUser }}
     <p class="idea-target"><span class="idea-target-label">{{ .T "idea.target_user" }}:</span> {{ .TargetUser }}</p>
@@ -130,4 +145,110 @@
   {{ end }}
 
 </article>
+
+{{/* ---------- Idea Copilot: >=1024 sağ ray (sticky), <1024 çekmece ---------- */}}
+{{ with .Chat }}
+<div class="chat-backdrop" data-chat-close hidden></div>
+
+<aside class="idea-rail" id="chat" aria-labelledby="chat-heading"
+       data-chat-panel
+       data-msg-generating="{{ $.T "chat.generating" }}"
+       data-msg-failed="{{ $.T "chat.error.failed" }}"
+       data-msg-rate_limited="{{ $.T "chat.error.rate_limited" }}"
+       data-msg-upstream="{{ $.T "chat.error.upstream" }}"
+       data-msg-no_conversation="{{ $.T "chat.error.no_conversation" }}"
+       data-msg-empty="{{ $.T "chat.error.empty" }}"
+       data-msg-too_long="{{ $.T "chat.error.too_long" }}"
+       data-msg-forbidden="{{ $.T "chat.error.forbidden" }}"
+       data-msg-not_found="{{ $.T "chat.error.not_found" }}"
+       data-label-you="{{ $.T "chat.role.user" }}"
+       data-label-assistant="{{ $.T "chat.role.assistant" }}">
+  <section class="chat-panel">
+
+    <header class="chat-head">
+      <span class="chat-avatar" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+        <span class="chat-avatar-dot"></span>
+      </span>
+      <span class="chat-head-text">
+        <h2 class="chat-title" id="chat-heading">{{ .Title }}</h2>
+        <span class="chat-subtitle"><span class="chat-subtitle-dot" aria-hidden="true"></span>{{ $.T "chat.subtitle" }}</span>
+      </span>
+      <button class="chat-close" type="button" data-chat-close aria-label="{{ $.T "chat.close" }}">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <div class="chat-quick" role="group" aria-label="{{ $.T "chat.quick_label" }}">
+      {{ range .QuickPrompts }}
+      <button class="chat-chip" type="submit" form="chat-form" name="message" value="{{ .Query }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" fill="currentColor"/></svg>
+        <span>{{ .Label }}</span>
+      </button>
+      {{ end }}
+    </div>
+
+    <div class="chat-log" data-chat-log role="log" aria-live="polite" aria-relevant="additions">
+      {{ if .Messages }}
+      {{ range .Messages }}
+      <div class="chat-msg{{ if .IsUser }} is-user{{ end }}">
+        <span class="chat-msg-avatar" aria-hidden="true">
+          {{ if .IsUser }}
+          <svg viewBox="0 0 24 24" width="14" height="14" focusable="false"><circle cx="12" cy="8.5" r="3.6" fill="currentColor"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          {{ else }}
+          <svg viewBox="0 0 24 24" width="14" height="14" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" fill="currentColor"/></svg>
+          {{ end }}
+        </span>
+        <div class="chat-bubble-wrap">
+          <p class="chat-bubble">
+            <span class="sr-only">{{ if .IsUser }}{{ $.T "chat.role.user" }}{{ else }}{{ $.T "chat.role.assistant" }}{{ end }}:</span>
+            {{ .Body }}
+          </p>
+          {{ if .Time }}<span class="chat-time">{{ .Time }}</span>{{ end }}
+        </div>
+      </div>
+      {{ end }}
+      {{ else }}
+      <div class="chat-empty">
+        <span class="chat-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" focusable="false"><path d="M4 5.5h16v10H8.5L4 19V5.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="9.5" cy="10.5" r="1.1" fill="currentColor"/><circle cx="12.5" cy="10.5" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10.5" r="1.1" fill="currentColor"/></svg>
+        </span>
+        <p class="chat-empty-title">{{ $.T "chat.empty.title" }}</p>
+        <p class="chat-empty-body">{{ $.T "chat.empty.body" }}</p>
+      </div>
+      {{ end }}
+    </div>
+
+    {{ if .Error }}
+    <p class="chat-error" role="status">
+      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="M12 4.5 21 20H3l9-15.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg>
+      {{ .Error }}
+    </p>
+    {{ end }}
+    <p class="chat-status" data-chat-status role="status" hidden></p>
+
+    <div class="chat-foot">
+      <form class="chat-form" id="chat-form" method="post" action="{{ .PostHref }}" data-chat-form>
+        <label class="sr-only" for="chat-input">{{ $.T "chat.input_label" }}</label>
+        <input class="chat-input" id="chat-input" name="message" type="text"
+               maxlength="{{ .MaxLen }}" autocomplete="off" required
+               placeholder="{{ $.T "chat.placeholder" }}">
+        <button class="chat-send" type="submit" aria-label="{{ $.T "chat.send" }}" title="{{ $.T "chat.send" }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M4 12 20 4l-3.4 16-4.3-6.1L4 12Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+
+      <form class="chat-blend" method="post" action="{{ .BlendHref }}" data-chat-blend>
+        <button class="chat-blend-button" type="submit">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" fill="currentColor"/></svg>
+          <span>{{ $.T "chat.blend" }}</span>
+        </button>
+        <span class="chat-blend-note">{{ $.T "chat.blend_note" }}</span>
+      </form>
+    </div>
+
+  </section>
+</aside>
+{{ end }}
+</div>
 {{ end }}

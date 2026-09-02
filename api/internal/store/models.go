@@ -64,9 +64,54 @@ type Idea struct {
 	MonetizationSignal      int       `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
 	KnownCompetitorsAIGuess string    `json:"known_competitors_ai_guess,omitempty"`
 	DomainTags              []string  `json:"domain_tags"`
-	LocalEvidence           []string  `json:"local_evidence"`         // füzyonla eşleşen yerel talep satırları (#43)
-	SourceTheme             string    `json:"source_theme,omitempty"` // tema adı (dump görünümü)
+	LocalEvidence           []string  `json:"local_evidence"`           // füzyonla eşleşen yerel talep satırları (#43)
+	ParentIdeaID            *int64    `json:"parent_idea_id,omitempty"` // ai_blended: türetildiği kart
+	Mine                    bool      `json:"mine"`                     // ai_blended ve bu oturuma ait
+	SourceTheme             string    `json:"source_theme,omitempty"`   // tema adı (dump görünümü)
+	CreatedBySessionID      string    `json:"-"`                        // ai_blended: üreten anonim oturum (görünürlük kuralı; store'da hesaplanır: source_type='ai_blended' AND created_by_session_id = $sid)
 	CreatedAt               time.Time `json:"created_at"`
+}
+
+// ChatMessage, kart sohbeti satırı (idea_conversations). Girişsiz kimlik
+// anonim oturum çerezi (session_id) ile kurulur — user_id/session_id'den
+// biri dolu olmalı (bkz. 010_anon_chat.sql CHECK constraint'i).
+type ChatMessage struct {
+	ID        int64     `json:"id"`
+	Role      string    `json:"role"` // user | assistant
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// MarshalJSON, ChatMessage'ı sözleşmedeki alan adlarıyla ve RFC3339 UTC
+// zaman damgasıyla yazar.
+func (m ChatMessage) MarshalJSON() ([]byte, error) {
+	type view struct {
+		ID        int64  `json:"id"`
+		Role      string `json:"role"`
+		Message   string `json:"message"`
+		CreatedAt string `json:"created_at"`
+	}
+	return json.Marshal(view{
+		ID:        m.ID,
+		Role:      m.Role,
+		Message:   m.Message,
+		CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// BlendDraft, sohbetten türetilen yeni kartın LLM'den gelen alanları
+// (copilot.Blend tarafından doğrulanıp doldurulur). Kanıt alanları
+// (example_quotes/evidence_count/source_theme_id/local_evidence) burada
+// YOK — bunlar LLM'den gelmez, kaynak karttan birebir kopyalanır
+// (InsertBlendedIdea).
+type BlendDraft struct {
+	Title              string
+	ProblemStatement   string
+	ProposedSolution   string
+	TargetUser         string
+	DomainTags         []string
+	UrgencyScore       int
+	MonetizationSignal int
 }
 
 // IdeaSource, bir kartın arkasındaki kaynak gönderinin gösterime yetecek
