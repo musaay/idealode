@@ -33,4 +33,9 @@ push/deploy yalnız lead'dedir. Ayrı qa rolü YOK (2026-09-02'de kaldırıldı:
 reviewer + lead'in canlı kontrolü yeterli). Teammate'ler yalnız lead'le konuşur (yıldız
 topolojisi). Solo çalışma yalnız şunlarda kabul: önemsiz tek satırlıklar,
 salt araştırma/soru-cevap, takımın yapamayacağı infra/ops işleri (git,
-deploy, canlı DB/Groq işlemleri).
+deploy, canlı DB/Groq işlemleri). 
+
+İş takibi: her iş (önemsiz tek satırlıklar hariç) önce GitHub issue olur,
+"IDEA LODE" project board'unda In progress'e çekilir (`gh project item-edit`),
+PR açıklaması `Closes #n` taşır; merge sonrası kart Done'a düşer. Board'da
+In progress boşken kimse çalışmıyor demektir.
