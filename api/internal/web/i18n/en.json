@@ -9,6 +9,8 @@
   "nav.sections": "Sections",
   "nav.breadcrumb": "Breadcrumb",
   "nav.home": "Back to home",
+  "nav.copilot": "Idea Copilot",
+  "nav.copilot_soon": "Coming soon",
 
   "lang.label": "Language",
   "lang.tr": "TR",
@@ -21,6 +23,8 @@
   "theme.dark": "Dark",
   "theme.switch_to_light": "Switch to light theme",
   "theme.switch_to_dark": "Switch to dark theme",
+  "theme.mode_light": "Light Mode",
+  "theme.mode_dark": "Dark Mode",
 
   "gallery.title": "Idea Pool",
   "gallery.count": "%d ideas",

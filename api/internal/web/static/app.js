@@ -20,7 +20,7 @@
       "; SameSite=Lax" + secure;
   }
 
-  // Sayfada birden çok tema anahtarı olabilir (sol nav + mobil header);
+  // Sayfada birden çok tema anahtarı olabilir (sol nav + üst çubuk + mobil);
   // hepsi aynı durumu gösterir, biri değişince hepsi güncellenir.
   function sync(nextTheme) {
     var opposite = nextTheme === "dark" ? "light" : "dark";
@@ -34,9 +34,15 @@
       url.searchParams.set("theme", opposite);
       el.setAttribute("href", url.pathname + url.search);
 
+      // Sol nav bloğu KARŞI temayı yazar ("Koyu temaya geç" eylemi).
       var text = el.querySelector(".theme-toggle-text");
       var textLabel = el.getAttribute("data-text-" + opposite);
       if (text && textLabel) text.textContent = textLabel;
+
+      // Üst çubuk pill'i AKTİF temayı yazar (referans variant="header").
+      var mode = el.querySelector(".theme-toggle-mode");
+      var modeLabel = el.getAttribute("data-mode-" + nextTheme);
+      if (mode && modeLabel) mode.textContent = modeLabel;
     });
   }
 

@@ -4,3 +4,4 @@ api/idealode
 api/bin/
 dist/
 *.log
+.claude/worktrees/

@@ -9,6 +9,8 @@
   "nav.sections": "Bölümler",
   "nav.breadcrumb": "Bulunduğunuz yer",
   "nav.home": "Ana sayfaya dön",
+  "nav.copilot": "Idea Copilot",
+  "nav.copilot_soon": "Yakında",
 
   "lang.label": "Dil",
   "lang.tr": "TR",
@@ -21,6 +23,8 @@
   "theme.dark": "Koyu",
   "theme.switch_to_light": "Açık temaya geç",
   "theme.switch_to_dark": "Koyu temaya geç",
+  "theme.mode_light": "Aydınlık Mod",
+  "theme.mode_dark": "Karanlık Mod",
 
   "gallery.title": "Fikir Havuzu",
   "gallery.count": "%d fikir",

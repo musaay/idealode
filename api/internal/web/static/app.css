@@ -63,6 +63,15 @@
   --color-card-grad: linear-gradient(135deg,
       rgba(236, 253, 245, 0.7), #ffffff 55%, rgba(240, 253, 250, 0.5));
   --color-accent-line: linear-gradient(90deg, #10b981, #0d9488 55%, #c488ff);
+  /* Referans amber-500 (#f59e0b) güneş ikonu açık zeminde 1.9:1 kalıyor;
+     ikon kontrastı için amber-700 kullanılır (4.8:1). */
+  --color-icon-sun: #b45309;
+  --color-icon-moon: #065f46;
+  --color-copilot-bg: #faf5ff;       /* referans: purple-50 */
+  --color-copilot-bg-hover: #f3e8ff; /* referans: purple-100 */
+  --color-copilot-fg: #7e22ce;       /* referans: purple-700 */
+  --color-copilot-bd: #e9d5ff;       /* referans: purple-200 */
+  --color-dot: #10b981;              /* referans: emerald-500 */
 
   --badge-pain-bg: #ecfdf5;
   --badge-pain-fg: #065f46;
@@ -99,6 +108,13 @@
     --color-card-grad: linear-gradient(135deg,
         rgba(6, 78, 59, 0.85), rgba(2, 44, 34, 0.95) 55%, #011a14);
     --color-accent-line: linear-gradient(90deg, #10b981, #0d9488 55%, #c488ff);
+    --color-icon-sun: #fbbf24;
+    --color-icon-moon: #6ffbbe;
+    --color-copilot-bg: rgba(196, 136, 255, 0.15);
+    --color-copilot-bg-hover: rgba(196, 136, 255, 0.25);
+    --color-copilot-fg: #c488ff;
+    --color-copilot-bd: rgba(196, 136, 255, 0.3);
+    --color-dot: #10b981;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -138,6 +154,13 @@
   --color-card-grad: linear-gradient(135deg,
       rgba(6, 78, 59, 0.85), rgba(2, 44, 34, 0.95) 55%, #011a14);
   --color-accent-line: linear-gradient(90deg, #10b981, #0d9488 55%, #c488ff);
+  --color-icon-sun: #fbbf24;
+  --color-icon-moon: #6ffbbe;
+  --color-copilot-bg: rgba(196, 136, 255, 0.15);
+  --color-copilot-bg-hover: rgba(196, 136, 255, 0.25);
+  --color-copilot-fg: #c488ff;
+  --color-copilot-bd: rgba(196, 136, 255, 0.3);
+  --color-dot: #10b981;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -328,6 +351,52 @@ a { color: var(--color-primary-strong); }
 
 .theme-toggle-block:hover { color: var(--color-text); border-color: var(--color-border-strong); }
 
+/* Üst çubuk tema pill'i — referans ThemeToggle variant="header":
+   ikon ve etiket AKTİF temayı gösterir (açıkken güneş + "Aydınlık Mod"). */
+.theme-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.theme-toggle-pill:hover { background: var(--color-surface); }
+
+.theme-toggle-pill[data-next-theme="dark"] .icon-sun { display: block; color: var(--color-icon-sun); }
+.theme-toggle-pill[data-next-theme="dark"] .icon-moon { display: none; }
+.theme-toggle-pill[data-next-theme="light"] .icon-moon { display: block; color: var(--color-icon-moon); }
+.theme-toggle-pill[data-next-theme="light"] .icon-sun { display: none; }
+
+/* Idea Copilot düğmesi — sohbet ekranı gelene kadar tıklama etkisizdir. */
+.copilot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--color-copilot-bd);
+  border-radius: var(--radius-pill);
+  background: var(--color-copilot-bg);
+  color: var(--color-copilot-fg);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.copilot-button:hover { background: var(--color-copilot-bg-hover); }
+.copilot-button[aria-disabled="true"] { cursor: default; }
+
 /* --------------------------------------------------- masaüstü sol nav */
 .sidenav { display: none; }
 
@@ -491,6 +560,9 @@ a { color: var(--color-primary-strong); }
   justify-content: center;
   gap: 2px;
   min-height: var(--tap);
+  /* <a> ve <button> aynı görünsün diye tarayıcı varsayılanları sıfırlanır. */
+  border: 0;
+  background: transparent;
   border-radius: var(--radius-nav);
   font-family: var(--font-display);
   font-weight: 600;
@@ -503,6 +575,32 @@ a { color: var(--color-primary-strong); }
   background: var(--color-primary);
   color: var(--color-on-primary);
   font-weight: 700;
+}
+
+/* Referans MobileBottomNav ikinci sekmesi: mor, pasif durumda dolgusuz. */
+.mobile-nav-copilot { color: var(--color-copilot-fg); }
+.mobile-nav-copilot[aria-disabled="true"] { cursor: default; }
+
+.mobile-nav-icon { position: relative; display: inline-flex; }
+
+/* Referanstaki "yeni etkinlik" noktası. */
+.mobile-nav-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-dot);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-nav-dot { animation: dot-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+}
+
+@keyframes dot-ping {
+  0% { transform: scale(1); opacity: 1; }
+  75%, 100% { transform: scale(1.9); opacity: 0; }
 }
 
 /* ----------------------------------------------------------- yerleşim */
@@ -532,6 +630,8 @@ a { color: var(--color-primary-strong); }
     z-index: 30;
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
     height: var(--topbar-h);
     padding-inline: var(--space-7);
     background: var(--color-bar-bg);
@@ -545,6 +645,26 @@ a { color: var(--color-primary-strong); }
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+/* 768-1023 px arası üst çubuk dar: breadcrumb kırpılmasın diye boşluklar
+   daraltılır. Dokunma hedefleri (44px) korunur. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .topbar { padding-inline: var(--space-4); }
+  .topbar-actions { gap: var(--space-2); }
+  .breadcrumb { gap: var(--space-2); }
+  .crumb { padding-inline: var(--space-3); }
+  /* Bu genişlikte tema düğmesi referansın compact biçimine düşer:
+     etiket gizlenir, erişilebilir ad aria-label'da kalır. */
+  .theme-toggle-pill { padding-inline: 0; width: var(--tap); justify-content: center; }
+  .theme-toggle-pill .theme-toggle-mode { display: none; }
 }
 
 .crumb {
@@ -567,6 +687,12 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 .crumb.is-active { background: var(--color-primary); color: var(--color-on-primary); }
 
 .crumb-current {
+  /* inline-flex'te text-overflow çalışmaz; kırpılan başlık üç nokta alsın diye
+     bu tek öğe inline-block'a düşer (yükseklik dokunma hedefinde kalır). */
+  display: inline-block;
+  line-height: calc(var(--tap) - 2px);
+  flex: 0 1 auto;
+  min-width: 5rem;
   border: 1px solid var(--badge-pain-bd);
   background: var(--badge-pain-bg);
   color: var(--badge-pain-fg);
