@@ -13,7 +13,7 @@ UI DB'ye dokunmaz. Tek binary, üç süreç:
 ## Sözleşme (her iki taraf buna göre yazar; değiştirmek lead onayı ister)
 Base: `API_BASE_URL` (ör. `http://idealode-api.railway.internal:8080`). Tüm yanıtlar
 `Content-Type: application/json; charset=utf-8`. Hata gövdesi: `{"error":"not_found"}`
-(`code` değerleri: `not_found`, `bad_request`, `internal`). Tarihler RFC3339 UTC.
+(`code` değerleri: `not_found`, `bad_request`, `internal`, `timeout` — 503). Tarihler RFC3339 UTC.
 
 ```
 GET /healthz                       → 200 {"status":"ok"}

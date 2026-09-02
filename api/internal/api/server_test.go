@@ -21,11 +21,19 @@ type fakeStore struct {
 	lastFilter  store.IdeaFilter
 	listErr     error
 	sourcesErr  error
-	forceGetErr error // ErrNotFound dışı bir hata simüle etmek için
+	forceGetErr error         // ErrNotFound dışı bir hata simüle etmek için
+	delay       time.Duration // gerçek sunucuda zaman aşımını tetiklemek için (bkz. TestTimeout_RealServer)
 }
 
 func (f *fakeStore) ListIdeasFiltered(ctx context.Context, filt store.IdeaFilter) ([]store.Idea, error) {
 	f.lastFilter = filt
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -269,4 +277,44 @@ func assertContentType(t *testing.T, rec *httptest.ResponseRecorder) {
 	if got != "application/json; charset=utf-8" {
 		t.Errorf("Content-Type: %q", got)
 	}
+}
+
+// TestTimeout_RealServer, httptest.ResponseRecorder DEĞİL gerçek bir
+// sunucu (httptest.NewServer) üzerinden zaman aşımını doğrular: stdlib'in
+// http.TimeoutHandler'ı 503 + text/plain döner, sözleşme ise tüm yanıtların
+// JSON olmasını ister. Yavaş handler'ı simülemek için fakeStore.delay,
+// sunucunun zaman aşımından uzun tutulur.
+func TestTimeout_RealServer(t *testing.T) {
+	fs := newFakeStore()
+	fs.delay = 80 * time.Millisecond
+	s := newServer(fs, 10*time.Millisecond)
+
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/ideas")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status: %d (503 bekleniyordu)", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type: %q", ct)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("gövde JSON değil: %v", err)
+	}
+	if body["error"] != "timeout" {
+		t.Errorf(`gövde {"error":"timeout"} olmalıydı, geldi: %v`, body)
+	}
+
+	// fakeStore'un arkaplan goroutine'i gecikmesini tamamlayıp yazmaya
+	// çalıştığında timeoutWriter bunu sessizce yutmalı (ikinci yanıt
+	// gitmemeli) — test sürecinin goroutine'i temiz bitirmesine izin ver.
+	time.Sleep(fs.delay + 40*time.Millisecond)
 }

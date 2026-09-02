@@ -8,10 +8,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/musaay/idealode/api/internal/store"
 )
+
+// apiTimeout, her isteğin üst sınırı (sözleşme: tüm yanıtlar JSON —
+// stdlib'in http.TimeoutHandler'ı zaman aşımında düz metin gövde yazdığı
+// için burada elle uygulanır, bkz. timeoutMiddleware).
+const apiTimeout = 5 * time.Second
 
 // IdeaStore, api katmanının store'dan ihtiyaç duyduğu okuma yüzeyi. Somut
 // *store.Store yerine arayüz kullanılır ki handler testleri canlı
@@ -25,13 +31,20 @@ type IdeaStore interface {
 
 // Server, JSON API handler'larını taşır.
 type Server struct {
-	ideas IdeaStore
-	mux   *http.ServeMux
+	ideas   IdeaStore
+	mux     *http.ServeMux
+	timeout time.Duration
 }
 
 // NewServer, handler'ları kurar.
 func NewServer(ideas IdeaStore) *Server {
-	s := &Server{ideas: ideas}
+	return newServer(ideas, apiTimeout)
+}
+
+// newServer, testlerin gerçek bir sunucuda (httptest.NewServer) kısa
+// zaman aşımıyla deneyebilmesi için NewServer'ın iç uygulaması.
+func newServer(ideas IdeaStore, timeout time.Duration) *Server {
+	s := &Server{ideas: ideas, timeout: timeout}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
@@ -43,9 +56,86 @@ func NewServer(ideas IdeaStore) *Server {
 	return s
 }
 
-// Handler, log + recover + zaman aşımı sarmalıyla mux'ı döner.
+// Handler, log + zaman aşımı + recover sarmalıyla mux'ı döner. recoverPanic
+// en içte durur ki panic, timeoutMiddleware'in başlattığı handler
+// goroutine'i içinde (aynı goroutine yığınında) yakalansın.
 func (s *Server) Handler() http.Handler {
-	return requestLog(s.recoverPanic(http.TimeoutHandler(s.mux, 5*time.Second, `{"error":"internal"}`)))
+	return requestLog(s.timeoutMiddleware(s.recoverPanic(s.mux)))
+}
+
+// timeoutMiddleware, isteği s.timeout ile sınırlar. stdlib'in
+// http.TimeoutHandler'ı zaman aşımında düz metin/HTML gövde yazar — bu
+// sözleşmeyi ("tüm yanıtlar JSON") bozar. Burada handler ayrı bir
+// goroutine'de çalıştırılır; süre dolarsa ve handler henüz yanıt
+// yazmadıysa sözleşmedeki JSON hata gövdesiyle 503 dönülür. Handler
+// context iptalini görüp döndükten sonra kendi yazdıklarıysa timeoutWriter
+// tarafından sessizce yutulur (istemciye zaten 503 gitmiştir).
+func (s *Server) timeoutMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
+		defer cancel()
+
+		tw := &timeoutWriter{ResponseWriter: w}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			next.ServeHTTP(tw, r.WithContext(ctx))
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			tw.timeout()
+		}
+	})
+}
+
+// timeoutWriter, handler ile zaman aşımı yolunun aynı http.ResponseWriter'a
+// yarışmadan yazmasını sağlar: hangisi önce WriteHeader çağırırsa o kazanır,
+// diğeri sessizce yutulur.
+type timeoutWriter struct {
+	http.ResponseWriter
+	mu          sync.Mutex
+	wroteHeader bool
+	timedOut    bool
+}
+
+func (tw *timeoutWriter) WriteHeader(code int) {
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	if tw.wroteHeader {
+		return
+	}
+	tw.wroteHeader = true
+	tw.ResponseWriter.WriteHeader(code)
+}
+
+func (tw *timeoutWriter) Write(b []byte) (int, error) {
+	tw.mu.Lock()
+	if tw.timedOut {
+		tw.mu.Unlock()
+		return len(b), nil // istemciye zaten 503 gitti; handler'ın gövdesi yutulur
+	}
+	if !tw.wroteHeader {
+		tw.wroteHeader = true
+		tw.ResponseWriter.WriteHeader(http.StatusOK)
+	}
+	tw.mu.Unlock()
+	return tw.ResponseWriter.Write(b)
+}
+
+// timeout, süre dolduğunda çağrılır. Handler zaten yazmaya başladıysa
+// (wroteHeader == true) dokunmaz — yarış kaybedilmiştir, gövde karışmasın.
+func (tw *timeoutWriter) timeout() {
+	tw.mu.Lock()
+	if tw.wroteHeader {
+		tw.mu.Unlock()
+		return
+	}
+	tw.wroteHeader = true
+	tw.timedOut = true
+	tw.mu.Unlock()
+	writeError(tw.ResponseWriter, http.StatusServiceUnavailable, "timeout")
 }
 
 // ListenAndServe, sunucuyu addr üzerinde çalıştırır ve ctx iptal edilince
