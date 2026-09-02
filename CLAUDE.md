@@ -23,11 +23,14 @@ kartları üretir. Ayrıntı: README.md.
 
 ## Team workflow
 Esaslı işler (özellik, düzeltme, refactor) HER ZAMAN ajan takımıyla yürür,
-solo değil: `.claude/agents/`dan teammate spawn edilir — `developer` uygular
-(kaynağı düzenleyen TEK rol), ardından `reviewer` ve `qa` PARALEL doğrular —
+solo değil: `.claude/agents/`dan teammate spawn edilir — `developer`
+(pipeline/store) veya `ui-developer` (web katmanı) uygular (kaynağı
+düzenleyen TEK rol), ardından `reviewer` doğrular; canlı doğrulama
+(DB, curl, tarayıcı) lead'de —
 ana oturum lead'dir: spec'i yazar (dosya seviyesinde yol haritası + kabul
 kriterleri), raporları süzer, kullanıcıya tek onay özeti sunar. git/commit/
-push/deploy yalnız lead'dedir. Teammate'ler yalnız lead'le konuşur (yıldız
+push/deploy yalnız lead'dedir. Ayrı qa rolü YOK (2026-09-02'de kaldırıldı:
+reviewer + lead'in canlı kontrolü yeterli). Teammate'ler yalnız lead'le konuşur (yıldız
 topolojisi). Solo çalışma yalnız şunlarda kabul: önemsiz tek satırlıklar,
 salt araştırma/soru-cevap, takımın yapamayacağı infra/ops işleri (git,
 deploy, canlı DB/Groq işlemleri).
