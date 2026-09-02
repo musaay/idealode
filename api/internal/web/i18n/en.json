@@ -78,6 +78,9 @@
   "error.404.body": "The card you are looking for may have been removed, or the address is wrong.",
   "error.500.title": "Something went wrong",
   "error.500.body": "The request could not be processed. Please try again shortly.",
+  "error.502.title": "The service is not responding right now",
+  "error.502.body": "Idea data is temporarily unavailable. Please refresh the page in a few seconds.",
+  "error.502.hint": "Your cards are safe; this is only a temporary connection outage.",
   "error.back_home": "Back to gallery",
 
   "footer.note": "Card content and quotes are shown exactly as recorded at the source."

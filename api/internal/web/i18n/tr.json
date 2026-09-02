@@ -78,6 +78,9 @@
   "error.404.body": "Aradığınız kart kaldırılmış ya da adres hatalı olabilir.",
   "error.500.title": "Bir şeyler ters gitti",
   "error.500.body": "İstek işlenemedi. Birazdan tekrar deneyin.",
+  "error.502.title": "Servis şu an yanıt vermiyor",
+  "error.502.body": "Fikir verisine geçici olarak ulaşılamıyor. Birkaç saniye sonra sayfayı yenileyin.",
+  "error.502.hint": "Kartlarınız yerinde duruyor; bu yalnızca geçici bir bağlantı kesintisi.",
   "error.back_home": "Galeriye dön",
 
   "footer.note": "Kart içerikleri ve alıntılar kaynağındaki hâliyle gösterilir."
