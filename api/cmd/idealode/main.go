@@ -8,6 +8,7 @@
 //	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
 //	run         ingest -> analyze -> synthesize sırayla
+//	api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç, #18)
 //	serve       web arayüzünü sunar (galeri + kart detayı, salt okunur)
 //	dump        idea card'ları JSON olarak stdout'a dök
 package main
@@ -20,7 +21,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/musaay/idealode/api/internal/api"
+	"github.com/musaay/idealode/api/internal/apiclient"
 	"github.com/musaay/idealode/api/internal/config"
 	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/pipeline"
@@ -39,6 +43,7 @@ Komutlar:
   seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
   run         ingest -> analyze -> synthesize -> fuse -> seeds sırayla çalıştırır
+  api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç); PORT, varsayılan 8080
   serve       web arayüzünü sunar (galeri + kart detayı); PORT, varsayılan 8080
   dump        idea card'ları JSON olarak stdout'a döker
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
@@ -60,7 +65,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "serve", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "api", "serve", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -93,6 +98,9 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 	case "generate":
 		return cmdGenerate(ctx, cfg)
 	case "run":
+		if err := cfg.RequireDatabaseURL(); err != nil {
+			return err
+		}
 		// Advisory lock (#15): çakışan koşu (örn. uzun süren önceki cron)
 		// varsa bu koşu sessizce atlanır — veri yarışı ve çift iş önlenir.
 		lockSt, err := store.Connect(ctx, cfg.DatabaseURL)
@@ -132,6 +140,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
+	case "api":
+		return cmdAPI(ctx, cfg)
 	case "serve":
 		return cmdServe(ctx, cfg)
 	case "dump":
@@ -145,6 +155,9 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 // cmdMigrate, embed edilmiş .sql dosyalarını DB'ye elle tetiklenerek uygular
 // (bkz. internal/store/migrate.go). Otomatik/örtük çalışmaz.
 func cmdMigrate(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	if err := store.Migrate(ctx, cfg.DatabaseURL); err != nil {
 		return err
 	}
@@ -156,6 +169,9 @@ func cmdMigrate(ctx context.Context, cfg *config.Config) error {
 // #3-4 connector'lar, #5-6 analyze, #7-8 synthesize, #9 run/dump).
 
 func cmdIngest(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -169,6 +185,9 @@ func cmdIngest(ctx context.Context, cfg *config.Config) error {
 
 func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
 		return err
 	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
@@ -188,6 +207,9 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireGroq(); err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -205,6 +227,9 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireGroq(); err != nil {
+		return err
+	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
 		return err
 	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
@@ -228,6 +253,9 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireGroq(); err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -243,10 +271,13 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// cmdServe, salt okunur web arayüzünü ayağa kaldırır (#21). Pipeline
-// çalıştırmaz; Railway'de `run` cron servisinden ayrı bir servis olarak
-// koşar. Adres PORT ortam değişkeninden okunur (varsayılan 8080).
-func cmdServe(ctx context.Context, cfg *config.Config) error {
+// cmdAPI, JSON API sunucusunu ayağa kaldırır (#18). DATABASE_URL'i gören TEK
+// süreçtir; `serve` (web) buraya HTTP ile bağlanır. Public domain almaz —
+// yalnız Railway iç ağında (idealode-web) erişilir.
+func cmdAPI(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -257,7 +288,26 @@ func cmdServe(ctx context.Context, cfg *config.Config) error {
 	if port == "" {
 		port = "8080"
 	}
-	return web.NewServer(st).ListenAndServe(ctx, ":"+port)
+	return api.NewServer(st).ListenAndServe(ctx, ":"+port)
+}
+
+// cmdServe, salt okunur web arayüzünü ayağa kaldırır (#21). Pipeline
+// çalıştırmaz, DB'ye bağlanmaz — kart verisini API_BASE_URL üzerinden
+// apiclient ile okur (#18). Railway'de `run` cron servisinden ve
+// `idealode-api`'den ayrı bir servis olarak koşar. Adres PORT ortam
+// değişkeninden okunur (varsayılan 8080).
+func cmdServe(ctx context.Context, cfg *config.Config) error {
+	base := os.Getenv("API_BASE_URL")
+	if base == "" {
+		return fmt.Errorf("zorunlu ortam değişkeni eksik: API_BASE_URL")
+	}
+	client := apiclient.New(base, 5*time.Second)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	return web.NewServer(client).ListenAndServe(ctx, ":"+port)
 }
 
 func cmdGenerate(ctx context.Context, cfg *config.Config) error {
@@ -265,6 +315,9 @@ func cmdGenerate(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdDump(ctx context.Context, cfg *config.Config) error {
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
 	st, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err

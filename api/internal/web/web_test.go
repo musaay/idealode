@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -433,10 +434,69 @@ func TestIdeaNotFound(t *testing.T) {
 	}
 }
 
-func TestStoreErrorRendersErrorPage(t *testing.T) {
+// TestAPIErrorRendersGatewayPage — API'ye ulaşılamadığında (ErrNotFound
+// DIŞI her hata) her sayfa 502 varyantını gösterir, süreç düşmez.
+func TestAPIErrorRendersGatewayPage(t *testing.T) {
+	for _, target := range []string{"/", "/?source_type=pain_point&q=bot", "/ideas/1"} {
+		fs := sampleStore()
+		fs.err = context.DeadlineExceeded
+		rec := do(t, newTestServer(t, fs), http.MethodGet, target)
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("%s durum = %d, 502 bekleniyor", target, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "Servis şu an yanıt vermiyor") {
+			t.Errorf("%s için 502 başlığı render edilmedi", target)
+		}
+		if !strings.Contains(body, `data-status="502"`) {
+			t.Errorf("%s için 502 varyant işareti yok", target)
+		}
+		if !strings.Contains(body, "geçici bir bağlantı kesintisi") {
+			t.Errorf("%s için 502 ipucu satırı yok", target)
+		}
+		if strings.Contains(body, "context deadline exceeded") {
+			t.Errorf("%s: ham hata metni sayfaya sızdı", target)
+		}
+	}
+}
+
+// TestAPIErrorGatewayPageEN — 502 metni iki dilde de çevrilidir.
+func TestAPIErrorGatewayPageEN(t *testing.T) {
 	fs := sampleStore()
 	fs.err = context.DeadlineExceeded
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/")
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/?lang=en")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("durum = %d, 502 bekleniyor", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "not responding right now") {
+		t.Error("502 sayfası İngilizce render edilmedi")
+	}
+}
+
+// TestWrappedNotFoundStillRenders404 — istemci ErrNotFound'u sararak döner;
+// bu 502 değil 404 olmalı.
+func TestWrappedNotFoundStillRenders404(t *testing.T) {
+	fs := sampleStore()
+	fs.err = fmt.Errorf("api (/api/ideas/1): %w", store.ErrNotFound)
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("durum = %d, 404 bekleniyor", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Sayfa bulunamadı") {
+		t.Error("404 şablonu render edilmedi")
+	}
+}
+
+// panicStore, recover yolunu (500 sayfası) sürdürmek için panikleyen store.
+type panicStore struct{ fakeStore }
+
+func (p *panicStore) ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]store.Idea, error) {
+	panic("beklenmeyen durum")
+}
+
+// TestPanicRenders500 — 500 sayfası hâlâ recover yolunda kullanılır.
+func TestPanicRenders500(t *testing.T) {
+	rec := do(t, NewServer(&panicStore{}).Handler(), http.MethodGet, "/")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("durum = %d, 500 bekleniyor", rec.Code)
 	}

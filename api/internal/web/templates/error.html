@@ -1,8 +1,12 @@
 {{ define "content" }}
-<section class="error-page" aria-labelledby="error-title">
+<section class="error-page" data-status="{{ .Status }}" aria-labelledby="error-title">
   <p class="error-status" aria-hidden="true">{{ .Status }}</p>
   <h1 id="error-title">{{ .Heading }}</h1>
   <p class="error-body">{{ .Message }}</p>
+  {{ if eq .Status 502 }}
+  {{/* 502 varyantı: kesinti geçicidir, kart verisi kaybolmadı. */}}
+  <p class="error-body">{{ .T "error.502.hint" }}</p>
+  {{ end }}
   <a class="btn" href="/">{{ .T "error.back_home" }}</a>
 </section>
 {{ end }}

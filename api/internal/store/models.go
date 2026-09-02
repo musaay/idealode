@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Source, DB-backed paylaşılan kaynak listesi satırı. Community alanı
 // connector'a özgü selector'dır: Reddit -> subreddit, SE -> site slug,
@@ -74,4 +77,22 @@ type IdeaSource struct {
 	Community string
 	URL       string
 	CreatedAt time.Time
+}
+
+// MarshalJSON, IdeaSource'u API sözleşmesindeki alan adlarıyla yazar
+// (platform/community/url/created_at). encoding/json'ın `omitempty`'si
+// struct alanlarını (time.Time dahil) asla atlamadığı için sıfır zaman
+// burada elle denetlenir — CreatedAt.IsZero() ise created_at hiç yazılmaz.
+func (s IdeaSource) MarshalJSON() ([]byte, error) {
+	type view struct {
+		Platform  string `json:"platform"`
+		Community string `json:"community"`
+		URL       string `json:"url"`
+		CreatedAt string `json:"created_at,omitempty"`
+	}
+	v := view{Platform: s.Platform, Community: s.Community, URL: s.URL}
+	if !s.CreatedAt.IsZero() {
+		v.CreatedAt = s.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return json.Marshal(v)
 }

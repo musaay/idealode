@@ -51,7 +51,7 @@ func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
 		Query:      q,
 	})
 	if err != nil {
-		s.renderServerError(w, r, base, err)
+		s.renderUpstreamError(w, r, base, err)
 		return
 	}
 
@@ -80,13 +80,19 @@ func (s *Server) handleIdea(w http.ResponseWriter, r *http.Request) {
 			s.renderNotFound(w, r, base)
 			return
 		}
-		s.renderServerError(w, r, base, err)
+		s.renderUpstreamError(w, r, base, err)
 		return
 	}
 
 	sources, err := s.ideas.IdeaSources(r.Context(), id)
 	if err != nil {
-		s.renderServerError(w, r, base, err)
+		// Kart okunduktan sonra kaynak ucu 404 diyorsa kart bu arada
+		// kaldırılmıştır: kullanıcıya 404 gösterilir, 502 değil.
+		if errors.Is(err, store.ErrNotFound) {
+			s.renderNotFound(w, r, base)
+			return
+		}
+		s.renderUpstreamError(w, r, base, err)
 		return
 	}
 
@@ -111,6 +117,21 @@ func (s *Server) renderNotFound(w http.ResponseWriter, r *http.Request, base Pag
 		Status:  http.StatusNotFound,
 		Heading: base.T("error.404.title"),
 		Message: base.T("error.404.body"),
+	})
+}
+
+// renderUpstreamError, API sürecine ulaşılamadığında (ağ hatası, 5xx, bozuk
+// yanıt) gösterilen 502 sayfası. Web süreci ayakta kalır; kullanıcı geçici
+// bir kesinti olduğunu okur. Hata detayı yalnız log'a düşer, sayfaya değil.
+func (s *Server) renderUpstreamError(w http.ResponseWriter, r *http.Request, base Page, err error) {
+	log.Printf("hata: api yanıt vermedi: %s %s: %v", r.Method, r.URL.Path, err)
+	base.Title = base.T("error.502.title") + " — " + base.T("app.name")
+	base.MobileTitle = base.T("app.name")
+	s.render(w, r, "error", http.StatusBadGateway, ErrorPage{
+		Page:    base,
+		Status:  http.StatusBadGateway,
+		Heading: base.T("error.502.title"),
+		Message: base.T("error.502.body"),
 	})
 }
 
