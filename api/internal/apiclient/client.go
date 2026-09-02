@@ -86,14 +86,14 @@ func (c *Client) GetIdea(ctx context.Context, id int64) (*store.Idea, error) {
 
 // msgDTO, sohbet mesajının tel üzerindeki biçimi (sözleşmedeki `Msg`).
 type msgDTO struct {
-	ID        string    `json:"id"`
+	ID        int64     `json:"id"` // api'de store.ChatMessage.ID (BIGSERIAL) — sayı, string değil
 	Role      string    `json:"role"`
 	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func (m msgDTO) toWeb() web.ChatMessage {
-	return web.ChatMessage{ID: m.ID, Role: m.Role, Message: m.Message, CreatedAt: m.CreatedAt}
+	return web.ChatMessage{ID: strconv.FormatInt(m.ID, 10), Role: m.Role, Message: m.Message, CreatedAt: m.CreatedAt}
 }
 
 // ListChat, `GET /api/ideas/{id}/chat` — bu oturumun kart sohbeti.
