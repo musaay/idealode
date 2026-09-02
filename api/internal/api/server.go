@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
@@ -75,7 +76,7 @@ func (s *Server) timeoutMiddleware(next http.Handler) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
 		defer cancel()
 
-		tw := &timeoutWriter{ResponseWriter: w}
+		tw := newTimeoutWriter(w)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -84,55 +85,94 @@ func (s *Server) timeoutMiddleware(next http.Handler) http.Handler {
 
 		select {
 		case <-done:
+			tw.flush()
 		case <-ctx.Done():
 			tw.timeout()
 		}
 	})
 }
 
-// timeoutWriter, handler ile zaman aşımı yolunun aynı http.ResponseWriter'a
-// yarışmadan yazmasını sağlar: hangisi önce WriteHeader çağırırsa o kazanır,
-// diğeri sessizce yutulur.
+// timeoutWriter, handler ile zaman aşımı yolunun aynı gerçek
+// http.ResponseWriter'a yarışmadan yazmasını sağlar. Handler goroutine'i
+// (Header/Write/WriteHeader) hiçbir zaman gerçek writer'a dokunmaz — yalnız
+// kendi özel header/buffer'ına yazar, bunlar tw.mu ile korunur. Gerçek
+// writer'a tek bir yazar dokunur: ya timeoutMiddleware'in ana goroutine'i
+// handler bitince flush() ile (done kanalının kapanması happens-before
+// garantisi verir, ek kilit gerekmez), ya da süre dolunca timeout() ile —
+// select bu ikisini birbirini dışlar kılar, aynı anda ikisi de çalışmaz.
 type timeoutWriter struct {
 	http.ResponseWriter
-	mu          sync.Mutex
-	wroteHeader bool
-	timedOut    bool
+	mu       sync.Mutex
+	header   http.Header // handler'ın Header() ile gördüğü özel kopya
+	buf      bytes.Buffer
+	status   int
+	wrote    bool // handler en az bir WriteHeader/Write yaptı mı
+	timedOut bool
+}
+
+func newTimeoutWriter(w http.ResponseWriter) *timeoutWriter {
+	return &timeoutWriter{ResponseWriter: w, header: make(http.Header)}
+}
+
+// Header, yalnız handler goroutine'i tarafından çağrılır (zaman aşımı yolu
+// kendi ayrı hata yanıtını doğrudan gerçek writer'a yazar, bu map'e hiç
+// dokunmaz) — kilit gerekmez.
+func (tw *timeoutWriter) Header() http.Header {
+	return tw.header
 }
 
 func (tw *timeoutWriter) WriteHeader(code int) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
-	if tw.wroteHeader {
+	if tw.timedOut || tw.wrote {
 		return
 	}
-	tw.wroteHeader = true
-	tw.ResponseWriter.WriteHeader(code)
+	tw.wrote = true
+	tw.status = code
 }
 
 func (tw *timeoutWriter) Write(b []byte) (int, error) {
 	tw.mu.Lock()
+	defer tw.mu.Unlock()
 	if tw.timedOut {
-		tw.mu.Unlock()
 		return len(b), nil // istemciye zaten 503 gitti; handler'ın gövdesi yutulur
 	}
-	if !tw.wroteHeader {
-		tw.wroteHeader = true
-		tw.ResponseWriter.WriteHeader(http.StatusOK)
+	if !tw.wrote {
+		tw.wrote = true
+		tw.status = http.StatusOK
 	}
-	tw.mu.Unlock()
-	return tw.ResponseWriter.Write(b)
+	return tw.buf.Write(b)
 }
 
-// timeout, süre dolduğunda çağrılır. Handler zaten yazmaya başladıysa
-// (wroteHeader == true) dokunmaz — yarış kaybedilmiştir, gövde karışmasın.
+// flush, handler süre dolmadan bitince (done kanalı kapanınca) biriktirilen
+// header/gövdeyi gerçek writer'a aktarır.
+func (tw *timeoutWriter) flush() {
+	tw.mu.Lock()
+	timedOut := tw.timedOut
+	status := tw.status
+	tw.mu.Unlock()
+	if timedOut {
+		return // yarış: timeout() zaten kazandı (pratikte olmaz, savunma amaçlı)
+	}
+	if status == 0 {
+		status = http.StatusOK
+	}
+	dst := tw.ResponseWriter.Header()
+	for k, v := range tw.header {
+		dst[k] = v
+	}
+	tw.ResponseWriter.WriteHeader(status)
+	tw.ResponseWriter.Write(tw.buf.Bytes())
+}
+
+// timeout, süre dolduğunda çağrılır. Handler'ın biriktirdiği gövdeyi (varsa)
+// atar ve gerçek writer'a doğrudan 503 JSON yazar.
 func (tw *timeoutWriter) timeout() {
 	tw.mu.Lock()
-	if tw.wroteHeader {
+	if tw.timedOut {
 		tw.mu.Unlock()
 		return
 	}
-	tw.wroteHeader = true
 	tw.timedOut = true
 	tw.mu.Unlock()
 	writeError(tw.ResponseWriter, http.StatusServiceUnavailable, "timeout")

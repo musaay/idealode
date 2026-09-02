@@ -24,6 +24,17 @@ var knownSourceTypes = map[string]bool{
 // maxQueryRunes, q parametresinin kırpıldığı üst sınır.
 const maxQueryRunes = 200
 
+// logHata, beklenmeyen store hatalarını loglar. Zaman aşımı sonrası
+// context'in iptal olması (r.Context().Err() != nil) handler için de normal
+// bir hata yolu üretir — bu durumda tekrar loglamak yalnız gürültüdür,
+// istemciye zaten timeoutWriter üzerinden 503 gitmiştir.
+func logHata(r *http.Request, err error) {
+	if r.Context().Err() != nil {
+		return
+	}
+	log.Printf("hata: %s %s: %v", r.Method, r.URL.Path, err)
+}
+
 // handleHealth, `GET /healthz`.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -53,7 +64,7 @@ func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 	})
 	if err != nil {
-		log.Printf("hata: %s %s: %v", r.Method, r.URL.Path, err)
+		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -77,7 +88,7 @@ func (s *Server) handleGetIdea(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		log.Printf("hata: %s %s: %v", r.Method, r.URL.Path, err)
+		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -99,14 +110,14 @@ func (s *Server) handleIdeaSources(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		log.Printf("hata: %s %s: %v", r.Method, r.URL.Path, err)
+		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
 	sources, err := s.ideas.IdeaSources(r.Context(), id)
 	if err != nil {
-		log.Printf("hata: %s %s: %v", r.Method, r.URL.Path, err)
+		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
