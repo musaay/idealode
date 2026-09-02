@@ -97,13 +97,13 @@ func TestCoherenceIndicesFlexibleFormats(t *testing.T) {
 		n    int
 		want []int
 	}{
-		{`{"indices":[0,1,3]}`, 8, []int{0, 1, 3}},          // düzgün format
-		{`{"indices":["013"]}`, 8, []int{0, 1, 3}},          // bitişik string (gpt-oss'un döndüğü)
-		{`{"indices":["0,2,5"]}`, 8, []int{0, 2, 5}},        // virgüllü string
-		{`{"indices":["2"]}`, 8, []int{2}},                  // sayı-string
-		{`{"indices":[13567]}`, 8, []int{1, 3, 5, 6, 7}},    // bitişik SAYI (gpt-oss'un döndüğü)
-		{`{"indices":[7,9,-1,7]}`, 8, []int{7}},             // negatif + tekrar elenir; 9 tek hane, atlanır
-		{`{"indices":[]}`, 8, nil},                          // boş
+		{`{"indices":[0,1,3]}`, 8, []int{0, 1, 3}},       // düzgün format
+		{`{"indices":["013"]}`, 8, []int{0, 1, 3}},       // bitişik string (gpt-oss'un döndüğü)
+		{`{"indices":["0,2,5"]}`, 8, []int{0, 2, 5}},     // virgüllü string
+		{`{"indices":["2"]}`, 8, []int{2}},               // sayı-string
+		{`{"indices":[13567]}`, 8, []int{1, 3, 5, 6, 7}}, // bitişik SAYI (gpt-oss'un döndüğü)
+		{`{"indices":[7,9,-1,7]}`, 8, []int{7}},          // negatif + tekrar elenir; 9 tek hane, atlanır
+		{`{"indices":[]}`, 8, nil},                       // boş
 	}
 	for _, c := range cases {
 		got, err := coherenceIndices(c.raw, c.n)

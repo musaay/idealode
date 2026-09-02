@@ -19,13 +19,13 @@ func TestStackExchangeFetchNew(t *testing.T) {
 			"has_more": false,
 			"items": []map[string]any{
 				{
-					"question_id": 7001,
-					"title":       "Tool to convert &quot;X&quot; to Y?",
-					"body":        "<p>I need a <b>free</b> tool that converts X to Y.</p>",
-					"link":        "https://softwarerecs.stackexchange.com/q/7001",
-					"score":       3,
+					"question_id":   7001,
+					"title":         "Tool to convert &quot;X&quot; to Y?",
+					"body":          "<p>I need a <b>free</b> tool that converts X to Y.</p>",
+					"link":          "https://softwarerecs.stackexchange.com/q/7001",
+					"score":         3,
 					"creation_date": 1700000500,
-					"owner":       map[string]any{"display_name": "carol"},
+					"owner":         map[string]any{"display_name": "carol"},
 				},
 			},
 		})
