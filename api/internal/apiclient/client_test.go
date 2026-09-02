@@ -332,8 +332,8 @@ func TestSessionHeaderSentFromContext(t *testing.T) {
 
 func TestListChatHappyPathAndNeverNil(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusOK,
-		`{"messages":[{"id":"m1","role":"user","message":"Selam","created_at":"2026-09-02T10:00:00Z"},`+
-			`{"id":"m2","role":"assistant","message":"Merhaba","created_at":"2026-09-02T10:00:05Z"}]}`))
+		`{"messages":[{"id":101,"role":"user","message":"Selam","created_at":"2026-09-02T10:00:00Z"},`+
+			`{"id":102,"role":"assistant","message":"Merhaba","created_at":"2026-09-02T10:00:05Z"}]}`))
 
 	msgs, err := c.ListChat(context.Background(), 1)
 	if err != nil {
@@ -362,7 +362,7 @@ func TestSendChatSendsBodyAndParsesReply(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody, gotType = string(b), r.Header.Get("Content-Type")
 		jsonHandler(http.StatusOK,
-			`{"reply":{"id":"m9","role":"assistant","message":"Cevap","created_at":"2026-09-02T11:00:00Z"},`+
+			`{"reply":{"id":109,"role":"assistant","message":"Cevap","created_at":"2026-09-02T11:00:00Z"},`+
 				`"suggestions":["a","b"]}`)(w, r)
 	})
 
