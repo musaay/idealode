@@ -8,6 +8,7 @@
 //	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
 //	run         ingest -> analyze -> synthesize sırayla
+//	serve       web arayüzünü sunar (galeri + kart detayı, salt okunur)
 //	dump        idea card'ları JSON olarak stdout'a dök
 package main
 
@@ -24,6 +25,7 @@ import (
 	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/pipeline"
 	"github.com/musaay/idealode/api/internal/store"
+	"github.com/musaay/idealode/api/internal/web"
 )
 
 const usageText = `idealode — çok kaynaklı yazılım fikri öneri pipeline'ı
@@ -37,6 +39,7 @@ Komutlar:
   seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
   run         ingest -> analyze -> synthesize -> fuse -> seeds sırayla çalıştırır
+  serve       web arayüzünü sunar (galeri + kart detayı); PORT, varsayılan 8080
   dump        idea card'ları JSON olarak stdout'a döker
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
 
@@ -57,7 +60,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "serve", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -129,6 +132,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
+	case "serve":
+		return cmdServe(ctx, cfg)
 	case "dump":
 		return cmdDump(ctx, cfg)
 	case "migrate":
@@ -236,6 +241,23 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	}
 	log.Printf("seeds tamam: %d yeni idea", n)
 	return nil
+}
+
+// cmdServe, salt okunur web arayüzünü ayağa kaldırır (#21). Pipeline
+// çalıştırmaz; Railway'de `run` cron servisinden ayrı bir servis olarak
+// koşar. Adres PORT ortam değişkeninden okunur (varsayılan 8080).
+func cmdServe(ctx context.Context, cfg *config.Config) error {
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	return web.NewServer(st).ListenAndServe(ctx, ":"+port)
 }
 
 func cmdGenerate(ctx context.Context, cfg *config.Config) error {

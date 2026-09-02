@@ -62,9 +62,11 @@ README.md                                serve komutu + env
 Aşağıdaki görünüm modeli asgari çerçevedir; ui-developer referans tasarıma
 bakarak boşlukları kendi doldurur — bileşen ekler, yerleşimi değiştirir,
 boş/hata durumlarını tasarlar. Her şeyin hazır verilmesini beklemez.
-Değişmez sınırlar: veri uydurulmaz (yazar, oy, pazar büyüklüğü, öncelik gibi
-DB'de olmayan alan gösterilmez), alıntı birebir kalır, kaynak linki gerçek
-URL'dir. Bu sınırlar dışındaki tasarım kararları raporda "tasarım kararı"
+Bu yetki BOŞLUKLAR içindir, genel temayı değiştirmek için değil: renk paleti,
+tipografi, kart yapısı, yerleşim, spacing ve köşe ölçeği referans tasarımdan
+birebir alınır; kişisel tercih uygulanmaz. Değişmez sınırlar: veri uydurulmaz
+(yazar, oy, pazar büyüklüğü, öncelik gibi DB'de olmayan alan gösterilmez),
+alıntı birebir kalır, kaynak linki gerçek URL'dir. Bu sınırlar dışındaki tasarım kararları raporda "tasarım kararı"
 başlığıyla listelenir; lead onaylamazsa geri alınır.
 
 ## Görünüm modeli (asgari)

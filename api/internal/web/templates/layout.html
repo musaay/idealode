@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="{{ .Lang }}" data-theme="{{ .Theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="{{ .T "app.description" }}">
+<title>{{ .Title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700;800&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/app.css?v={{ .AssetVer }}">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<a class="skip-link" href="#main">{{ .T "skip.content" }}</a>
+
+{{/* ---------- masaüstü sol nav (>= 768px) ---------- */}}
+<aside class="sidenav" aria-label="{{ .T "nav.label" }}">
+  <div class="sidenav-top">
+    <a class="brand" href="/" aria-label="{{ .T "nav.home" }}">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" focusable="false">
+          <path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" fill="currentColor"/>
+          <path d="M3 12.2 12 16.7l9-4.5M3 16.7 12 21.2l9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">{{ .T "app.name" }}</span>
+        <span class="brand-tagline">{{ .T "app.tagline" }}</span>
+      </span>
+    </a>
+
+    <nav class="sidenav-links" aria-label="{{ .T "nav.sections" }}">
+      <a class="navlink{{ if .OnGallery }} is-active{{ end }}" href="/"
+         {{ if .OnGallery }}aria-current="page"{{ end }}>
+        <span class="navlink-label">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>{{ .T "nav.gallery" }}</span>
+        </span>
+        {{ if .NavCount }}<span class="navlink-count">{{ .NavCount }}</span>{{ end }}
+      </a>
+    </nav>
+  </div>
+
+  <div class="sidenav-bottom">
+    <div class="pref-row">
+      <span class="pref-label" id="lang-label-desktop">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 6h11M8.5 4v2c0 4.5-2 7.5-5.5 9M6 10.5c1.6 3 4 4.8 6.5 5.6M13.5 20l4-9 4 9M15 17.2h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>{{ .T "lang.label" }}</span>
+      </span>
+      <span class="switch" role="group" aria-labelledby="lang-label-desktop">
+        <a class="switch-option{{ if eq .Lang "tr" }} is-active{{ end }}" href="{{ .LangLinkTR }}"
+           lang="tr" aria-label="{{ .T "lang.switch_to_tr" }}"
+           {{ if eq .Lang "tr" }}aria-current="true"{{ end }}>{{ .T "lang.tr" }}</a>
+        <a class="switch-option{{ if eq .Lang "en" }} is-active{{ end }}" href="{{ .LangLinkEN }}"
+           lang="en" aria-label="{{ .T "lang.switch_to_en" }}"
+           {{ if eq .Lang "en" }}aria-current="true"{{ end }}>{{ .T "lang.en" }}</a>
+      </span>
+    </div>
+
+    <a class="theme-toggle theme-toggle-block" id="theme-toggle" href="{{ .ThemeLink }}"
+       data-next-theme="{{ .NextTheme }}"
+       data-label-dark="{{ .T "theme.switch_to_dark" }}" data-label-light="{{ .T "theme.switch_to_light" }}"
+       data-text-dark="{{ .T "theme.dark" }}" data-text-light="{{ .T "theme.light" }}"
+       aria-label="{{ if eq .NextTheme "dark" }}{{ .T "theme.switch_to_dark" }}{{ else }}{{ .T "theme.switch_to_light" }}{{ end }}">
+      <span class="icon-sun" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></g></svg>
+      </span>
+      <span class="icon-moon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><path d="M20 14.4A8.4 8.4 0 0 1 9.6 4a8.4 8.4 0 1 0 10.4 10.4Z" fill="currentColor"/></svg>
+      </span>
+      <span class="theme-toggle-text">{{ if eq .NextTheme "dark" }}{{ .T "theme.dark" }}{{ else }}{{ .T "theme.light" }}{{ end }}</span>
+    </a>
+  </div>
+</aside>
+
+{{/* ---------- mobil üst header (< 768px) ---------- */}}
+<header class="mobile-header">
+  <div class="mobile-header-left">
+    {{ if .ShowBack }}
+    <a class="icon-button" href="/" aria-label="{{ .T "idea.back" }}">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    {{ else }}
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="18" height="18" focusable="false">
+        <path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" fill="currentColor"/>
+        <path d="M3 12.2 12 16.7l9-4.5M3 16.7 12 21.2l9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    {{ end }}
+    <p class="mobile-title">{{ .MobileTitle }}</p>
+  </div>
+
+  <div class="mobile-header-right">
+    <span class="switch switch-sm" role="group" aria-label="{{ .T "lang.label" }}">
+      <a class="switch-option{{ if eq .Lang "tr" }} is-active{{ end }}" href="{{ .LangLinkTR }}"
+         lang="tr" aria-label="{{ .T "lang.switch_to_tr" }}"
+         {{ if eq .Lang "tr" }}aria-current="true"{{ end }}>{{ .T "lang.tr" }}</a>
+      <a class="switch-option{{ if eq .Lang "en" }} is-active{{ end }}" href="{{ .LangLinkEN }}"
+         lang="en" aria-label="{{ .T "lang.switch_to_en" }}"
+         {{ if eq .Lang "en" }}aria-current="true"{{ end }}>{{ .T "lang.en" }}</a>
+    </span>
+
+    <a class="icon-button theme-toggle" id="theme-toggle-mobile" href="{{ .ThemeLink }}"
+       data-next-theme="{{ .NextTheme }}"
+       data-label-dark="{{ .T "theme.switch_to_dark" }}" data-label-light="{{ .T "theme.switch_to_light" }}"
+       aria-label="{{ if eq .NextTheme "dark" }}{{ .T "theme.switch_to_dark" }}{{ else }}{{ .T "theme.switch_to_light" }}{{ end }}">
+      <span class="icon-sun" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></g></svg>
+      </span>
+      <span class="icon-moon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><path d="M20 14.4A8.4 8.4 0 0 1 9.6 4a8.4 8.4 0 1 0 10.4 10.4Z" fill="currentColor"/></svg>
+      </span>
+    </a>
+  </div>
+</header>
+
+{{/* ---------- ana bölge ---------- */}}
+<div class="layout">
+  <header class="topbar">
+    <nav class="breadcrumb" aria-label="{{ .T "nav.breadcrumb" }}">
+      <a class="crumb{{ if .OnGallery }} is-active{{ end }}" href="/"
+         {{ if .OnGallery }}aria-current="page"{{ end }}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span>{{ .T "nav.gallery" }}</span>
+      </a>
+      {{ if .Breadcrumb }}
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span class="crumb crumb-current" aria-current="page">{{ .Breadcrumb }}</span>
+      {{ end }}
+    </nav>
+  </header>
+
+  <main id="main" class="site-main">
+    <div class="content">
+{{ template "content" . }}
+    </div>
+
+    <footer class="site-footer">
+      <p>{{ .T "footer.note" }}</p>
+    </footer>
+  </main>
+</div>
+
+{{/* ---------- mobil alt nav (< 768px) ---------- */}}
+<nav class="mobile-nav" aria-label="{{ .T "nav.label" }}">
+  <a class="mobile-nav-item{{ if .OnGallery }} is-active{{ end }}" href="/"
+     {{ if .OnGallery }}aria-current="page"{{ end }}>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    <span>{{ .T "nav.gallery" }}</span>
+  </a>
+</nav>
+
+<script src="/static/app.js?v={{ .AssetVer }}" defer></script>
+</body>
+</html>

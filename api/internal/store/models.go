@@ -48,19 +48,30 @@ type Theme struct {
 
 // Idea, paylaşılan idea card "tohumu".
 type Idea struct {
-	ID                      int64      `json:"id"`
-	Title                   string     `json:"title"`
-	ProblemStatement        string     `json:"problem_statement"`
-	ProposedSolution        string     `json:"proposed_solution"`
-	TargetUser              string     `json:"target_user"`
-	EvidenceCount           int        `json:"evidence_count"`
-	ExampleQuotes           []string   `json:"example_quotes"` // orijinal dil (EN)
-	SourceType              string     `json:"source_type"`
-	SourceThemeID           *int64     `json:"source_theme_id,omitempty"`
-	UrgencyScore            int        `json:"urgency_score"`       // 1-5
-	MonetizationSignal      int        `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
-	KnownCompetitorsAIGuess string     `json:"known_competitors_ai_guess,omitempty"`
-	DomainTags              []string   `json:"domain_tags"`
-	SourceTheme             string     `json:"source_theme,omitempty"` // tema adı (dump görünümü)
-	CreatedAt               time.Time  `json:"created_at"`
+	ID                      int64     `json:"id"`
+	Title                   string    `json:"title"`
+	ProblemStatement        string    `json:"problem_statement"`
+	ProposedSolution        string    `json:"proposed_solution"`
+	TargetUser              string    `json:"target_user"`
+	EvidenceCount           int       `json:"evidence_count"`
+	ExampleQuotes           []string  `json:"example_quotes"` // orijinal dil (EN)
+	SourceType              string    `json:"source_type"`
+	SourceThemeID           *int64    `json:"source_theme_id,omitempty"`
+	UrgencyScore            int       `json:"urgency_score"`       // 1-5
+	MonetizationSignal      int       `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
+	KnownCompetitorsAIGuess string    `json:"known_competitors_ai_guess,omitempty"`
+	DomainTags              []string  `json:"domain_tags"`
+	LocalEvidence           []string  `json:"local_evidence"`         // füzyonla eşleşen yerel talep satırları (#43)
+	SourceTheme             string    `json:"source_theme,omitempty"` // tema adı (dump görünümü)
+	CreatedAt               time.Time `json:"created_at"`
+}
+
+// IdeaSource, bir kartın arkasındaki kaynak gönderinin gösterime yetecek
+// alanları (web kaynak listesi). Yazar/skor gibi alanlar bilinçli olarak
+// taşınmaz — arayüzde gösterilmez.
+type IdeaSource struct {
+	Platform  string
+	Community string
+	URL       string
+	CreatedAt time.Time
 }
