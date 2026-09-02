@@ -38,6 +38,9 @@ var migration009 string
 //go:embed migrate_sql/010_anon_chat.sql
 var migration010 string
 
+//go:embed migrate_sql/011_archive_ideas.sql
+var migration011 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -88,6 +91,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration010); err != nil {
 		return fmt.Errorf("010_anon_chat.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration011); err != nil {
+		return fmt.Errorf("011_archive_ideas.sql: %w", err)
 	}
 	return nil
 }

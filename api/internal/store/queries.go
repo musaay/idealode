@@ -538,6 +538,7 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		  AND ($2 = '' OR i.title ILIKE $2 OR i.problem_statement ILIKE $2
 		       OR i.proposed_solution ILIKE $2)
 		  AND (i.source_type <> 'ai_blended' OR i.created_by_session_id = $4)
+		  AND i.archived_at IS NULL
 		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT $3`
 
@@ -573,10 +574,12 @@ func escapeLike(s string) string {
 
 // GetIdea, tek kartı döner; kayıt yoksa ErrNotFound. Görünürlük kuralı:
 // başkasının ai_blended kartı da ErrNotFound döner (var olduğu sızdırılmaz,
-// 404 — bkz. spec kabul kriteri 4).
+// 404 — bkz. spec kabul kriteri 4). Arşivlenmiş kart (archived_at doluysa)
+// da aynı şekilde ErrNotFound döner — galeriden kaldırılan kart erişilemez
+// olmalı (#74).
 func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error) {
 	var i Idea
-	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1`, id), &i)
+	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1 AND i.archived_at IS NULL`, id), &i)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}

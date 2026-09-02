@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 )
@@ -81,6 +82,67 @@ func TestUnanalyzedPostsExcludesRadarSeed(t *testing.T) {
 	}
 	if !found {
 		t.Error("normal post analiz kuyruğunda görünmeli")
+	}
+}
+
+// TestArchivedIdeaHidden, arşivlenmiş (archived_at dolu) kartın galeri
+// listesinde görünmediğini ve GetIdea ile ErrNotFound döndüğünü doğrular;
+// arşivsiz kart etkilenmemeli (#74).
+func TestArchivedIdeaHidden(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	active, err := s.InsertIdea(ctx, Idea{
+		Title:            "test-archive-active",
+		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
+		SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("active insert: %v", err)
+	}
+	archived, err := s.InsertIdea(ctx, Idea{
+		Title:            "test-archive-archived",
+		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
+		SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("archived insert: %v", err)
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id IN ($1, $2)", active, archived)
+	})
+
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET archived_at = now() WHERE id = $1", archived); err != nil {
+		t.Fatalf("archive update: %v", err)
+	}
+
+	// Liste: arşivli kart yok, arşivsiz kart var.
+	out, err := s.ListIdeasFiltered(ctx, IdeaFilter{Limit: 200})
+	if err != nil {
+		t.Fatalf("ListIdeasFiltered: %v", err)
+	}
+	var sawActive, sawArchived bool
+	for _, i := range out {
+		if i.ID == active {
+			sawActive = true
+		}
+		if i.ID == archived {
+			sawArchived = true
+		}
+	}
+	if !sawActive {
+		t.Error("arşivsiz kart listede görünmeli")
+	}
+	if sawArchived {
+		t.Error("arşivli kart listede görünmemeli")
+	}
+
+	// Detay: arşivsiz 200, arşivli ErrNotFound.
+	if _, err := s.GetIdea(ctx, active, ""); err != nil {
+		t.Errorf("GetIdea(arşivsiz): beklenmeyen hata: %v", err)
+	}
+	if _, err := s.GetIdea(ctx, archived, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetIdea(arşivli): ErrNotFound bekleniyordu, alınan: %v", err)
 	}
 }
 
