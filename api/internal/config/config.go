@@ -65,10 +65,6 @@ func Load() (*Config, error) {
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 	}
 
-	if c.DatabaseURL == "" {
-		return nil, fmt.Errorf("zorunlu ortam değişkeni eksik: DATABASE_URL")
-	}
-
 	var err error
 	if c.MinThemeEvidence, err = getenvInt("MIN_THEME_EVIDENCE", 3); err != nil {
 		return nil, err
@@ -93,6 +89,17 @@ func Load() (*Config, error) {
 func (c *Config) RequireGroq() error {
 	if c.GroqAPIKey == "" {
 		return fmt.Errorf("bu komut LLM kullanır; zorunlu ortam değişkeni eksik: GROQ_API_KEY")
+	}
+	return nil
+}
+
+// RequireDatabaseURL, doğrudan DB'ye bağlanan subcommand'ların (ingest,
+// analyze, synthesize, fuse, seeds, run, migrate, dump, api) başında
+// çağrılır. `serve` DB'ye bağlanmaz (#18 — API_BASE_URL üzerinden okur),
+// bu yüzden Load() DATABASE_URL'i artık zorunlu kılmaz.
+func (c *Config) RequireDatabaseURL() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("bu komut veritabanına bağlanır; zorunlu ortam değişkeni eksik: DATABASE_URL")
 	}
 	return nil
 }

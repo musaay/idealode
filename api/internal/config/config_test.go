@@ -25,11 +25,26 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadMissingDatabaseURL(t *testing.T) {
+func TestLoadWithoutDatabaseURL(t *testing.T) {
+	// serve süreci DB'ye bağlanmaz (#18) — DATABASE_URL yokken Load() geçmeli.
 	t.Setenv("DATABASE_URL", "")
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
-		t.Fatalf("DATABASE_URL eksikliği adıyla raporlanmalı, geldi: %v", err)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("DATABASE_URL olmadan Load hata vermemeli: %v", err)
+	}
+	if c.DatabaseURL != "" {
+		t.Errorf("DatabaseURL boş kalmalı, geldi: %q", c.DatabaseURL)
+	}
+}
+
+func TestRequireDatabaseURL(t *testing.T) {
+	c := &Config{}
+	if err := c.RequireDatabaseURL(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Errorf("DATABASE_URL eksikliği adıyla raporlanmalı, geldi: %v", err)
+	}
+	c.DatabaseURL = "postgres://x"
+	if err := c.RequireDatabaseURL(); err != nil {
+		t.Errorf("DatabaseURL varken hata olmamalı: %v", err)
 	}
 }
 
