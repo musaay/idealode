@@ -699,11 +699,12 @@ func TestIdeaShellState(t *testing.T) {
 
 func TestBothThemeTogglesShareState(t *testing.T) {
 	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/?theme=dark").Body.String()
-	if n := strings.Count(body, `class="theme-toggle`); n != 2 {
-		t.Fatalf("tema anahtarı sayısı = %d, 2 bekleniyor (sol nav + mobil header)", n)
+	// Sol nav bloğu + masaüstü üst çubuk pill'i + mobil header ikonu.
+	if n := strings.Count(body, `data-next-theme=`); n != 3 {
+		t.Fatalf("tema anahtarı sayısı = %d, 3 bekleniyor (sol nav + üst çubuk + mobil)", n)
 	}
-	if n := strings.Count(body, `data-next-theme="light"`); n != 2 {
-		t.Errorf("iki anahtar da aynı sonraki temayı göstermiyor (%d)", n)
+	if n := strings.Count(body, `data-next-theme="light"`); n != 3 {
+		t.Errorf("anahtarlar aynı sonraki temayı göstermiyor (%d)", n)
 	}
 }
 
@@ -798,5 +799,120 @@ func TestLocalEvidencePlatformLabelled(t *testing.T) {
 	// Alıntının kendisi değişmez.
 	if !strings.Contains(body, "Uygulama sürekli bildirim atmıyor") {
 		t.Error("yerel talep alıntısı bozuldu")
+	}
+}
+
+// ------------------------------------------------------ üst çubuk kontrolleri
+
+// Referans App.tsx üst çubuk sağı: dil anahtarı + tema düğmesi + Idea Copilot.
+func TestTopbarHasControls(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/").Body.String()
+
+	actions := strings.Index(body, `class="topbar-actions"`)
+	if actions < 0 {
+		t.Fatal("üst çubukta kontrol grubu yok")
+	}
+	topbar := strings.Index(body, `class="topbar"`)
+	if topbar < 0 || topbar > actions {
+		t.Error("kontrol grubu üst çubuğun içinde değil")
+	}
+
+	rest := body[actions:]
+	tr := strings.Index(rest, `>TR<`)
+	theme := strings.Index(rest, `id="theme-toggle-topbar"`)
+	copilot := strings.Index(rest, `class="copilot-button"`)
+	if tr < 0 || theme < 0 || copilot < 0 {
+		t.Fatalf("eksik kontrol: tr=%d theme=%d copilot=%d", tr, theme, copilot)
+	}
+	// Referanstaki sıra: dil, tema, Idea Copilot.
+	if !(tr < theme && theme < copilot) {
+		t.Errorf("kontrol sırası referanstan farklı: tr=%d theme=%d copilot=%d", tr, theme, copilot)
+	}
+
+	// Tema etiketi AKTİF temayı gösterir; varsayılan açık tema.
+	if !strings.Contains(rest, "Aydınlık Mod") {
+		t.Error("tema düğmesi aktif tema etiketini göstermiyor")
+	}
+	// Sohbet henüz yok: düğme gezinmez.
+	if !strings.Contains(rest, `aria-disabled="true"`) {
+		t.Error("Idea Copilot düğmesi pasif olarak işaretlenmemiş")
+	}
+	if strings.Contains(rest[:copilot+400], `href="#"`) {
+		t.Error("Idea Copilot boş bağlantı olarak render edildi")
+	}
+	if !strings.Contains(rest, "Idea Copilot") {
+		t.Error("Idea Copilot etiketi yok")
+	}
+}
+
+func TestTopbarControlsEN(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1?lang=en").Body.String()
+	rest := body[strings.Index(body, `class="topbar-actions"`):]
+
+	if !strings.Contains(rest, "Light Mode") {
+		t.Error("EN tema etiketi yok")
+	}
+	if !strings.Contains(rest, `title="Coming soon"`) {
+		t.Error("EN Idea Copilot ipucu yok")
+	}
+}
+
+// Tema bağlantıları JS'siz de çalışır: her anahtar gerçek ?theme= adresidir.
+func TestThemeLinksWorkWithoutJS(t *testing.T) {
+	h := newTestServer(t, sampleStore())
+	body := do(t, h, http.MethodGet, "/").Body.String()
+	if strings.Count(body, `href="/?theme=dark"`) < 2 {
+		t.Error("tema anahtarları gerçek bağlantı değil")
+	}
+
+	rec := do(t, h, http.MethodGet, "/?theme=dark")
+	if !strings.Contains(rec.Body.String(), `data-theme="dark"`) {
+		t.Error("?theme=dark uygulanmadı")
+	}
+	if !strings.Contains(rec.Body.String(), "Karanlık Mod") {
+		t.Error("koyu temada üst çubuk etiketi güncellenmedi")
+	}
+}
+
+// Referans MobileBottomNav iki sekmelidir: Galeri + Idea Copilot.
+func TestMobileBottomNavHasTwoTabs(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/").Body.String()
+
+	start := strings.Index(body, `class="mobile-nav"`)
+	if start < 0 {
+		t.Fatal("mobil alt nav yok")
+	}
+	nav := body[start:]
+	nav = nav[:strings.Index(nav, "</nav>")]
+
+	if n := strings.Count(nav, "mobile-nav-item"); n != 2 {
+		t.Fatalf("mobil alt nav sekme sayısı = %d, 2 bekleniyor", n)
+	}
+	if !strings.Contains(nav, "Galeri") || !strings.Contains(nav, "Idea Copilot") {
+		t.Error("sekme etiketleri referanstaki gibi değil")
+	}
+	// Galeri önce gelir.
+	if strings.Index(nav, "Galeri") > strings.Index(nav, "Idea Copilot") {
+		t.Error("sekme sırası referanstan farklı")
+	}
+	// Sohbet henüz yok: ikinci sekme gezinmez.
+	if !strings.Contains(nav, `aria-disabled="true"`) {
+		t.Error("Idea Copilot sekmesi pasif işaretlenmemiş")
+	}
+	if strings.Contains(nav, `href="#"`) {
+		t.Error("Idea Copilot sekmesi boş bağlantı olarak render edildi")
+	}
+}
+
+func TestMobileBottomNavCopilotEN(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/?lang=en").Body.String()
+	nav := body[strings.Index(body, `class="mobile-nav"`):]
+	nav = nav[:strings.Index(nav, "</nav>")]
+
+	if !strings.Contains(nav, `title="Coming soon"`) {
+		t.Error("EN ipucu yok")
+	}
+	if !strings.Contains(nav, "Gallery") {
+		t.Error("EN galeri etiketi yok")
 	}
 }

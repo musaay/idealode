@@ -131,6 +131,39 @@
       <span class="crumb crumb-current" aria-current="page">{{ .Breadcrumb }}</span>
       {{ end }}
     </nav>
+
+    {{/* referans App.tsx üst çubuk sağı: dil anahtarı + tema + Idea Copilot */}}
+    <div class="topbar-actions">
+      <span class="switch" role="group" aria-label="{{ .T "lang.label" }}">
+        <a class="switch-option{{ if eq .Lang "tr" }} is-active{{ end }}" href="{{ .LangLinkTR }}"
+           lang="tr" aria-label="{{ .T "lang.switch_to_tr" }}"
+           {{ if eq .Lang "tr" }}aria-current="true"{{ end }}>{{ .T "lang.tr" }}</a>
+        <a class="switch-option{{ if eq .Lang "en" }} is-active{{ end }}" href="{{ .LangLinkEN }}"
+           lang="en" aria-label="{{ .T "lang.switch_to_en" }}"
+           {{ if eq .Lang "en" }}aria-current="true"{{ end }}>{{ .T "lang.en" }}</a>
+      </span>
+
+      <a class="theme-toggle theme-toggle-pill" id="theme-toggle-topbar" href="{{ .ThemeLink }}"
+         data-next-theme="{{ .NextTheme }}"
+         data-label-dark="{{ .T "theme.switch_to_dark" }}" data-label-light="{{ .T "theme.switch_to_light" }}"
+         data-mode-light="{{ .T "theme.mode_light" }}" data-mode-dark="{{ .T "theme.mode_dark" }}"
+         aria-label="{{ if eq .NextTheme "dark" }}{{ .T "theme.switch_to_dark" }}{{ else }}{{ .T "theme.switch_to_light" }}{{ end }}">
+        <span class="icon-sun" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></g></svg>
+        </span>
+        <span class="icon-moon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><path d="M20 14.4A8.4 8.4 0 0 1 9.6 4a8.4 8.4 0 1 0 10.4 10.4Z" fill="currentColor"/></svg>
+        </span>
+        {{/* referans: etiket AKTİF temayı gösterir (isLight -> "Aydınlık Mod") */}}
+        <span class="theme-toggle-mode">{{ if eq .NextTheme "dark" }}{{ .T "theme.mode_light" }}{{ else }}{{ .T "theme.mode_dark" }}{{ end }}</span>
+      </a>
+
+      {{/* Sohbet ekranı henüz yok: referanstaki görünüm korunur, tıklama sayfayı değiştirmez. */}}
+      <button class="copilot-button" type="button" aria-disabled="true" title="{{ .T "nav.copilot_soon" }}">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+        <span>{{ .T "nav.copilot" }}</span>
+      </button>
+    </div>
   </header>
 
   <main id="main" class="site-main">
@@ -151,6 +184,16 @@
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     <span>{{ .T "nav.gallery" }}</span>
   </a>
+
+  {{/* referans MobileBottomNav ikinci sekmesi; sohbet gelene kadar gezinmez */}}
+  <button class="mobile-nav-item mobile-nav-copilot" type="button"
+          aria-disabled="true" title="{{ .T "nav.copilot_soon" }}">
+    <span class="mobile-nav-icon">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" fill="currentColor"/></svg>
+      <span class="mobile-nav-dot" aria-hidden="true"></span>
+    </span>
+    <span>{{ .T "nav.copilot" }}</span>
+  </button>
 </nav>
 
 <script src="/static/app.js?v={{ .AssetVer }}" defer></script>
