@@ -52,3 +52,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AngelMatch (Rashid Khasanov) — 125K'lık melek yatırımcı/VC veritabanı, $37.3K/ay (2026-09-01)
 - Magai (Dustin Stout) — 50+ AI modelini tek arayüzde birleştiren platform, $1M ARR / ~$100K MRR (2026-09-01)
 - Meerkats.ai (Santanu Dasgupta) — sohbetten yönetilen AI büyüme/SDR ajanı, 4 haftada $3K MRR (2026-09-01)
+- PostFast (Petar Georgiev) — çoklu platform sosyal medya paylaşım zamanlayıcısı, €5.4K MRR (2026-09-02)
+- Visualizee.ai (Piotr Obidowski) — mimarlar/tasarımcılar için AI foto-gerçekçi render, $8.6K MRR (2026-09-02)
+- Noosa Labs (Pascal Levy-Garboua) — küçük SaaS'ları satın alıp büyüten portföy (Sendtric çapa), $120K MRR (2026-09-02)
+- 1Mind (Amanda Kahlow) — kurumsal satış sürecini yürüten "insan yüzlü" AI ajanları, 18 ayda $6M gelir (2026-09-02)
