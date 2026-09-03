@@ -1815,13 +1815,15 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   }
 
   .idea-rail {
-    /* referans: lg:w-84 (336px), sticky top-20, h-[580px] */
+    /* kullanıcı kararı: sol içerikten bağımsız, tam ekran yükseklikli panel
+       (referanstaki sabit 580px'ten bilinçli sapma) */
     flex: 0 0 336px;
     width: 336px;
     position: sticky;
     top: calc(var(--topbar-h) + var(--space-4));
-    height: 580px;
+    height: calc(100vh - var(--topbar-h) - (var(--space-4) * 2));
     min-height: 500px;
+    max-height: 860px;
   }
 }
 
