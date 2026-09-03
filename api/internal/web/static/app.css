@@ -175,10 +175,9 @@
      mikro-gradyan, düz yüzey rengi üzerinde. */
   :root:not([data-theme="light"]) .chat-panel {
     background: var(--color-bar-grad), var(--color-surface);
-    /* "AI aktif" hissi: Copilot'un kendi moru, ince parlayan kenarlık */
-    border-color: rgba(196, 136, 255, 0.35);
-    box-shadow: 0 0 0 1px rgba(196, 136, 255, 0.12),
-      0 0 28px rgba(196, 136, 255, 0.22), 0 0 64px rgba(196, 136, 255, 0.1);
+    /* "AI aktif" hissi: sol nav'ın kendi çizgisi gibi net, tek bir kenarlık —
+       soluk glow değil, belirgin mor bir hat. */
+    border: 1.5px solid rgba(196, 136, 255, 0.6);
   }
 
   /* Kullanıcı balonu: dolgu yeşil yerine nötr kart + yeşil kenarlık —
@@ -325,9 +324,7 @@
    mikro-gradyan, düz yüzey rengi üzerinde. */
 :root[data-theme="dark"] .chat-panel {
   background: var(--color-bar-grad), var(--color-surface);
-  border-color: rgba(196, 136, 255, 0.35);
-  box-shadow: 0 0 0 1px rgba(196, 136, 255, 0.12),
-    0 0 28px rgba(196, 136, 255, 0.22), 0 0 64px rgba(196, 136, 255, 0.1);
+  border: 1.5px solid rgba(196, 136, 255, 0.6);
 }
 
 :root[data-theme="dark"] .chat-msg.is-user .chat-bubble {
