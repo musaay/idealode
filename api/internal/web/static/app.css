@@ -90,38 +90,60 @@
 /* --- koyu tema: sistem tercihi (kullanıcı açık temayı seçmediyse) --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-bg: #022c22;
-    --color-surface: #04382b;
-    --color-surface-2: #064e3b;
-    --color-nav-bg: #022c22;
-    --color-bar-bg: rgba(2, 44, 34, 0.92);
-    --color-text: #ffffff;
-    --color-text-body: #dbe6df;
-    --color-text-muted: #bbcabf;
-    --color-border: rgba(187, 202, 191, 0.18);
-    --color-border-strong: rgba(187, 202, 191, 0.34);
+    --color-bg: #0a0d0b;
+    --color-surface: #141815;
+    --color-surface-2: #1a1f1c;
+    --color-nav-bg: #0c0f0d;
+    --color-bar-bg: rgba(20, 24, 21, 0.92);
+    /* Referansın imza yönü/renk sırası (--color-accent-line) zemine taşınır:
+       neredeyse siyah taban üzerinde soldan sağa çok düşük opaklıklı geçiş. */
+    --color-bg-grad: linear-gradient(90deg,
+        rgba(16, 185, 129, 0.22) 0%, rgba(13, 148, 136, 0.06) 45%,
+        rgba(196, 136, 255, 0.11) 100%);
+    --color-bar-grad: linear-gradient(90deg,
+        rgba(16, 185, 129, 0.2) 0%, rgba(13, 148, 136, 0.06) 48%,
+        rgba(196, 136, 255, 0.14) 100%);
+    --color-text: #f7f8f5;
+    --color-text-body: #f4f4f2;
+    --color-text-muted: #9aa39c;
+    --color-border: rgba(255, 255, 255, 0.09);
+    --color-border-strong: rgba(255, 255, 255, 0.22);
+    /* CTA yeşili tek sabit nokta: koyu temada yalnız birincil eylem yeşildir. */
     --color-primary: #6ffbbe;
     --color-primary-strong: #9dffd6;
     --color-on-primary: #002113;
     --color-brand: #6ffbbe;
-    --color-focus: #6ffbbe;
+    /* Odak halkası / aktif nav: yeşilden krem tonuna. */
+    --color-focus: #f4ede0;
+    --color-nav-active-fg: #f4ede0;
+    --color-nav-active-bg: rgba(244, 237, 224, 0.1);
+    /* Üst çubuktaki mevcut sayfa kırıntısı: rozet paletine değil, nötr
+       yüzey + muted metne bağlanır (rozet gibi okunmasın). */
+    --color-crumb-current-bg: var(--color-surface-2);
+    --color-crumb-current-fg: var(--color-text-muted);
+    --color-crumb-current-bd: var(--color-border-strong);
+    /* Bağlantı rengi: CTA yeşili değil, nötr okunur ton. */
+    --color-link: #dfe0dd;
+    --color-link-strong: #f4f4f2;
     --color-card-grad: linear-gradient(135deg,
-        rgba(6, 78, 59, 0.85), rgba(2, 44, 34, 0.95) 55%, #011a14);
-    --color-accent-line: linear-gradient(90deg, #10b981, #0d9488 55%, #c488ff);
+        rgba(34, 40, 36, 0.92), rgba(20, 24, 21, 0.96) 55%, #101311);
+    --color-accent-line: linear-gradient(90deg, #c488ff, #fbbf24 55%, #f4ede0);
     --color-icon-sun: #fbbf24;
-    --color-icon-moon: #6ffbbe;
+    --color-icon-moon: #f4ede0;
     --color-copilot-bg: rgba(196, 136, 255, 0.15);
     --color-copilot-bg-hover: rgba(196, 136, 255, 0.25);
     --color-copilot-fg: #c488ff;
     --color-copilot-bd: rgba(196, 136, 255, 0.3);
-    --color-dot: #10b981;
+    /* Bildirim noktası: yeşilden amber'e. */
+    --color-dot: #fbbf24;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-    --badge-pain-bg: rgba(16, 185, 129, 0.16);
-    --badge-pain-fg: #6ffbbe;
-    --badge-pain-bd: rgba(16, 185, 129, 0.38);
+    /* "Ağrı Noktası" rozeti: yeşilden soğuk camgöbeğine. */
+    --badge-pain-bg: rgba(56, 189, 248, 0.14);
+    --badge-pain-fg: #7dd3fc;
+    --badge-pain-bd: rgba(56, 189, 248, 0.35);
     --badge-market-bg: rgba(245, 158, 11, 0.16);
     --badge-market-fg: #fcd34d;
     --badge-market-bd: rgba(245, 158, 11, 0.38);
@@ -129,45 +151,131 @@
     --badge-ai-fg: #dcbcff;
     --badge-ai-bd: rgba(196, 136, 255, 0.38);
     --badge-neutral-bg: rgba(255, 255, 255, 0.07);
-    --badge-neutral-fg: #d3ded7;
-    --badge-neutral-bd: rgba(187, 202, 191, 0.22);
+    --badge-neutral-fg: #d7dbd6;
+    --badge-neutral-bd: rgba(255, 255, 255, 0.2);
+  }
+
+  :root:not([data-theme="light"]) body {
+    background: var(--color-bg-grad) fixed, var(--color-bg);
+  }
+
+  :root:not([data-theme="light"]) .topbar,
+  :root:not([data-theme="light"]) .mobile-header,
+  :root:not([data-theme="light"]) .mobile-nav {
+    background: var(--color-bar-grad), var(--color-bar-bg);
+  }
+
+  :root:not([data-theme="light"]) .sidenav {
+    /* Gradyan viewport'a sabitlenir: sol ray ile içerik zemini arasında
+       renk sırası kesintisiz sürer, sınırda dikiş görünmez. */
+    background: var(--color-bg-grad) fixed, var(--color-nav-bg);
+  }
+
+  /* Aktif nav pill (sol ray, mobil alt nav, üst çubuk kırıntısı): yeşil
+     dolgu yerine krem metin + çok düşük opaklıklı krem zemin. */
+  :root:not([data-theme="light"]) .navlink.is-active,
+  :root:not([data-theme="light"]) .mobile-nav-item.is-active,
+  :root:not([data-theme="light"]) .crumb.is-active {
+    background: var(--color-nav-active-bg);
+    color: var(--color-nav-active-fg);
+  }
+
+  /* Odak göstergesi rolündeki kenarlıklar da krem tona bağlanır (yalnız
+     odak; :hover kenarlığı CTA yeşilinde kalır). */
+  :root:not([data-theme="light"]) .search-input:focus-visible,
+  :root:not([data-theme="light"]) .card:has(.card-link:focus-visible) {
+    border-color: var(--color-focus);
+  }
+
+  /* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
+     yerine krem metin + çok düşük opaklıklı krem zemin. */
+  :root:not([data-theme="light"]) .switch-option.is-active,
+  :root:not([data-theme="light"]) .chip.is-active:not(.chip-market_derived):not(.chip-ai_blended) {
+    background: var(--color-nav-active-bg);
+    color: var(--color-nav-active-fg);
+  }
+
+  /* Mevcut sayfa kırıntısı rozet paletinden ayrılır. */
+  :root:not([data-theme="light"]) .crumb-current {
+    background: var(--color-crumb-current-bg);
+    color: var(--color-crumb-current-fg);
+    border-color: var(--color-crumb-current-bd);
+  }
+
+  /* Bağlantılar CTA gibi bağırmaz; nötr okunur tonda. */
+  :root:not([data-theme="light"]) a:not([class]),
+  :root:not([data-theme="light"]) .card-link,
+  :root:not([data-theme="light"]) .source-link {
+    color: var(--color-link);
+  }
+
+  :root:not([data-theme="light"]) .card-link:hover,
+  :root:not([data-theme="light"]) .chat-chip:hover {
+    color: var(--color-link-strong);
+  }
+
+  /* Alıntı kenarlığı dekoratif: CTA yeşili yerine nötr kenarlık. */
+  :root:not([data-theme="light"]) .quote {
+    border-left-color: var(--color-border-strong);
   }
 }
 
 /* --- koyu tema: kullanıcı seçimi (sistem tercihini ezer) --- */
 :root[data-theme="dark"] {
-  --color-bg: #022c22;
-  --color-surface: #04382b;
-  --color-surface-2: #064e3b;
-  --color-nav-bg: #022c22;
-  --color-bar-bg: rgba(2, 44, 34, 0.92);
-  --color-text: #ffffff;
-  --color-text-body: #dbe6df;
-  --color-text-muted: #bbcabf;
-  --color-border: rgba(187, 202, 191, 0.18);
-  --color-border-strong: rgba(187, 202, 191, 0.34);
+  --color-bg: #0a0d0b;
+  --color-surface: #141815;
+  --color-surface-2: #1a1f1c;
+  --color-nav-bg: #0c0f0d;
+  --color-bar-bg: rgba(20, 24, 21, 0.92);
+  /* Referansın imza yönü/renk sırası (--color-accent-line) zemine taşınır:
+     neredeyse siyah taban üzerinde soldan sağa çok düşük opaklıklı geçiş. */
+  --color-bg-grad: linear-gradient(90deg,
+      rgba(16, 185, 129, 0.22) 0%, rgba(13, 148, 136, 0.06) 45%,
+      rgba(196, 136, 255, 0.11) 100%);
+  --color-bar-grad: linear-gradient(90deg,
+      rgba(16, 185, 129, 0.2) 0%, rgba(13, 148, 136, 0.06) 48%,
+      rgba(196, 136, 255, 0.14) 100%);
+  --color-text: #f7f8f5;
+  --color-text-body: #f4f4f2;
+  --color-text-muted: #9aa39c;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.22);
+  /* CTA yeşili tek sabit nokta: koyu temada yalnız birincil eylem yeşildir. */
   --color-primary: #6ffbbe;
   --color-primary-strong: #9dffd6;
   --color-on-primary: #002113;
   --color-brand: #6ffbbe;
-  --color-focus: #6ffbbe;
+  /* Odak halkası / aktif nav: yeşilden krem tonuna. */
+  --color-focus: #f4ede0;
+  --color-nav-active-fg: #f4ede0;
+  --color-nav-active-bg: rgba(244, 237, 224, 0.1);
+  /* Üst çubuktaki mevcut sayfa kırıntısı: rozet paletine değil, nötr
+     yüzey + muted metne bağlanır (rozet gibi okunmasın). */
+  --color-crumb-current-bg: var(--color-surface-2);
+  --color-crumb-current-fg: var(--color-text-muted);
+  --color-crumb-current-bd: var(--color-border-strong);
+  /* Bağlantı rengi: CTA yeşili değil, nötr okunur ton. */
+  --color-link: #dfe0dd;
+  --color-link-strong: #f4f4f2;
   --color-card-grad: linear-gradient(135deg,
-      rgba(6, 78, 59, 0.85), rgba(2, 44, 34, 0.95) 55%, #011a14);
-  --color-accent-line: linear-gradient(90deg, #10b981, #0d9488 55%, #c488ff);
+      rgba(34, 40, 36, 0.92), rgba(20, 24, 21, 0.96) 55%, #101311);
+  --color-accent-line: linear-gradient(90deg, #c488ff, #fbbf24 55%, #f4ede0);
   --color-icon-sun: #fbbf24;
-  --color-icon-moon: #6ffbbe;
+  --color-icon-moon: #f4ede0;
   --color-copilot-bg: rgba(196, 136, 255, 0.15);
   --color-copilot-bg-hover: rgba(196, 136, 255, 0.25);
   --color-copilot-fg: #c488ff;
   --color-copilot-bd: rgba(196, 136, 255, 0.3);
-  --color-dot: #10b981;
+  /* Bildirim noktası: yeşilden amber'e. */
+  --color-dot: #fbbf24;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-  --badge-pain-bg: rgba(16, 185, 129, 0.16);
-  --badge-pain-fg: #6ffbbe;
-  --badge-pain-bd: rgba(16, 185, 129, 0.38);
+  /* "Ağrı Noktası" rozeti: yeşilden soğuk camgöbeğine. */
+  --badge-pain-bg: rgba(56, 189, 248, 0.14);
+  --badge-pain-fg: #7dd3fc;
+  --badge-pain-bd: rgba(56, 189, 248, 0.35);
   --badge-market-bg: rgba(245, 158, 11, 0.16);
   --badge-market-fg: #fcd34d;
   --badge-market-bd: rgba(245, 158, 11, 0.38);
@@ -175,8 +283,72 @@
   --badge-ai-fg: #dcbcff;
   --badge-ai-bd: rgba(196, 136, 255, 0.38);
   --badge-neutral-bg: rgba(255, 255, 255, 0.07);
-  --badge-neutral-fg: #d3ded7;
-  --badge-neutral-bd: rgba(187, 202, 191, 0.22);
+  --badge-neutral-fg: #d7dbd6;
+  --badge-neutral-bd: rgba(255, 255, 255, 0.2);
+}
+
+:root[data-theme="dark"] body {
+  background: var(--color-bg-grad) fixed, var(--color-bg);
+}
+
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .mobile-header,
+:root[data-theme="dark"] .mobile-nav {
+  background: var(--color-bar-grad), var(--color-bar-bg);
+}
+
+:root[data-theme="dark"] .sidenav {
+  /* Gradyan viewport'a sabitlenir: sol ray ile içerik zemini arasında
+     renk sırası kesintisiz sürer, sınırda dikiş görünmez. */
+  background: var(--color-bg-grad) fixed, var(--color-nav-bg);
+}
+
+/* Aktif nav pill (sol ray, mobil alt nav, üst çubuk kırıntısı): yeşil
+   dolgu yerine krem metin + çok düşük opaklıklı krem zemin. */
+:root[data-theme="dark"] .navlink.is-active,
+:root[data-theme="dark"] .mobile-nav-item.is-active,
+:root[data-theme="dark"] .crumb.is-active {
+  background: var(--color-nav-active-bg);
+  color: var(--color-nav-active-fg);
+}
+
+/* Odak göstergesi rolündeki kenarlıklar da krem tona bağlanır (yalnız
+   odak; :hover kenarlığı CTA yeşilinde kalır). */
+:root[data-theme="dark"] .search-input:focus-visible,
+:root[data-theme="dark"] .card:has(.card-link:focus-visible) {
+  border-color: var(--color-focus);
+}
+
+/* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
+   yerine krem metin + çok düşük opaklıklı krem zemin. */
+:root[data-theme="dark"] .switch-option.is-active,
+:root[data-theme="dark"] .chip.is-active:not(.chip-market_derived):not(.chip-ai_blended) {
+  background: var(--color-nav-active-bg);
+  color: var(--color-nav-active-fg);
+}
+
+/* Mevcut sayfa kırıntısı rozet paletinden ayrılır. */
+:root[data-theme="dark"] .crumb-current {
+  background: var(--color-crumb-current-bg);
+  color: var(--color-crumb-current-fg);
+  border-color: var(--color-crumb-current-bd);
+}
+
+/* Bağlantılar CTA gibi bağırmaz; nötr okunur tonda. */
+:root[data-theme="dark"] a:not([class]),
+:root[data-theme="dark"] .card-link,
+:root[data-theme="dark"] .source-link {
+  color: var(--color-link);
+}
+
+:root[data-theme="dark"] .card-link:hover,
+:root[data-theme="dark"] .chat-chip:hover {
+  color: var(--color-link-strong);
+}
+
+/* Alıntı kenarlığı dekoratif: CTA yeşili yerine nötr kenarlık. */
+:root[data-theme="dark"] .quote {
+  border-left-color: var(--color-border-strong);
 }
 
 :root[data-theme="dark"] { color-scheme: dark; }
