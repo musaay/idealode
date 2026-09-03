@@ -311,6 +311,10 @@
 
   // Hızlı komut çipleri: JS varken sayfayı yenilemeden gönderilir.
   Array.prototype.forEach.call(panel.querySelectorAll(".chat-quick .chat-chip"), function (chip) {
+    // JS'siz fallback için markup'ta type="submit" duruyor; JS varken bunu
+    // "button"a çevirmezsek çip, form'un implicit-submit varsayılan butonu
+    // olur ve kutuda Enter'a basınca çipin sabit metni gönderilir (#84).
+    chip.type = "button";
     chip.addEventListener("click", function (event) {
       event.preventDefault();
       send(chip.value);
