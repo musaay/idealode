@@ -171,6 +171,12 @@
     background: var(--color-bg-grad) fixed, var(--color-nav-bg);
   }
 
+  /* Sağ sohbet paneli sol nav'la aynı görünümü alır: aynı soldan-sağa
+     mikro-gradyan, düz yüzey rengi üzerinde. */
+  :root:not([data-theme="light"]) .chat-panel {
+    background: var(--color-bar-grad), var(--color-surface);
+  }
+
   /* Aktif nav pill (sol ray, mobil alt nav, üst çubuk kırıntısı): yeşil
      dolgu yerine krem metin + çok düşük opaklıklı krem zemin. */
   :root:not([data-theme="light"]) .navlink.is-active,
@@ -301,6 +307,12 @@
   /* Gradyan viewport'a sabitlenir: sol ray ile içerik zemini arasında
      renk sırası kesintisiz sürer, sınırda dikiş görünmez. */
   background: var(--color-bg-grad) fixed, var(--color-nav-bg);
+}
+
+/* Sağ sohbet paneli sol nav'la aynı görünümü alır: aynı soldan-sağa
+   mikro-gradyan, düz yüzey rengi üzerinde. */
+:root[data-theme="dark"] .chat-panel {
+  background: var(--color-bar-grad), var(--color-surface);
 }
 
 /* Aktif nav pill (sol ray, mobil alt nav, üst çubuk kırıntısı): yeşil
