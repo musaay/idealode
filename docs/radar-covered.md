@@ -56,3 +56,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Visualizee.ai (Piotr Obidowski) — mimarlar/tasarımcılar için AI foto-gerçekçi render, $8.6K MRR (2026-09-02)
 - Noosa Labs (Pascal Levy-Garboua) — küçük SaaS'ları satın alıp büyüten portföy (Sendtric çapa), $120K MRR (2026-09-02)
 - 1Mind (Amanda Kahlow) — kurumsal satış sürecini yürüten "insan yüzlü" AI ajanları, 18 ayda $6M gelir (2026-09-02)
+- Fastlane (Gaurav) — solopreneur'lar için TikTok/Reels/Shorts AI kısa video pazarlama aracı, $69K/ay (2026-09-03)
+- PropertyData (Michael Dent) — İngiltere emlak yatırımcıları için piyasa analiz/fırsat tarama platformu, $128K/ay (2026-09-03)
+- AudioPen (Louis Pereira) — sesli notu düzenli metne çeviren AI araç, $15K/ay (2026-09-03)
+- RotateProduct (Lorik Morina) — statik ürün fotoğrafını 3D döner videoya çeviren AI e-ticaret aracı, 5 ayda $6.8K MRR (2026-09-03)
