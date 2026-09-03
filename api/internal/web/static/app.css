@@ -175,9 +175,6 @@
      mikro-gradyan, düz yüzey rengi üzerinde. */
   :root:not([data-theme="light"]) .chat-panel {
     background: var(--color-bar-grad), var(--color-surface);
-    /* "AI aktif" hissi: sol nav'ın kendi çizgisi gibi net, tek bir kenarlık —
-       soluk glow değil, belirgin mor bir hat. */
-    border: 1.5px solid rgba(196, 136, 255, 0.6);
   }
 
   /* Kullanıcı balonu: dolgu yeşil yerine nötr kart + yeşil kenarlık —
@@ -324,7 +321,6 @@
    mikro-gradyan, düz yüzey rengi üzerinde. */
 :root[data-theme="dark"] .chat-panel {
   background: var(--color-bar-grad), var(--color-surface);
-  border: 1.5px solid rgba(196, 136, 255, 0.6);
 }
 
 :root[data-theme="dark"] .chat-msg.is-user .chat-bubble {
@@ -1484,6 +1480,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   padding: var(--space-3) var(--space-4);
   background: var(--color-surface-2);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .chat-avatar {
@@ -1574,6 +1571,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
   scrollbar-width: thin;
+  flex-shrink: 0;
 }
 
 .chat-chip {
@@ -1724,6 +1722,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   padding: var(--space-3) var(--space-4);
   font-size: 0.9375rem;
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .chat-error {
@@ -1744,6 +1743,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   padding: var(--space-3);
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .chat-form {
@@ -1841,8 +1841,12 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   .idea-layout {
     flex-direction: row;
     align-items: flex-start;
-    gap: var(--space-6);
+    /* sol nav mantığı: içerik ile sohbet arasında boşluk değil, yalnız çizgi */
+    gap: 0;
   }
+
+  /* metin ayırıcı çizgiye yapışmasın */
+  .idea-main { padding-right: var(--space-6); }
 
   .idea-rail {
     /* kullanıcı kararı: sol içerikten bağımsız, tam ekran yükseklikli panel
@@ -1850,10 +1854,18 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
     flex: 0 0 336px;
     width: 336px;
     position: sticky;
-    top: calc(var(--topbar-h) + var(--space-4));
-    height: calc(100vh - var(--topbar-h) - (var(--space-4) * 2));
+    top: var(--topbar-h);
+    height: calc(100vh - var(--topbar-h));
     min-height: 500px;
-    max-height: 860px;
+  }
+
+  /* Masaüstünde sohbet "kart" değil, sol nav'ın karşı yöndeki eşi: düz yüzey,
+     yalnız sol kenarında tek çizgi. Mobil çekmece bu kuraldan etkilenmez. */
+  .chat-panel {
+    border: 0;
+    border-left: 1px solid var(--color-border);
+    border-radius: 0;
+    box-shadow: none;
   }
 }
 
