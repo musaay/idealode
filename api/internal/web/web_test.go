@@ -498,6 +498,69 @@ func TestIdeaLocalEvidenceEmptyState(t *testing.T) {
 	}
 }
 
+// Referans sadakati (#70): kanıt kartında kopyala düğmesi, arama kutusunda
+// temizle (X), bölüm başlıklarında renkli ikon kutuları.
+func TestIdeaQuoteCopyButtons(t *testing.T) {
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1")
+	body := rec.Body.String()
+
+	// Kart 1: 2 kanıt alıntısı + 1 yerel talep alıntısı = 3 düğme.
+	if got := strings.Count(body, `class="quote-copy"`); got != 3 {
+		t.Errorf("kopyala düğmesi sayısı = %d, beklenen 3", got)
+	}
+	// Erişilebilir ad ve geri bildirim metni katalogdan gelir.
+	if !strings.Contains(body, `data-copied-label="Kopyalandı"`) {
+		t.Error("kopyalandı geri bildirim metni yok")
+	}
+	// Kopyalanacak metin markup'a ikinci kez yazılmaz: JS blockquote'u okur.
+	if strings.Contains(body, "data-quote-text=") {
+		t.Error("alıntı metni düğmeye kopyalanmış — birebirlik riski")
+	}
+
+	en := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1?lang=en").Body.String()
+	if !strings.Contains(en, `data-copied-label="Copied"`) {
+		t.Error("EN kopyalandı metni yok")
+	}
+}
+
+func TestIdeaSectionIcons(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1").Body.String()
+
+	for _, cls := range []string{"panel-icon-problem", "panel-icon-solution", "panel-icon-local"} {
+		if !strings.Contains(body, cls) {
+			t.Errorf("bölüm ikon kutusu yok: %s", cls)
+		}
+	}
+	// Süs ikonları ekran okuyucudan gizlenir.
+	if !strings.Contains(body, `<span class="panel-icon panel-icon-problem" aria-hidden="true">`) {
+		t.Error("ikon kutusu aria-hidden değil")
+	}
+}
+
+func TestGallerySearchClearButton(t *testing.T) {
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/?q=bot").Body.String()
+
+	if !strings.Contains(body, "data-search-clear") {
+		t.Fatal("arama temizle düğmesi yok")
+	}
+	// JS'siz görünmez: sunucu her zaman hidden basar, görünürlüğü JS açar.
+	if !strings.Contains(body, `data-search-clear hidden`) {
+		t.Error("temizle düğmesi hidden basılmamış")
+	}
+	if !strings.Contains(body, `aria-label="Aramayı temizle"`) {
+		t.Error("temizle düğmesinde erişilebilir ad yok")
+	}
+	// Düğme gönderim yapmaz; arama formu JS'siz de aynı biçimde çalışır.
+	if !strings.Contains(body, `<button class="search-clear" type="button"`) {
+		t.Error("temizle düğmesi type=button değil")
+	}
+
+	en := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/?q=bot&lang=en").Body.String()
+	if !strings.Contains(en, `aria-label="Clear search"`) {
+		t.Error("EN temizle etiketi yok")
+	}
+}
+
 func TestIdeaNotFound(t *testing.T) {
 	h := newTestServer(t, sampleStore())
 	for _, target := range []string{"/ideas/999", "/ideas/abc", "/ideas/-1", "/ideas/", "/bilinmeyen"} {

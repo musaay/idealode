@@ -67,6 +67,85 @@
   });
 })();
 
+// ------------------------------------------------- arama kutusu temizle (X)
+// JS yokken düğme hiç görünmez (markup'ta hidden, CSS'te [hidden] gizler);
+// arama kutusu doğal biçimde elle boşaltılıp gönderilebilir. JS varken düğme
+// yalnız kutuda metin varken belirir, tıklanınca kutuyu boşaltıp odağı geri
+// verir — form kendiliğinden gönderilmez.
+(function () {
+  "use strict";
+
+  var input = document.querySelector(".search-input");
+  var button = document.querySelector("[data-search-clear]");
+  if (!input || !button) return;
+
+  function sync() {
+    button.hidden = input.value.length === 0;
+  }
+
+  sync();
+  input.addEventListener("input", sync);
+  // type=search'te Escape/tarayıcı temizlemesi "input" üretmeyebilir.
+  input.addEventListener("search", sync);
+
+  button.addEventListener("click", function () {
+    input.value = "";
+    sync();
+    input.focus();
+  });
+})();
+
+// ------------------------------------------------- alıntıyı panoya kopyala
+// Kopyalanan metin ayrı bir data attribute'ta tutulmaz; düğme kendi kanıt
+// kartındaki <blockquote> içeriğini okur, böylece alıntı birebir kalır.
+// Clipboard API yoksa (JS kapalı ya da güvensiz bağlam) .has-clipboard hiç
+// eklenmez ve düğmeler gizli kalır.
+(function () {
+  "use strict";
+
+  var buttons = document.querySelectorAll("[data-quote-copy]");
+  if (!buttons.length) return;
+
+  var clipboard = navigator.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") return;
+
+  document.documentElement.classList.add("has-clipboard");
+
+  var RESET_MS = 2000;
+  var timers = new WeakMap();
+
+  function label(button, name) {
+    var text = button.getAttribute("data-" + name + "-label") || "";
+    var slot = button.querySelector("[data-quote-copy-text]");
+    if (slot) slot.textContent = text;
+    if (text) button.setAttribute("title", text);
+  }
+
+  function confirmCopy(button) {
+    button.classList.add("is-copied");
+    label(button, "copied");
+
+    clearTimeout(timers.get(button));
+    timers.set(button, setTimeout(function () {
+      button.classList.remove("is-copied");
+      label(button, "copy");
+    }, RESET_MS));
+  }
+
+  Array.prototype.forEach.call(buttons, function (button) {
+    button.addEventListener("click", function () {
+      var card = button.closest(".quote");
+      var quote = card ? card.querySelector(".quote-text") : null;
+      if (!quote) return;
+
+      clipboard.writeText(quote.textContent).then(
+        function () { confirmCopy(button); },
+        function () { /* pano reddetti: sessizce geç, düğme aynı kalır */ }
+      );
+    });
+  });
+})();
+
 // --------------------------------------------------------- Idea Copilot
 // Panel JS olmadan da tam çalışır: hızlı komut çipleri ve giriş alanı
 // gerçek <form method="post"> gönderimidir, sunucu 303 ile karta döner.
