@@ -87,6 +87,12 @@
   --badge-ai-bg: #faf5ff;
   --badge-ai-fg: #6b21a8;
   --badge-ai-bd: #e9d5ff;
+  /* "İvme" rozeti: açık temada rozet paletinin kullanılmamış tek tonu
+     camgöbeği. Doygun camgöbeği kenarlık (#7dd3fc) "Kullanıcı İhtiyacı"nın
+     nane kenarlığından (#a7f3d0) ayrışır; metin zemin üstünde 7.4:1. */
+  --badge-momentum-bg: #ecfeff;
+  --badge-momentum-fg: #155e75;
+  --badge-momentum-bd: #7dd3fc;
   --badge-neutral-bg: #f1f5f9;
   --badge-neutral-fg: #334155;
   --badge-neutral-bd: #cbd5e1;
@@ -155,6 +161,12 @@
     --badge-ai-bg: rgba(196, 136, 255, 0.16);
     --badge-ai-fg: #dcbcff;
     --badge-ai-bd: rgba(196, 136, 255, 0.38);
+    /* "İvme" rozeti: koyu temada camgöbeği "Kullanıcı İhtiyacı"na ait; rozet
+       paletinde kalan tek ton krem. Sıcak kremi nötr rozetin soğuk grisinden
+       (#d7dbd6) ayırır, zemin üstünde 13:1. */
+    --badge-momentum-bg: rgba(244, 237, 224, 0.24);
+    --badge-momentum-fg: #f4ede0;
+    --badge-momentum-bd: rgba(244, 237, 224, 0.62);
     --badge-neutral-bg: rgba(255, 255, 255, 0.07);
     --badge-neutral-fg: #d7dbd6;
     --badge-neutral-bd: rgba(255, 255, 255, 0.2);
@@ -209,7 +221,7 @@
   /* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
      yerine krem metin + çok düşük opaklıklı krem zemin. */
   :root:not([data-theme="light"]) .switch-option.is-active,
-  :root:not([data-theme="light"]) .chip.is-active:not(.chip-market_derived):not(.chip-ai_blended) {
+  :root:not([data-theme="light"]) .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended) {
     background: var(--color-nav-active-bg);
     color: var(--color-nav-active-fg);
   }
@@ -301,6 +313,12 @@
   --badge-ai-bg: rgba(196, 136, 255, 0.16);
   --badge-ai-fg: #dcbcff;
   --badge-ai-bd: rgba(196, 136, 255, 0.38);
+  /* "İvme" rozeti: koyu temada camgöbeği "Kullanıcı İhtiyacı"na ait; rozet
+     paletinde kalan tek ton krem. Sıcak kremi nötr rozetin soğuk grisinden
+     (#d7dbd6) ayırır, zemin üstünde 13:1. */
+  --badge-momentum-bg: rgba(244, 237, 224, 0.24);
+  --badge-momentum-fg: #f4ede0;
+  --badge-momentum-bd: rgba(244, 237, 224, 0.62);
   --badge-neutral-bg: rgba(255, 255, 255, 0.07);
   --badge-neutral-fg: #d7dbd6;
   --badge-neutral-bd: rgba(255, 255, 255, 0.2);
@@ -353,7 +371,7 @@
 /* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
    yerine krem metin + çok düşük opaklıklı krem zemin. */
 :root[data-theme="dark"] .switch-option.is-active,
-:root[data-theme="dark"] .chip.is-active:not(.chip-market_derived):not(.chip-ai_blended) {
+:root[data-theme="dark"] .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended) {
   background: var(--color-nav-active-bg);
   color: var(--color-nav-active-fg);
 }
@@ -1038,6 +1056,12 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   color: var(--badge-market-fg);
 }
 
+.chip-momentum_derived.is-active {
+  background: var(--badge-momentum-bg);
+  border-color: var(--badge-momentum-bd);
+  color: var(--badge-momentum-fg);
+}
+
 .chip-ai_blended.is-active {
   background: var(--badge-ai-bg);
   border-color: var(--badge-ai-bd);
@@ -1165,6 +1189,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 
 .badge-pain_point { background: var(--badge-pain-bg); color: var(--badge-pain-fg); border-color: var(--badge-pain-bd); }
 .badge-market_derived { background: var(--badge-market-bg); color: var(--badge-market-fg); border-color: var(--badge-market-bd); }
+.badge-momentum_derived { background: var(--badge-momentum-bg); color: var(--badge-momentum-fg); border-color: var(--badge-momentum-bd); }
 .badge-ai_blended,
 .badge-ai_generated { background: var(--badge-ai-bg); color: var(--badge-ai-fg); border-color: var(--badge-ai-bd); }
 

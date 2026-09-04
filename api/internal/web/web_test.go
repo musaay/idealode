@@ -1578,3 +1578,87 @@ func TestChatAcceptsMultipartBody(t *testing.T) {
 		t.Errorf("multipart gövde okunmadı: %v", fs.sent)
 	}
 }
+
+// momentumStore, sampleStore'a bir momentum_derived (İvme) kart ekler (#89).
+func momentumStore() *fakeStore {
+	fs := sampleStore()
+	fs.ideas = append(fs.ideas, store.Idea{
+		ID:               3,
+		Title:            "Terminal içi rebase yardımcısı",
+		ProblemStatement: "Geliştiriciler rebase çakışmalarını el yordamıyla çözüyor.",
+		ProposedSolution: "Çakışmayı adım adım anlatan TUI.",
+		EvidenceCount:    1,
+		ExampleQuotes: []string{
+			"★4200 toplam, +180/gün (GitHub trending, son 14 günde 6 gün listede) — gelir kanıtı yok",
+		},
+		SourceType: "momentum_derived",
+		DomainTags: []string{"devtools"},
+		CreatedAt:  time.Date(2026, 9, 4, 9, 0, 0, 0, time.UTC),
+	})
+	return fs
+}
+
+func TestMomentumDerivedBadgeAndFilter(t *testing.T) {
+	h := newTestServer(t, momentumStore())
+
+	// Galeride rozet TR etiketiyle ve kendi CSS sınıfıyla görünür.
+	body := do(t, h, http.MethodGet, "/").Body.String()
+	for _, want := range []string{
+		`class="badge badge-momentum_derived"`,
+		">İvme<",
+		"Terminal içi rebase yardımcısı",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("galeri gövdesinde %q yok", want)
+		}
+	}
+	if strings.Contains(body, "momentum_derived<") {
+		t.Error("ham source_type değeri etiket olarak basıldı")
+	}
+
+	// Filtre çipi hem galeride var hem de store'a geçer; diğer kartlar elenir.
+	if !strings.Contains(body, "source_type=momentum_derived") {
+		t.Error("İvme filtre çipi galeride yok")
+	}
+	fs := momentumStore()
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/?source_type=momentum_derived")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d", rec.Code)
+	}
+	if fs.lastFilter.SourceType != "momentum_derived" {
+		t.Errorf("filtre store'a geçmedi: %+v", fs.lastFilter)
+	}
+	filtered := rec.Body.String()
+	if strings.Contains(filtered, "Randevu hatırlatma botu") {
+		t.Error("filtre dışı kart listelendi")
+	}
+	if !strings.Contains(filtered, `aria-current="page"`) {
+		t.Error("aktif çip aria-current taşımıyor")
+	}
+}
+
+func TestMomentumDerivedDetailAndEN(t *testing.T) {
+	h := newTestServer(t, momentumStore())
+
+	body := do(t, h, http.MethodGet, "/ideas/3").Body.String()
+	if !strings.Contains(body, `class="badge badge-momentum_derived"`) || !strings.Contains(body, ">İvme<") {
+		t.Error("kart detayında İvme rozeti yok")
+	}
+	// Koddan hesaplanan ivme kanıt satırı birebir basılır; "+" html/template
+	// autoescape'i tarafından &#43; olur (kaçış AÇIK kalmalı).
+	if !strings.Contains(body, "★4200 toplam, &#43;180/gün (GitHub trending, son 14 günde 6 gün listede) — gelir kanıtı yok") {
+		t.Error("ivme kanıt satırı birebir basılmadı")
+	}
+
+	en := do(t, h, http.MethodGet, "/ideas/3?lang=en").Body.String()
+	if !strings.Contains(en, ">Momentum<") {
+		t.Error("EN rozet etiketi yok")
+	}
+	if strings.Contains(en, ">İvme<") {
+		t.Error("EN sayfada TR rozet etiketi kaldı")
+	}
+	// Kart içeriği ASLA çevrilmez.
+	if !strings.Contains(en, "Terminal içi rebase yardımcısı") {
+		t.Error("kart başlığı EN'de değişti")
+	}
+}

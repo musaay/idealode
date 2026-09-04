@@ -40,6 +40,7 @@
 
   "source_type.pain_point": "Pain Point",
   "source_type.market_derived": "Market-derived",
+  "source_type.momentum_derived": "Momentum",
   "source_type.ai_blended": "AI-blended",
   "source_type.ai_generated": "AI-generated",
   "source_type.user_created": "User-created",

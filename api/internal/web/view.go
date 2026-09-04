@@ -71,7 +71,7 @@ func clipTitle(s string) string {
 
 // Badge, kart rozetinin görünen hâli. Kind CSS sınıfına, Label metne gider.
 type Badge struct {
-	Kind  string // pain_point | market_derived | ai_blended | ai_generated | user_created | other
+	Kind  string // pain_point | market_derived | momentum_derived | ai_blended | ai_generated | user_created | other
 	Label string
 }
 
@@ -99,11 +99,12 @@ func platformLabel(lang, platform string) string {
 
 // knownSourceTypes, kataloğda karşılığı olan kaynak türleri.
 var knownSourceTypes = map[string]bool{
-	"pain_point":     true,
-	"market_derived": true,
-	"ai_blended":     true,
-	"ai_generated":   true,
-	"user_created":   true,
+	"pain_point":       true,
+	"market_derived":   true,
+	"momentum_derived": true,
+	"ai_blended":       true,
+	"ai_generated":     true,
+	"user_created":     true,
 }
 
 // badgeFor, source_type'ı rozete çevirir. Bilinmeyen tür nötr gösterilir ve
@@ -389,7 +390,7 @@ func buildGallery(base Page, ideas []store.Idea, sourceType, query string) Galle
 }
 
 // chipOrder, filtre chip'lerinin sabit sırası (galeriye giren tüm türler).
-var chipOrder = []string{"", "pain_point", "market_derived", "ai_blended"}
+var chipOrder = []string{"", "pain_point", "market_derived", "momentum_derived", "ai_blended"}
 
 func buildChips(lang, active, query string) []FilterChip {
 	chips := make([]FilterChip, 0, len(chipOrder))
