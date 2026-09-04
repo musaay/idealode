@@ -41,6 +41,7 @@
 
   "source_type.pain_point": "Kullanıcı İhtiyacı",
   "source_type.market_derived": "Pazar Verisi",
+  "source_type.momentum_derived": "İvme",
   "source_type.ai_blended": "AI Karışım",
   "source_type.ai_generated": "AI Üretimi",
   "source_type.user_created": "Kullanıcı Fikri",
