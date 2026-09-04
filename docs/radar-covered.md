@@ -60,3 +60,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - PropertyData (Michael Dent) — İngiltere emlak yatırımcıları için piyasa analiz/fırsat tarama platformu, $128K/ay (2026-09-03)
 - AudioPen (Louis Pereira) — sesli notu düzenli metne çeviren AI araç, $15K/ay (2026-09-03)
 - RotateProduct (Lorik Morina) — statik ürün fotoğrafını 3D döner videoya çeviren AI e-ticaret aracı, 5 ayda $6.8K MRR (2026-09-03)
+- My AskAI (Alex & Mike Heap) — SaaS/e-ticaret için AI müşteri destek ajanı, $25K/ay, 40K+ kullanıcı, 2 kişilik ekip (2026-09-04)
+- Youform (Abhishek Chakravarty, Davis Baer) — ucuz Typeform alternatifi form/anket aracı, $18K MRR, 80K kullanıcı (2026-09-04)
+- Extra Points (Matt Brown) — kolej sporunun iş/finans tarafına odaklı niş ücretli bülten, ~$200K/yıl, üniversitelere toplu lisans (2026-09-04)
+- FounderPal (Sveta Bay, Dan Kulkov) — solopreneur'lar için AI pazarlama strateji üretici, $10K/ay, Bubble ile 3 haftada yapıldı (2026-09-04)
