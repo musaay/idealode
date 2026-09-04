@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -260,5 +261,55 @@ func TestGitHubTrendingHTTPError(t *testing.T) {
 
 	if _, _, err := gh.FetchNew(context.Background(), src); err == nil {
 		t.Fatal("HTTP 403 hata döndürmeliydi")
+	}
+}
+
+// --- FetchRepoMeta (#89 ivme kapısı madde 2-3) ---
+
+func TestFetchRepoMetaOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/foo/bar" {
+			t.Errorf("yanlış path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"created_at":"2026-03-01T00:00:00Z","stargazers_count":500,"forks_count":50,"open_issues_count":12}`))
+	}))
+	defer srv.Close()
+
+	meta, err := fetchRepoMeta(context.Background(), srv.URL, "foo", "bar")
+	if err != nil {
+		t.Fatalf("fetchRepoMeta: %v", err)
+	}
+	if meta.StargazersCount != 500 || meta.ForksCount != 50 || meta.OpenIssuesCount != 12 {
+		t.Errorf("yanlış meta: %+v", meta)
+	}
+	wantCreated, _ := time.Parse(time.RFC3339, "2026-03-01T00:00:00Z")
+	if !meta.CreatedAt.Equal(wantCreated) {
+		t.Errorf("yanlış CreatedAt: %v", meta.CreatedAt)
+	}
+}
+
+func TestFetchRepoMetaNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := fetchRepoMeta(context.Background(), srv.URL, "foo", "gone")
+	if !errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("ErrRepoNotFound beklenirdi, geldi: %v", err)
+	}
+}
+
+func TestFetchRepoMetaRateLimited(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusTooManyRequests} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(code)
+		}))
+		_, err := fetchRepoMeta(context.Background(), srv.URL, "foo", "bar")
+		srv.Close()
+		if !errors.Is(err, ErrGitHubRateLimited) {
+			t.Errorf("HTTP %d için ErrGitHubRateLimited beklenirdi, geldi: %v", code, err)
+		}
 	}
 }
