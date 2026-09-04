@@ -85,6 +85,44 @@ func TestUnanalyzedPostsExcludesRadarSeed(t *testing.T) {
 	}
 }
 
+// TestUnanalyzedPostsExcludesGitHubTrending, github_trending satırlarının
+// (#50 B parçası) LLM sinyal sınıflandırmasına değil doğrudan füzyona
+// girdiğini — dolayısıyla analiz kuyruğuna hiç girmediğini doğrular.
+func TestUnanalyzedPostsExcludesGitHubTrending(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	posts := []RawPost{
+		{Platform: "test-gh-trending", SourceRef: "tgt-1", Community: "c", Title: "normal post"},
+		{Platform: "github_trending", SourceRef: "tgt-2", Community: "daily", Title: "owner/repo"},
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform IN ('test-gh-trending', 'github_trending') AND source_ref LIKE 'tgt-%'")
+	})
+	if _, err := s.InsertRawPosts(ctx, posts); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	out, err := s.UnanalyzedPosts(ctx, 1000)
+	if err != nil {
+		t.Fatalf("UnanalyzedPosts: %v", err)
+	}
+	for _, p := range out {
+		if p.Platform == "github_trending" {
+			t.Fatalf("github_trending post analiz kuyruğuna girmemeli: %+v", p)
+		}
+	}
+	found := false
+	for _, p := range out {
+		if p.SourceRef == "tgt-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("normal post analiz kuyruğunda görünmeli")
+	}
+}
+
 // TestArchivedIdeaHidden, arşivlenmiş (archived_at dolu) kartın galeri
 // listesinde görünmediğini ve GetIdea ile ErrNotFound döndüğünü doğrular;
 // arşivsiz kart etkilenmemeli (#74).

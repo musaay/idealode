@@ -6,8 +6,10 @@
 -- (emsal) + talep kanıtı (gerçek şikayet alıntıları).
 --
 -- local_evidence: kaynak linkli birebir alıntı satırları.
--- fused_at: füzyon denendi işareti (boş sonuçla da damgalanır; her koşuda
--- yeniden denemeyi önler).
+-- fused_at: füzyon denendi işareti (boş sonuçla da damgalanır). İlk
+-- füzyondan (talep hakemi + ivme geçişi) sonra bir hafta geçince yalnız
+-- ivme geçişi (github_trending eşleşmesi) yeniden dener — talep hakemi
+-- tekrar çağrılmaz (#50 B parçası, bkz. IdeasNeedingFusion).
 
 BEGIN;
 

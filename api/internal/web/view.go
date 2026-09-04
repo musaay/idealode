@@ -78,14 +78,15 @@ type Badge struct {
 // knownPlatforms, kataloğda insan-okur karşılığı olan platform anahtarları.
 // Listede olmayan platform HAM değeriyle gösterilir — uydurma etiket yok.
 var knownPlatforms = map[string]bool{
-	"radar_seed":    true,
-	"hackernews":    true,
-	"stackexchange": true,
-	"googleplay":    true,
-	"producthunt":   true,
-	"technopat":     true,
-	"github":        true,
-	"reddit":        true,
+	"radar_seed":      true,
+	"hackernews":      true,
+	"stackexchange":   true,
+	"googleplay":      true,
+	"producthunt":     true,
+	"technopat":       true,
+	"github":          true,
+	"github_trending": true,
+	"reddit":          true,
 }
 
 // platformLabel, platform anahtarını gösterim etiketine çevirir.
