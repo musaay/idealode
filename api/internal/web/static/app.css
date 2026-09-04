@@ -77,6 +77,8 @@
   --color-copilot-fg: #7e22ce;       /* referans: purple-700 */
   --color-copilot-bd: #e9d5ff;       /* referans: purple-200 */
   --color-dot: #10b981;              /* referans: emerald-500 */
+  /* "Kopyalandı" onayı — referans emerald-500 tik kullanır. */
+  --color-copy-ok: #047857;
 
   --badge-pain-bg: #ecfdf5;
   --badge-pain-fg: #065f46;
@@ -141,6 +143,8 @@
     --color-copilot-bd: rgba(196, 136, 255, 0.3);
     /* Bildirim noktası: yeşilden amber'e. */
     --color-dot: #fbbf24;
+    /* Kopyalandı tiki: koyu temada yeşil yalnız CTA'nın olduğu için krem. */
+    --color-copy-ok: #f4ede0;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -287,6 +291,8 @@
   --color-copilot-bd: rgba(196, 136, 255, 0.3);
   /* Bildirim noktası: yeşilden amber'e. */
   --color-dot: #fbbf24;
+  /* Kopyalandı tiki: koyu temada yeşil yalnız CTA'nın olduğu için krem. */
+  --color-copy-ok: #f4ede0;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -959,7 +965,6 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 }
 
 .search {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -967,6 +972,16 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 }
 
 @media (min-width: 900px) { .search { max-width: 400px; } }
+
+/* Kutu + ikon + temizle düğmesi tek konumlandırma bağlamında durur; gönder
+   düğmesi bunun DIŞINDA kalır, böylece X kutunun sağ ucuna oturur. */
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
 
 .search-icon {
   position: absolute;
@@ -979,7 +994,9 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   flex: 1;
   min-width: 0;
   min-height: var(--tap);
-  padding: 0 var(--space-4) 0 42px;
+  /* Sağ boşluk temizle düğmesinin genişliği kadar sabittir: düğme belirip
+     kaybolurken metin kaymaz (referans: pl-9 pr-9). */
+  padding: 0 46px 0 42px;
   font: inherit;
   font-size: 1rem;
   color: var(--color-text);
@@ -990,6 +1007,30 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 
 .search-input::placeholder { color: var(--color-text-muted); opacity: 1; }
 .search-input:focus-visible { border-color: var(--color-primary); }
+
+/* type=search'ün tarayıcı temizle işareti gizlenir; kendi X düğmemiz var. */
+.search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+.search-clear {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  color: var(--color-text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+/* JS yokken (ve kutu boşken) düğme yoktur: [hidden] her zaman kazanır. */
+.search-clear[hidden] { display: none; }
+
+.search-clear:hover { color: var(--color-text); }
 
 .search-submit {
   min-height: var(--tap);
@@ -1303,7 +1344,47 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 
 @media (min-width: 640px) { .panel { padding: var(--space-7); } }
 
-.panel-title { font-size: 1.125rem; font-weight: 700; margin-bottom: var(--space-3); }
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;             /* referans: gap-2.5 */
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: var(--space-3);
+}
+
+/* Bölüm başlığı ikon kutusu (referans: w-8 h-8 rounded-lg dolgulu kutu).
+   Renkler yeni bir palet açmaz, mevcut rozet token'larından gelir; koyu
+   temada yeşil yalnız CTA/marka olduğu için kutular camgöbeği / amber /
+   mor tonlarında kalır. */
+.panel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.panel-icon-problem {
+  background: var(--badge-market-bg);
+  color: var(--badge-market-fg);
+  border-color: var(--badge-market-bd);
+}
+
+.panel-icon-solution {
+  background: var(--badge-pain-bg);
+  color: var(--badge-pain-fg);
+  border-color: var(--badge-pain-bd);
+}
+
+.panel-icon-local {
+  background: var(--badge-ai-bg);
+  color: var(--badge-ai-fg);
+  border-color: var(--badge-ai-bd);
+}
 
 .panel-body { color: var(--color-text-muted); }
 
@@ -1345,11 +1426,63 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
   margin-top: var(--space-3);
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border);
 }
+
+/* Solda veri yoksa (platform etiketi yok) eylemler sağa yaslanır. */
+.quote-meta-end { justify-content: flex-end; }
+
+/* Yalnız kopyala düğmesi taşıyan altbilgi: JS/pano yoksa düğme de yok
+   demektir, o yüzden şerit tamamen kalkar (boş çizgi kalmaz). */
+.quote-meta-actions { display: none; }
+:root.has-clipboard .quote-meta-actions {
+  display: flex;
+  justify-content: flex-end;
+  /* Düğmenin kendi 44px'lik dokunma alanı boşluğu zaten veriyor. */
+  padding-top: 0;
+}
+
+.quote-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Panoya kopyala (referans: kanıt kartı altbilgisindeki Copy düğmesi).
+   Varsayılan gizli; app.js yalnız Clipboard API varsa <html>'e
+   .has-clipboard ekler — JS'siz veya güvensiz bağlamda düğme belirmez. */
+.quote-copy {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  color: var(--color-text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+:root.has-clipboard .quote-copy { display: inline-flex; }
+
+.quote-copy:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.quote-copy-done { display: none; }
+
+.quote-copy.is-copied { color: var(--color-copy-ok); }
+.quote-copy.is-copied .quote-copy-icon { display: none; }
+.quote-copy.is-copied .quote-copy-done { display: block; }
 
 .source-list { display: flex; flex-direction: column; gap: var(--space-2); }
 

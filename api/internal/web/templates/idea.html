@@ -1,3 +1,18 @@
+{{/* Alıntıyı panoya kopyala düğmesi (referans: IdeaDetailView kanıt kartı
+     altbilgisi). JS yokken CSS ile gizlidir; kopyalanacak metin ayrıca
+     yazılmaz, JS kartın kendi <blockquote> içeriğini okur — alıntı birebir
+     kalır. Bağlam olarak sayfa verisi ($) beklenir. */}}
+{{ define "quote-copy" }}
+<button class="quote-copy" type="button" data-quote-copy
+        data-copy-label="{{ .T "idea.copy_quote" }}"
+        data-copied-label="{{ .T "idea.quote_copied" }}"
+        title="{{ .T "idea.copy_quote" }}">
+  <svg class="quote-copy-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  <svg class="quote-copy-done" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="m4.5 12.5 5 5 10-11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <span class="sr-only" data-quote-copy-text>{{ .T "idea.copy_quote" }}</span>
+</button>
+{{ end }}
+
 {{ define "content" }}
 <div class="idea-layout">
 <article class="idea idea-main" aria-labelledby="idea-title">
@@ -49,14 +64,24 @@
 
   {{ if .Problem }}
   <section class="panel" aria-labelledby="sec-problem">
-    <h2 class="panel-title" id="sec-problem">{{ .T "idea.problem" }}</h2>
+    <h2 class="panel-title" id="sec-problem">
+      <span class="panel-icon panel-icon-problem" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 7.6v5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="16.2" r="1.05" fill="currentColor"/></svg>
+      </span>
+      {{ .T "idea.problem" }}
+    </h2>
     <p class="panel-body">{{ .Problem }}</p>
   </section>
   {{ end }}
 
   {{ if .Solution }}
   <section class="panel" aria-labelledby="sec-solution">
-    <h2 class="panel-title" id="sec-solution">{{ .T "idea.solution" }}</h2>
+    <h2 class="panel-title" id="sec-solution">
+      <span class="panel-icon panel-icon-solution" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><path d="M20.5 11.2V12a8.5 8.5 0 1 1-5-7.75" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="m8.4 11.6 3 3 8-8.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      {{ .T "idea.solution" }}
+    </h2>
     <p class="panel-body">{{ .Solution }}</p>
   </section>
   {{ end }}
@@ -66,7 +91,12 @@
     {{ if .Quotes }}
     <ul class="quote-list" role="list">
       {{ range .Quotes }}
-      <li class="quote"><blockquote class="quote-text">{{ . }}</blockquote></li>
+      <li class="quote">
+        <blockquote class="quote-text">{{ . }}</blockquote>
+        <p class="quote-meta quote-meta-actions">
+          <span class="quote-actions">{{ template "quote-copy" $ }}</span>
+        </p>
+      </li>
       {{ end }}
     </ul>
     {{ else }}
@@ -96,23 +126,29 @@
   </section>
 
   <section class="panel" aria-labelledby="sec-local">
-    <h2 class="panel-title" id="sec-local">{{ .T "idea.local_evidence" }}</h2>
+    <h2 class="panel-title" id="sec-local">
+      <span class="panel-icon panel-icon-local" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><path d="M12 21.2s-7-5.4-7-11.1a7 7 0 1 1 14 0c0 5.7-7 11.1-7 11.1Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="9.9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>
+      </span>
+      {{ .T "idea.local_evidence" }}
+    </h2>
     {{ if .LocalEvidence }}
     <ul class="quote-list" role="list">
       {{ range .LocalEvidence }}
       <li class="quote quote-local">
         <blockquote class="quote-text">{{ .Quote }}</blockquote>
-        {{ if or .Platform .URL }}
-        <p class="quote-meta">
+        <p class="quote-meta{{ if and (not .Platform) (not .URL) }} quote-meta-actions{{ else if not .Platform }} quote-meta-end{{ end }}">
           {{ if .Platform }}<span class="source-platform">{{ .Platform }}</span>{{ end }}
-          {{ if .URL }}
-          <a class="source-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer"
-             aria-label="{{ $.T "idea.open_source_aria" .URL }}">{{ $.T "idea.open_source" }}
-            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </a>
-          {{ end }}
+          <span class="quote-actions">
+            {{ template "quote-copy" $ }}
+            {{ if .URL }}
+            <a class="source-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer"
+               aria-label="{{ $.T "idea.open_source_aria" .URL }}">{{ $.T "idea.open_source" }}
+              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            {{ end }}
+          </span>
         </p>
-        {{ end }}
       </li>
       {{ end }}
     </ul>
