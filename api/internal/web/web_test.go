@@ -844,6 +844,21 @@ func TestPlatformLabel(t *testing.T) {
 	}
 }
 
+// TestPlatformLabelGitHubTrending, tr/en'de FARKLI etiket taşıyan tek
+// platformu ayrı test eder (#50 B parçası) — yukarıdaki TestPlatformLabel
+// tüm dillerde aynı beklenen değeri varsayar, bu ikisi ayrışıyor.
+func TestPlatformLabelGitHubTrending(t *testing.T) {
+	cases := map[string]string{
+		"tr": "GitHub ivme",
+		"en": "GitHub momentum",
+	}
+	for lang, want := range cases {
+		if got := platformLabel(lang, "github_trending"); got != want {
+			t.Errorf("platformLabel(%q, github_trending) = %q, beklenen %q", lang, got, want)
+		}
+	}
+}
+
 // TestMarketDerivedSourceRow, canlı DB'de görülen iki kusuru kilitler:
 // sıfır tarihin basılması ve ham "radar_seed"/"radar" değerlerinin sızması.
 func TestMarketDerivedSourceRow(t *testing.T) {

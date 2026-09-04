@@ -27,6 +27,8 @@ func Connectors(cfg *config.Config) map[string]connector.SourceConnector {
 	m[gp.Platform()] = gp
 	tp := connector.NewTechnopat()
 	m[tp.Platform()] = tp
+	ght := connector.NewGitHubTrending()
+	m[ght.Platform()] = ght
 	// Product Hunt token ister; token yokken registry'ye girmez, ingest
 	// kaynağı "connector yok" logu ile atlar (kabul kriteri: pipeline düşmez).
 	if cfg.ProductHuntToken != "" {

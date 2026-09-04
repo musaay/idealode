@@ -51,25 +51,26 @@ type Theme struct {
 
 // Idea, paylaşılan idea card "tohumu".
 type Idea struct {
-	ID                      int64     `json:"id"`
-	Title                   string    `json:"title"`
-	ProblemStatement        string    `json:"problem_statement"`
-	ProposedSolution        string    `json:"proposed_solution"`
-	TargetUser              string    `json:"target_user"`
-	EvidenceCount           int       `json:"evidence_count"`
-	ExampleQuotes           []string  `json:"example_quotes"` // orijinal dil (EN)
-	SourceType              string    `json:"source_type"`
-	SourceThemeID           *int64    `json:"source_theme_id,omitempty"`
-	UrgencyScore            int       `json:"urgency_score"`       // 1-5
-	MonetizationSignal      int       `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
-	KnownCompetitorsAIGuess string    `json:"known_competitors_ai_guess,omitempty"`
-	DomainTags              []string  `json:"domain_tags"`
-	LocalEvidence           []string  `json:"local_evidence"`           // füzyonla eşleşen yerel talep satırları (#43)
-	ParentIdeaID            *int64    `json:"parent_idea_id,omitempty"` // ai_blended: türetildiği kart
-	Mine                    bool      `json:"mine"`                     // ai_blended ve bu oturuma ait
-	SourceTheme             string    `json:"source_theme,omitempty"`   // tema adı (dump görünümü)
-	CreatedBySessionID      string    `json:"-"`                        // ai_blended: üreten anonim oturum (görünürlük kuralı; store'da hesaplanır: source_type='ai_blended' AND created_by_session_id = $sid)
-	CreatedAt               time.Time `json:"created_at"`
+	ID                      int64      `json:"id"`
+	Title                   string     `json:"title"`
+	ProblemStatement        string     `json:"problem_statement"`
+	ProposedSolution        string     `json:"proposed_solution"`
+	TargetUser              string     `json:"target_user"`
+	EvidenceCount           int        `json:"evidence_count"`
+	ExampleQuotes           []string   `json:"example_quotes"` // orijinal dil (EN)
+	SourceType              string     `json:"source_type"`
+	SourceThemeID           *int64     `json:"source_theme_id,omitempty"`
+	UrgencyScore            int        `json:"urgency_score"`       // 1-5
+	MonetizationSignal      int        `json:"monetization_signal"` // 0-5 (0 = sinyal yok)
+	KnownCompetitorsAIGuess string     `json:"known_competitors_ai_guess,omitempty"`
+	DomainTags              []string   `json:"domain_tags"`
+	LocalEvidence           []string   `json:"local_evidence"`           // füzyonla eşleşen yerel talep satırları (#43)
+	ParentIdeaID            *int64     `json:"parent_idea_id,omitempty"` // ai_blended: türetildiği kart
+	Mine                    bool       `json:"mine"`                     // ai_blended ve bu oturuma ait
+	SourceTheme             string     `json:"source_theme,omitempty"`   // tema adı (dump görünümü)
+	CreatedBySessionID      string     `json:"-"`                        // ai_blended: üreten anonim oturum (görünürlük kuralı; store'da hesaplanır: source_type='ai_blended' AND created_by_session_id = $sid)
+	CreatedAt               time.Time  `json:"created_at"`
+	FusedAt                 *time.Time `json:"fused_at,omitempty"` // ilk füzyon denemesi damgası; dolu+eski = haftalık ivme yeniden deneme adayı (#50 B)
 }
 
 // ChatMessage, kart sohbeti satırı (idea_conversations). Girişsiz kimlik

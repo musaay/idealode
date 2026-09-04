@@ -74,10 +74,12 @@ func (s *Store) RawPostExists(ctx context.Context, platform, sourceRef string) (
 }
 
 // UnanalyzedPosts, henüz post_analysis kaydı olmayan post'ları döner
-// (eskiden yeniye — imleç mantığıyla uyumlu). radar_seed platformu hariç
-// tutulur: tohum satırları raw_posts'a yalnızca "işlendi" imleci olarak
-// yazılır (#56), analiz kuyruğuna hiç girmemeli — pending sayacı da bu
-// satırlarla şişmesin.
+// (eskiden yeniye — imleç mantığıyla uyumlu). radar_seed ve github_trending
+// platformları hariç tutulur: radar_seed satırları raw_posts'a yalnızca
+// "işlendi" imleci olarak yazılır (#56); github_trending satırları ise
+// LLM sinyal sınıflandırmasına değil, doğrudan füzyona (ivme kanıtı) girer
+// (#50 B parçası) — ikisi de analiz kuyruğuna hiç girmemeli, pending
+// sayacı da bu satırlarla şişmesin.
 func (s *Store) UnanalyzedPosts(ctx context.Context, limit int) ([]RawPost, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT rp.id, rp.platform, rp.source_ref, rp.community, rp.title, rp.body,
@@ -86,7 +88,7 @@ func (s *Store) UnanalyzedPosts(ctx context.Context, limit int) ([]RawPost, erro
 		FROM raw_posts rp
 		LEFT JOIN post_analysis pa ON pa.post_id = rp.id
 		WHERE pa.id IS NULL
-		  AND rp.platform <> 'radar_seed'
+		  AND rp.platform NOT IN ('radar_seed', 'github_trending')
 		ORDER BY rp.id
 		LIMIT $1`, limit)
 	if err != nil {
@@ -194,13 +196,17 @@ func (s *Store) AcquireRunLock(ctx context.Context) (release func(), ok bool, er
 	return release, true, nil
 }
 
-// IdeasNeedingFusion, henüz füzyon denenmemiş market_derived kartları döner.
+// IdeasNeedingFusion, füzyon denenmemiş ya da haftadan eski füzyonu olan
+// market_derived kartları döner (fused_at boş önce). Haftalık yeniden
+// deneme yalnız ivme geçişini (fuseMomentum) tetikler — talep hakemi
+// (fuseJudge) tekrar çağrılmaz, LLM maliyeti tekrar ödenmez (#50 B parçası).
 func (s *Store) IdeasNeedingFusion(ctx context.Context, limit int) ([]Idea, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, title, problem_statement, proposed_solution, domain_tags
+		SELECT id, title, problem_statement, proposed_solution, domain_tags, fused_at
 		FROM ideas
-		WHERE source_type = 'market_derived' AND fused_at IS NULL
-		ORDER BY id
+		WHERE source_type = 'market_derived'
+		  AND (fused_at IS NULL OR fused_at < now() - interval '7 days')
+		ORDER BY fused_at NULLS FIRST, id
 		LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -210,7 +216,7 @@ func (s *Store) IdeasNeedingFusion(ctx context.Context, limit int) ([]Idea, erro
 	var out []Idea
 	for rows.Next() {
 		var i Idea
-		if err := rows.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution, &i.DomainTags); err != nil {
+		if err := rows.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution, &i.DomainTags, &i.FusedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -260,6 +266,68 @@ func (s *Store) SetIdeaLocalEvidence(ctx context.Context, ideaID int64, evidence
 	_, err := s.Pool.Exec(ctx, `
 		UPDATE ideas SET local_evidence = $2, fused_at = now(), updated_at = now()
 		WHERE id = $1`, ideaID, evidence)
+	return err
+}
+
+// MomentumCandidates, karta aday GitHub ivme repolarını döner: son 7 günün
+// github_trending satırları arasından repo başına en güncel satır (aynı
+// repo farklı günlerde tekrar edebilir), problem metnine trigram
+// benzerliği düşük bir eşiği (0.10 — title yalnız "owner/repo" olduğundan
+// FusionCandidates'takinden düşük tutulur) geçenler, benzerliğe göre
+// sıralı. tags şu an filtrede kullanılmıyor (repo'nun kendi domain_tags'i
+// yok); imza FusionCandidates ile simetri ve ileride tag-tabanlı daraltma
+// için ayrılmıştır.
+func (s *Store) MomentumCandidates(ctx context.Context, problem string, tags []string, limit int) ([]RawPost, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	rows, err := s.Pool.Query(ctx, `
+		WITH recent AS (
+			SELECT DISTINCT ON (split_part(source_ref, ':', 1))
+			       id, platform, source_ref, community, title, body,
+			       COALESCE(author, ''), COALESCE(url, ''), COALESCE(score, 0), created_at
+			FROM raw_posts
+			WHERE platform = 'github_trending'
+			  AND created_at > now() - interval '7 days'
+			ORDER BY split_part(source_ref, ':', 1), created_at DESC
+		)
+		SELECT id, platform, source_ref, community, title, body, author, url, score, created_at,
+		       similarity(title || ' ' || body, $1) AS sim
+		FROM recent
+		WHERE similarity(title || ' ' || body, $1) > 0.10
+		ORDER BY sim DESC
+		LIMIT $2`, problem, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RawPost
+	for rows.Next() {
+		var p RawPost
+		var sim float64
+		if err := rows.Scan(&p.ID, &p.Platform, &p.SourceRef, &p.Community, &p.Title,
+			&p.Body, &p.Author, &p.URL, &p.Score, &p.CreatedAt, &sim); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// AppendIdeaLocalEvidence, mevcut yerel talep kanıt satırlarını SİLMEDEN
+// yeni satırlar ekler (füzyonun ivme geçişi — SetIdeaLocalEvidence'ın
+// aksine diziyi bütünüyle değiştirmez). fused_at her çağrıda damgalanır
+// (satır eklenmese bile — haftalık yeniden deneme penceresi için "denendi"
+// işareti gerekir). nil slice pgx'te SQL NULL yazar ve `||` birleştirmesini
+// kırar; guard ile boş diziye indirgenir (CLAUDE.md nil-slice tuzağı).
+func (s *Store) AppendIdeaLocalEvidence(ctx context.Context, ideaID int64, lines []string) error {
+	if lines == nil {
+		lines = []string{}
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE ideas SET local_evidence = local_evidence || $2, fused_at = now(), updated_at = now()
+		WHERE id = $1`, ideaID, lines)
 	return err
 }
 

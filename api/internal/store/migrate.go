@@ -41,6 +41,9 @@ var migration010 string
 //go:embed migrate_sql/011_archive_ideas.sql
 var migration011 string
 
+//go:embed migrate_sql/012_github_trending.sql
+var migration012 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -94,6 +97,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration011); err != nil {
 		return fmt.Errorf("011_archive_ideas.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration012); err != nil {
+		return fmt.Errorf("012_github_trending.sql: %w", err)
 	}
 	return nil
 }
