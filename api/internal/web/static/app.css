@@ -145,7 +145,7 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-    /* "Ağrı Noktası" rozeti: yeşilden soğuk camgöbeğine. */
+    /* "Kullanıcı İhtiyacı" rozeti: yeşilden soğuk camgöbeğine. */
     --badge-pain-bg: rgba(56, 189, 248, 0.14);
     --badge-pain-fg: #7dd3fc;
     --badge-pain-bd: rgba(56, 189, 248, 0.35);
@@ -291,7 +291,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-  /* "Ağrı Noktası" rozeti: yeşilden soğuk camgöbeğine. */
+  /* "Kullanıcı İhtiyacı" rozeti: yeşilden soğuk camgöbeğine. */
   --badge-pain-bg: rgba(56, 189, 248, 0.14);
   --badge-pain-fg: #7dd3fc;
   --badge-pain-bd: rgba(56, 189, 248, 0.35);

@@ -384,7 +384,7 @@ func TestGalleryListsIdeas(t *testing.T) {
 		"Konuşma terapisi takip aracı",
 		`href="/ideas/1"`,
 		`href="/ideas/2"`,
-		"Ağrı Noktası",
+		"Kullanıcı İhtiyacı",
 		"Pazar Verisi",
 		"2 fikir",
 		"#scheduling",
