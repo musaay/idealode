@@ -39,9 +39,20 @@ const fuseMomentumSystem = `You match a software product idea with trending GitH
 
 Return ONLY a JSON object exactly of this shape: {"indices":[0,3]} — an ARRAY of INTEGER repo numbers (0-based). If none match, return {"indices":[]}.`
 
+// fuseStore, FuseEvidence'ın ihtiyaç duyduğu store operasyonlarını soyutlar
+// — canlı DB olmadan fake ile test edilebilsin diye (bkz. fuse_test.go).
+// *store.Store bu arayüzü zaten sağlar.
+type fuseStore interface {
+	IdeasNeedingFusion(ctx context.Context, limit int) ([]store.Idea, error)
+	FusionCandidates(ctx context.Context, tags []string, problem string, limit int) ([]store.RawPost, error)
+	SetIdeaLocalEvidence(ctx context.Context, ideaID int64, evidence []string) error
+	MomentumCandidates(ctx context.Context, problem string, tags []string, limit int) ([]store.RawPost, error)
+	AppendIdeaLocalEvidence(ctx context.Context, ideaID int64, lines []string) error
+}
+
 // FuseEvidence, füzyon bekleyen market_derived kartlara yerel talep kanıtı
 // eşleştirir; işlenen kart sayısını döner.
-func FuseEvidence(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat) (int, error) {
+func FuseEvidence(ctx context.Context, cfg *config.Config, st fuseStore, chat llm.Chat) (int, error) {
 	ideas, err := st.IdeasNeedingFusion(ctx, fuseIdeaLimit)
 	if err != nil {
 		return 0, err
@@ -62,12 +73,16 @@ func FuseEvidence(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		isRetry := idea.FusedAt != nil
 
 		if !isRetry {
+			// İlk geçiş: talep + ivme AYNI koşuda hesaplanır ve TEK
+			// SetIdeaLocalEvidence çağrısıyla yazılır (fused_at bir kez
+			// damgalanır) — Append yalnız haftalık yeniden deneme yolunda
+			// kullanılır (aşağıdaki else dalı).
 			candidates, err := st.FusionCandidates(ctx, idea.DomainTags, idea.ProblemStatement, fuseCandidateLimit)
 			if err != nil {
 				return fused, err
 			}
 
-			evidence := []string{}
+			demand := []string{}
 			if len(candidates) > 0 {
 				matched, err := fuseJudge(ctx, chat, idea, candidates)
 				if err != nil {
@@ -75,35 +90,44 @@ func FuseEvidence(ctx context.Context, cfg *config.Config, st *store.Store, chat
 					continue
 				}
 				for _, p := range matched {
-					if len(evidence) >= fuseEvidenceMax {
+					if len(demand) >= fuseEvidenceMax {
 						break
 					}
 					quote := strings.TrimSpace(p.Body)
 					if quote == "" {
 						quote = p.Title
 					}
-					evidence = append(evidence,
+					demand = append(demand,
 						fmt.Sprintf("%s — [%s] %s", clip(quote, 260), p.Platform, p.URL))
 				}
 			}
 
+			// İvme hakemi hata verirse talep kanıtı YİNE de yazılır — kaybolmaz;
+			// yalnız ivme boş kalır ve haftalık yeniden denemede tekrar denenir.
+			momentum, err := fuseMomentum(ctx, chat, st, idea)
+			if err != nil {
+				log.Printf("fuse: %q ivme hakemi HATA: %v — talep kanıtı yazıldı, ivme haftalık yeniden denemede", idea.Title, err)
+				momentum = nil
+			}
+
+			evidence := append(append([]string{}, demand...), momentum...)
 			if err := st.SetIdeaLocalEvidence(ctx, idea.ID, evidence); err != nil {
 				return fused, err
 			}
-			log.Printf("fuse: %q -> %d yerel talep kanıtı", idea.Title, len(evidence))
+			log.Printf("fuse: %q -> %d yerel talep + %d ivme kanıtı", idea.Title, len(demand), len(momentum))
+		} else {
+			// Haftalık yeniden deneme: yalnız ivme geçişi çalışır; mevcut
+			// talep kanıtı satırları KORUNUR (Append, Set değil).
+			momentum, err := fuseMomentum(ctx, chat, st, idea)
+			if err != nil {
+				log.Printf("fuse: %q ivme geçişi HATA: %v — atlandı (damgalanmadı)", idea.Title, err)
+				continue
+			}
+			if err := st.AppendIdeaLocalEvidence(ctx, idea.ID, momentum); err != nil {
+				return fused, err
+			}
+			log.Printf("fuse: %q -> %d ivme kanıtı (yeniden deneme)", idea.Title, len(momentum))
 		}
-
-		// İvme geçişi: hem ilk füzyonda hem haftalık yeniden denemede
-		// çalışır; mevcut talep kanıtı satırları KORUNUR (Append, Set değil).
-		momentum, err := fuseMomentum(ctx, chat, st, idea)
-		if err != nil {
-			log.Printf("fuse: %q ivme geçişi HATA: %v — atlandı (damgalanmadı)", idea.Title, err)
-			continue
-		}
-		if err := st.AppendIdeaLocalEvidence(ctx, idea.ID, momentum); err != nil {
-			return fused, err
-		}
-		log.Printf("fuse: %q -> %d ivme kanıtı", idea.Title, len(momentum))
 
 		fused++
 
@@ -151,7 +175,7 @@ var totalStarsPrefixRe = regexp.MustCompile(`^★([\d,]+)`)
 // view.go:293 regex'ine uyan kanıt satırlarına çevirir (en fazla
 // fuseMomentumMax adet — talep alıntılarının tavanından AYRI). Aday yoksa
 // LLM'e hiç gidilmez, boş (nil değil) dizi döner.
-func fuseMomentum(ctx context.Context, chat llm.Chat, st *store.Store, idea store.Idea) ([]string, error) {
+func fuseMomentum(ctx context.Context, chat llm.Chat, st fuseStore, idea store.Idea) ([]string, error) {
 	candidates, err := st.MomentumCandidates(ctx, idea.ProblemStatement, idea.DomainTags, fuseMomentumCandidateLimit)
 	if err != nil {
 		return nil, err
