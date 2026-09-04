@@ -224,6 +224,42 @@ func (s *Store) IdeasNeedingFusion(ctx context.Context, limit int) ([]Idea, erro
 	return out, rows.Err()
 }
 
+// CountIdeasSince, belirli source_type'tan son `sinceDays` gün içinde açılan
+// kart sayısını döner — ivme kartlarının haftalık sert tavanı için (#89):
+// çağıran sinceDays=7, source_type='momentum_derived' geçer; sonuç ≥1 ise
+// tohum bu koşuda atlanır (imleç yazılmadan).
+func (s *Store) CountIdeasSince(ctx context.Context, sourceType string, sinceDays int) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM ideas
+		 WHERE source_type = $1 AND created_at >= now() - make_interval(days => $2)`,
+		sourceType, sinceDays).Scan(&n)
+	return n, err
+}
+
+// TrendingPersistenceDays, github_trending kaynağındaki bir repo'nun son
+// `sinceDays` gün içinde raw_posts'ta kaç FARKLI günde göründüğünü
+// (kalıcılık, #89 ivme kapısı madde 1) ve en son görüldüğü günün skorunu
+// (günlük ★ artışı, evidence metninde "+M/gün" için) döner. repo,
+// "owner/repo" biçiminde — source_ref "owner/repo:YYYY-MM-DD" olarak
+// tutulur (bkz. connector.GitHubTrending.FetchNew).
+func (s *Store) TrendingPersistenceDays(ctx context.Context, repo string, sinceDays int) (persistedDays int, lastDailyDelta int, err error) {
+	err = s.Pool.QueryRow(ctx, `
+		SELECT
+			count(DISTINCT split_part(source_ref, ':', 2)),
+			coalesce((
+				SELECT score FROM raw_posts
+				WHERE platform = 'github_trending' AND split_part(source_ref, ':', 1) = $1
+				ORDER BY created_at DESC LIMIT 1
+			), 0)
+		FROM raw_posts
+		WHERE platform = 'github_trending'
+		  AND split_part(source_ref, ':', 1) = $1
+		  AND created_at >= now() - make_interval(days => $2)`,
+		repo, sinceDays).Scan(&persistedDays, &lastDailyDelta)
+	return persistedDays, lastDailyDelta, err
+}
+
 // FusionCandidates, karta aday yerel talep kanıtlarını döner: tag kesişimi
 // ya da başlık benzerliği olan, sinyalli (pain_point/feature_request)
 // post'lar, benzerliğe göre sıralı.
