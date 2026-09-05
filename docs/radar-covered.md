@@ -64,3 +64,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Youform (Abhishek Chakravarty, Davis Baer) — ucuz Typeform alternatifi form/anket aracı, $18K MRR, 80K kullanıcı (2026-09-04)
 - Extra Points (Matt Brown) — kolej sporunun iş/finans tarafına odaklı niş ücretli bülten, ~$200K/yıl, üniversitelere toplu lisans (2026-09-04)
 - FounderPal (Sveta Bay, Dan Kulkov) — solopreneur'lar için AI pazarlama strateji üretici, $10K/ay, Bubble ile 3 haftada yapıldı (2026-09-04)
+- Leadmore AI (Richard Wang) — Reddit'te organik lead/mesaj üreten B2B AI pazarlama aracı, 4 ayda $30K MRR (2026-09-05)
+- Launch Fast (Hasaam Bhatti) — Amazon satıcıları için AI ürün/anahtar kelime araştırma aracı, ~$30K/ay (2026-09-05)
+- Simple Analytics (Adriaan van Rossum) — çerez izni gerektirmeyen gizlilik odaklı Google Analytics alternatifi, ~$35-40K MRR (2026-09-05)
