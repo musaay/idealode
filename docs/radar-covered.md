@@ -67,3 +67,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Leadmore AI (Richard Wang) — Reddit'te organik lead/mesaj üreten B2B AI pazarlama aracı, 4 ayda $30K MRR (2026-09-05)
 - Launch Fast (Hasaam Bhatti) — Amazon satıcıları için AI ürün/anahtar kelime araştırma aracı, ~$30K/ay (2026-09-05)
 - Simple Analytics (Adriaan van Rossum) — çerez izni gerektirmeyen gizlilik odaklı Google Analytics alternatifi, ~$35-40K MRR (2026-09-05)
+- Snag (Benjamin Chen) — çevredeki bedava eşyaları tek akışta toplayan uygulama, 4 ayda $30K/ay, 100K+ indirme (2026-09-06)
+- AirTrack (Niki Kravchuk) — uçuş fiyatı takip eden Telegram botu, 1M+ kullanıcı, $7K/ay (2026-09-06)
+- CalBuddy (Tomer Cnaan) — Cal AI'nin İsrail pazarı için İbranice klonu, kalori takip uygulaması, $81K/ay (2026-09-06)
+- Glowy (Will Baker) — "lazymaxing" yöntemiyle yapılan yüz analiz/skorlama uygulaması, ~$10K/ay, satışa hazır varlık olarak üretildi (2026-09-06)
