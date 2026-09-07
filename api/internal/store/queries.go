@@ -321,7 +321,8 @@ func (s *Store) MomentumCandidates(ctx context.Context, problem string, tags []s
 		WITH recent AS (
 			SELECT DISTINCT ON (split_part(source_ref, ':', 1))
 			       id, platform, source_ref, community, title, body,
-			       COALESCE(author, ''), COALESCE(url, ''), COALESCE(score, 0), created_at
+			       COALESCE(author, '') AS author, COALESCE(url, '') AS url,
+			       COALESCE(score, 0) AS score, created_at
 			FROM raw_posts
 			WHERE platform = 'github_trending'
 			  AND created_at > now() - interval '7 days'
