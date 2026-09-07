@@ -116,12 +116,69 @@ func badgeFor(lang, sourceType string) Badge {
 	return Badge{Kind: "other", Label: sourceType}
 }
 
+// distinctCriteria, özgünlük merceğinin (#101) tanıdığı kriter anahtarları.
+// Listede olmayan değer ("none", boş, beklenmedik metin) hiç basılmaz —
+// uydurma etiket üretilmez.
+var distinctCriteria = map[string]bool{"K1": true, "K2": true, "K3": true, "K4": true}
+
+// DistinctBadge, özgünlük merceğinin kart üzerindeki izi. Mercek ADVISORY'dir
+// (kartı geçersiz kılmaz): yalnız fail/unsure iz bırakır, pass ve NULL hiçbir
+// şey göstermez — Show=false ise şablon tek bir öğe bile basmaz.
+type DistinctBadge struct {
+	Show          bool
+	Label         string // "Özgünlük: şüpheli · K1"
+	Criterion     string // "K1".."K4"; tanınmayan/none ise boş
+	CriterionText string // "K1 — doygunluk" (yalnız detayda)
+	Reason        string // merceğin gerekçesi, birebir (yalnız detayda)
+	HasDetail     bool   // <details> açılır gövdesinde gösterilecek bir şey var mı
+}
+
+// distinctBadgeFor, kartın distinctiveness_* alanlarını rozete çevirir.
+// Karar metni katalogdan gelir; kriter kısaltması ("· K1") dilden bağımsız
+// olduğu için ayraçla Go tarafında eklenir.
+func distinctBadgeFor(lang string, verdict, criterion, reason *string) DistinctBadge {
+	v := ""
+	if verdict != nil {
+		v = strings.ToLower(strings.TrimSpace(*verdict))
+	}
+	var b DistinctBadge
+	switch v {
+	case "fail":
+		b.Show = true
+		b.Label = translate(lang, "distinct.fail")
+	case "unsure":
+		b.Show = true
+		b.Label = translate(lang, "distinct.unsure")
+	default:
+		// pass, NULL, beklenmedik değer: kartta hiçbir iz yok.
+		return DistinctBadge{}
+	}
+
+	if criterion != nil {
+		if c := strings.ToUpper(strings.TrimSpace(*criterion)); distinctCriteria[c] {
+			b.Criterion = c
+			b.CriterionText = c + " — " + translate(lang, "distinct.criterion."+c)
+			// Kriter kısaltması yalnız "şüpheli" (fail) rozetinde gösterilir;
+			// "belirsiz" kararında mercek kriteri işaretlemez.
+			if v == "fail" {
+				b.Label += " · " + c
+			}
+		}
+	}
+	if reason != nil {
+		b.Reason = strings.TrimSpace(*reason)
+	}
+	b.HasDetail = b.CriterionText != "" || b.Reason != ""
+	return b
+}
+
 // IdeaCard, galeri ızgarasındaki tek kart.
 type IdeaCard struct {
 	ID            int64
 	Title         string
 	Problem       string
 	Badge         Badge
+	Distinct      DistinctBadge
 	EvidenceCount int
 	DomainTags    []string
 	CreatedAt     string // YYYY-MM-DD
@@ -130,10 +187,12 @@ type IdeaCard struct {
 
 // FilterChip, galeri filtre bağlantısı (JS'siz çalışır: düz <a href>).
 type FilterChip struct {
-	Label  string
-	Href   string
-	Kind   string // rozet renkleriyle aynı anahtar; "all" nötr
-	Active bool
+	Label   string
+	Href    string
+	Kind    string // rozet renkleriyle aynı anahtar; "all" nötr
+	Active  bool
+	Current bool   // aria-current="page" basılsın mı (açık/kapa çiplerde false)
+	Aria    string // erişilebilir ad; boşsa görünen etiket kullanılır
 }
 
 // GalleryPage, `GET /` görünüm modeli.
@@ -143,6 +202,7 @@ type GalleryPage struct {
 	Chips      []FilterChip
 	Query      string
 	SourceType string
+	Flag       string // "" | store.FlagDoubtful (gizli alan + arama formu)
 	Count      int
 	Filtered   bool // arama veya filtre uygulanmış mı (boş durumda "temizle")
 }
@@ -190,6 +250,9 @@ type IdeaPage struct {
 	ParentHref string // ai_blended kartın kaynak kartı; boşsa satır basılmaz
 	Mine       bool   // yalnız bu oturuma görünen kart
 	Chat       ChatPanel
+
+	// Özgünlük merceği (#101, advisory): yalnız fail/unsure kartlarda basılır.
+	Distinct DistinctBadge
 }
 
 // ChatBubble, panelde basılan tek mesaj.
@@ -364,14 +427,16 @@ func hostOf(raw string) string {
 }
 
 // buildGallery, store satırlarını galeri görünümüne çevirir.
-func buildGallery(base Page, ideas []store.Idea, sourceType, query string) GalleryPage {
+func buildGallery(base Page, ideas []store.Idea, sourceType, query, flag string) GalleryPage {
 	cards := make([]IdeaCard, 0, len(ideas))
 	for _, i := range ideas {
 		cards = append(cards, IdeaCard{
-			ID:            i.ID,
-			Title:         i.Title,
-			Problem:       i.ProblemStatement,
-			Badge:         badgeFor(base.Lang, i.SourceType),
+			ID:      i.ID,
+			Title:   i.Title,
+			Problem: i.ProblemStatement,
+			Badge:   badgeFor(base.Lang, i.SourceType),
+			Distinct: distinctBadgeFor(base.Lang, i.DistinctivenessVerdict,
+				i.DistinctivenessCriterion, i.DistinctivenessReason),
 			EvidenceCount: i.EvidenceCount,
 			DomainTags:    i.DomainTags,
 			CreatedAt:     formatDate(i.CreatedAt),
@@ -381,19 +446,25 @@ func buildGallery(base Page, ideas []store.Idea, sourceType, query string) Galle
 	return GalleryPage{
 		Page:       base,
 		Ideas:      cards,
-		Chips:      buildChips(base.Lang, sourceType, query),
+		Chips:      buildChips(base.Lang, sourceType, query, flag),
 		Query:      query,
 		SourceType: sourceType,
+		Flag:       flag,
 		Count:      len(cards),
-		Filtered:   sourceType != "" || query != "",
+		Filtered:   sourceType != "" || query != "" || flag != "",
 	}
 }
 
 // chipOrder, filtre chip'lerinin sabit sırası (galeriye giren tüm türler).
 var chipOrder = []string{"", "pain_point", "market_derived", "momentum_derived", "ai_blended"}
 
-func buildChips(lang, active, query string) []FilterChip {
-	chips := make([]FilterChip, 0, len(chipOrder))
+// buildChips, kaynak türü çiplerini ve sonlarına "Şüpheli" çipini üretir.
+// İki eksen birleşir: tür çipleri yürürlükteki flag'i korur, "Şüpheli" çipi
+// yürürlükteki türü ve aramayı korur. "Şüpheli" açık/kapa çalışır (etkinken
+// bağlantı filtreyi kaldırır) — bu yüzden aria-current basılmaz, bunun yerine
+// ne yapacağını söyleyen bir erişilebilir ad taşır.
+func buildChips(lang, active, query, flag string) []FilterChip {
+	chips := make([]FilterChip, 0, len(chipOrder)+1)
 	for _, st := range chipOrder {
 		label := translate(lang, "gallery.filter.all")
 		kind := "all"
@@ -408,13 +479,45 @@ func buildChips(lang, active, query string) []FilterChip {
 		if query != "" {
 			v.Set("q", query)
 		}
-		href := "/"
-		if len(v) > 0 {
-			href = "/?" + v.Encode()
+		if flag != "" {
+			v.Set("flag", flag)
 		}
-		chips = append(chips, FilterChip{Label: label, Href: href, Kind: kind, Active: active == st})
+		chips = append(chips, FilterChip{
+			Label: label, Href: galleryHref(v), Kind: kind,
+			Active: active == st, Current: active == st,
+		})
 	}
+
+	v := url.Values{}
+	if active != "" {
+		v.Set("source_type", active)
+	}
+	if query != "" {
+		v.Set("q", query)
+	}
+	on := flag == store.FlagDoubtful
+	aria := translate(lang, "gallery.filter.doubtful_on")
+	if on {
+		aria = translate(lang, "gallery.filter.doubtful_off")
+	} else {
+		v.Set("flag", store.FlagDoubtful)
+	}
+	chips = append(chips, FilterChip{
+		Label:  translate(lang, "gallery.filter.doubtful"),
+		Href:   galleryHref(v),
+		Kind:   "doubtful",
+		Active: on,
+		Aria:   aria,
+	})
 	return chips
+}
+
+// galleryHref, galeri bağlantısını üretir (parametresizse düz "/").
+func galleryHref(v url.Values) string {
+	if len(v) == 0 {
+		return "/"
+	}
+	return "/?" + v.Encode()
 }
 
 // buildIdea, tek kartı, kaynaklarını ve sohbet panelini görünüm modeline
@@ -456,6 +559,8 @@ func buildIdea(base Page, idea *store.Idea, sources []store.IdeaSource, msgs []C
 		Urgency:       idea.UrgencyScore,
 		Monetization:  idea.MonetizationSignal,
 		CreatedAt:     formatDate(idea.CreatedAt),
+		Distinct: distinctBadgeFor(base.Lang, idea.DistinctivenessVerdict,
+			idea.DistinctivenessCriterion, idea.DistinctivenessReason),
 	}
 	page.HasMeta = page.Urgency > 0 || page.Monetization > 0 ||
 		page.SourceTheme != "" || page.Competitors != ""

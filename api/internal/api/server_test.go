@@ -302,6 +302,28 @@ func TestListIdeas_UnknownSourceType(t *testing.T) {
 	}
 }
 
+// TestListIdeas_DoubtfulFlag: `flag` beyaz listedir — yalnız "doubtful"
+// filtreye geçer, başka her değer filtresiz sayılır (#104).
+func TestListIdeas_DoubtfulFlag(t *testing.T) {
+	fs := newFakeStore()
+	s := newTestServer(fs, &fakeLLM{})
+
+	doReq(t, s.Handler(), "/api/ideas?flag=doubtful")
+	if fs.lastFilter.Flag != store.FlagDoubtful {
+		t.Errorf("flag filtreye geçmedi: %q", fs.lastFilter.Flag)
+	}
+
+	doReq(t, s.Handler(), "/api/ideas?flag=drop%20table")
+	if fs.lastFilter.Flag != "" {
+		t.Errorf("bilinmeyen flag filtreye sızdı: %q", fs.lastFilter.Flag)
+	}
+
+	doReq(t, s.Handler(), "/api/ideas")
+	if fs.lastFilter.Flag != "" {
+		t.Errorf("flag'siz istekte filtre dolu geldi: %q", fs.lastFilter.Flag)
+	}
+}
+
 func TestListIdeas_EmptyResult_NotNull(t *testing.T) {
 	fs := newFakeStore()
 	fs.ideas = nil // nil slice tuzağı

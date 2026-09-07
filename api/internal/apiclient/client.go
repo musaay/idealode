@@ -53,6 +53,10 @@ func (c *Client) ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]s
 	if f.Limit > 0 {
 		q.Set("limit", strconv.Itoa(f.Limit))
 	}
+	// Beyaz liste store.FlagDoubtful'dedir; tanınmayan değer hiç gönderilmez.
+	if f.Flag == store.FlagDoubtful {
+		q.Set("flag", f.Flag)
+	}
 
 	var body struct {
 		Ideas []store.Idea `json:"ideas"`
