@@ -28,7 +28,7 @@ const synthesizeSystemTmpl = `You generate concrete software product ideas ("ide
 
 CRITICAL CONSTRAINT: Only propose realistic, grounded, SOFTWARE-heavy ideas that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months. AVOID ideas that require hardware manufacturing, physical infrastructure, large capital, heavy regulation, or a big team. The idea must be a SaaS, an API, a browser extension, an automation tool, an AI-wrapper or similar — something that can quickly be turned into an MVP.
 
-Competition is NOT a filter: the existence of competitors VALIDATES demand. Never reject or water down an idea because "someone already built it". If you can guess likely competitors, list them as an informational note only.
+Competition is NOT a filter by itself: competitors validate demand only when the idea has a specific angle they don't serve — "the same thing again" is not an idea. If you can guess likely competitors, list them as an informational note only.
 
 THIRD-PARTY RULE (critical): Evidence about existing products comes in two kinds — treat them very differently:
 (a) DEFECTS of a specific product: crashes, login failures, technical errors, bad support, that product's own pricing. Only that vendor can fix these; they are NOT valid ideas for an independent builder. If the evidence contains ONLY defects, return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
@@ -274,6 +274,13 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
+		// ADVISORY özgünlük merceği (#101 v3): K1-K4 sonucunu karta yazar,
+		// kart üretimini ASLA bloklamaz (PO kararı: bloklama, işaretle).
+		// Hata verirse alanlar NULL kalır, kart yine de yazılır.
+		if err := distinctivenessAdvise(ctx, chat, &idea); err != nil {
+			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, err)
+		}
+
 		// Dedup (#14): pg_trgm benzerliği + gri bölgede LLM hakemi. Mükerrer
 		// fikir yeni kart açmaz, mevcut kartın kanıtını güçlendirir.
 		dup, existing, err := findDuplicate(ctx, st, chat, idea)
@@ -350,7 +357,9 @@ type ideaResponse struct {
 // (urgency 1-5, monetization 0-5), tag'ler slug'a normalize edilir,
 // alıntılar 5 ile sınırlanır.
 // errVendorInternal: kanıt yalnızca belirli bir ürünün kendi kusurlarını
-// anlatıyor — üçüncü tarafça inşa edilebilir bir fikir yok (skip cevabı).
+// anlatıyor — üçüncü tarafça inşa edilebilir bir fikir yok (skip cevabı,
+// THIRD-PARTY/DATA-ACCESS RULE — "vendor-internal" ve "data-locked" dahil
+// her skip:true aynı şekilde ele alınır).
 var errVendorInternal = fmt.Errorf("vendor-internal: üçüncü tarafça inşa edilemez")
 
 func parseIdeaResponse(raw string) (store.Idea, error) {

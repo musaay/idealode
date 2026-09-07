@@ -68,7 +68,9 @@ func parseRadarSeeds(jsonl string) []radarSeed {
 
 // Mercek (lens) sistem prompt'ları — üçü de "pass" değilse tohum elenir,
 // kart üretilmez. Şema synthesize.go'daki savunmacı VERDICT parse desenini
-// izler.
+// izler. Özgünlük merceği (lensDistinctivenessSystem) BURADA DEĞİL —
+// ADVISORY olduğundan bloklayıcı listeye girmez, kart üretildikten sonra
+// ayrıca çağrılır (bkz. distinctivenessAdvise, #101 v3).
 const lensThirdPartySystem = `You evaluate whether a proposed software product idea, based on a validated market seed (an existing successful product or trend), could be BUILT BY AN INDEPENDENT THIRD-PARTY developer — not merely patched by the original vendor.
 
 FAIL if the underlying opportunity is actually a defect, bug, or feature gap that only the ORIGINAL vendor could reasonably fix (their own onboarding, their own pricing, their own outage). PASS if an independent developer could build a STANDALONE product serving the same or an adjacent need, without needing to be the original vendor.
@@ -89,10 +91,27 @@ FAIL if the idea has no realistic path to revenue (e.g. a tiny hobbyist niche, a
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
+// lensDistinctivenessSystem: özgünlük merceği (#101 v3) — ADVISORY, bloklamaz.
+// K1-K4'ten biri tutuyorsa verdict "fail"; sonuç kart üretimini engellemez,
+// yalnız store.Idea'nın distinctiveness_* alanlarına yazılır (bkz.
+// distinctivenessAdvise). Kart üretildikten SONRA, hem synthesize.go'nun
+// pain_point yolunda hem seeds.go'nun ProcessSeeds'inde (revenue+trending)
+// aynı biçimde çağrılır.
+const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria. This is an ADVISORY assessment — it does not block the idea, it only flags it. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
+
+K1 Saturation: 10+ well-known (not obscure) products already do the same core job, AND this idea has no distinguishing angle from them. A few strong competitors alone (e.g. 2-3 established players) do NOT trigger K1 — only real saturation with no angle does.
+K2 Natively solvable: the underlying pain is already solved at the OS/platform level (screen time, notifications, etc.) and the product only adds a "nice trick" on top of that native solution. Simplicity alone is not the issue — the question is whether the pain it solves is already natively solved.
+K3 Demand reality: no concrete paying segment exists — especially in Turkey: "who in Turkey would pay for this, and why?" Even if a comparable product has real revenue elsewhere, if there's no TR segment, this still fails K3.
+K4 Platform fragility: a single update from an incumbent/OS vendor would make the idea pointless.
+
+The existence of competitors alone is never, by itself, a reason to fail.
+
+Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that triggered a "fail" verdict, or "none" if verdict is "pass"/"unsure".`
+
 // lensProductizableSystem: ivme tohumlarına özgü 4. mercek (#89 kapı madde
 // 4) — awesome-list, eğitim/kurs, makale/paper, model ağırlığı, saf
 // kütüphane/framework gibi son-kullanıcıya doğrudan ürün olmayan repoları
-// eler. Yalnız kind=="trending" tohumlarda mevcut 3 mercekle birlikte koşar.
+// eler. Yalnız kind=="trending" tohumlarda mevcut merceklerle birlikte koşar.
 const lensProductizableSystem = `You evaluate whether a proposed software product idea, based on a trending GitHub repository, is PRODUCTIZABLE as an end-user tool or application — something a non-contributor user could actually install/open and use.
 
 FAIL if the underlying repository is an awesome-list/curated-links collection, a tutorial or course, a research paper or writeup, a set of model weights/checkpoints, or a pure library/framework meant to be consumed by other developers rather than used directly by an end user.
@@ -121,21 +140,31 @@ var seedLenses = []seedLens{
 var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem}}, seedLenses...)
 
 type lensVerdict struct {
-	Verdict string `json:"verdict"`
-	Reason  string `json:"reason"`
+	Verdict   string `json:"verdict"`
+	Criterion string `json:"criterion"`
+	Reason    string `json:"reason"`
 }
+
+// validDistinctivenessCriteria, lensDistinctivenessSystem'in tanıdığı
+// criterion değerleri — tanınmayan/eksik değer "none"a indirgenir (#101 v3).
+var validDistinctivenessCriteria = map[string]bool{"K1": true, "K2": true, "K3": true, "K4": true, "none": true}
 
 // parseLensVerdict, mercek cevabını savunmacı ayrıştırır: JSON değilse ya da
 // verdict tanınmıyorsa "unsure" sayılır (pass DEĞİL) — belirsizlikte kart
-// üretilmez.
+// üretilmez. criterion tanınmıyorsa (küçük modelin uydurduğu başka bir
+// değer, ya da alan hiç yoksa) "none"a indirgenir.
 func parseLensVerdict(raw string) lensVerdict {
 	var v lensVerdict
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
-		return lensVerdict{Verdict: "unsure", Reason: fmt.Sprintf("LLM yanıtı JSON değil: %.120s", raw)}
+		return lensVerdict{Verdict: "unsure", Criterion: "none", Reason: fmt.Sprintf("LLM yanıtı JSON değil: %.120s", raw)}
 	}
 	v.Verdict = strings.ToLower(strings.TrimSpace(v.Verdict))
 	if v.Verdict != "pass" && v.Verdict != "fail" && v.Verdict != "unsure" {
 		v.Verdict = "unsure"
+	}
+	v.Criterion = strings.TrimSpace(v.Criterion)
+	if !validDistinctivenessCriteria[v.Criterion] {
+		v.Criterion = "none"
 	}
 	return v
 }
@@ -143,6 +172,34 @@ func parseLensVerdict(raw string) lensVerdict {
 func lensUserPrompt(s radarSeed) string {
 	return fmt.Sprintf("Seed name: %s\nSummary: %s\nEvidence: %s\nTR angle: %s",
 		s.Name, s.Summary, s.Evidence, s.TRAngle)
+}
+
+// distinctivenessUserPrompt, lensDistinctivenessSystem'in kullanıcı
+// prompt'u — distinctivenessAdvise'ın tek çağrı noktası üzerinden hem
+// synthesize.go (pain_point) hem ProcessSeeds (market/momentum_derived)
+// yolunda AYNI biçimde kullanılır.
+func distinctivenessUserPrompt(title, problem, solution, targetUser string) string {
+	return fmt.Sprintf("Idea title: %s\nProblem: %s\nSolution: %s\nTarget user: %s",
+		title, problem, solution, targetUser)
+}
+
+// distinctivenessAdvise, kart üretildikten SONRA çağrılan ADVISORY özgünlük
+// merceğidir (#101 v3): kart üretimini ASLA bloklamaz, yalnız
+// store.Idea'nın distinctiveness_verdict/criterion/reason alanlarını
+// doldurur. Mercek çağrısı hata verirse (ağ/kota) alanlar dokunulmadan
+// (dolayısıyla DB'de NULL) kalır ve hata döner — çağıran loglar, kartı yine
+// de yazar (bloklama YOK ilkesi buraya da uygulanır).
+func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
+	raw, err := chat.ChatJSON(ctx, lensDistinctivenessSystem,
+		distinctivenessUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser))
+	if err != nil {
+		return err
+	}
+	v := parseLensVerdict(raw)
+	idea.DistinctivenessVerdict = &v.Verdict
+	idea.DistinctivenessCriterion = &v.Criterion
+	idea.DistinctivenessReason = &v.Reason
+	return nil
 }
 
 // trendingGateStore, ivme tohumu kapısının (#89) ihtiyaç duyduğu store
@@ -347,6 +404,9 @@ func seedRawPost(s radarSeed) store.RawPost {
 
 // ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 3
 // mercekten geçirir ve üçü de "pass" ise market_derived idea card üretir.
+// Kart üretildikten SONRA (dedup'tan önce) ayrıca ADVISORY özgünlük merceği
+// çağrılır — bloklamaz, yalnız kartın distinctiveness_* alanlarını doldurur
+// (#101 v3, bkz. distinctivenessAdvise).
 // Her tohum raw_posts'a platform='radar_seed' olarak yazılır — bu yazım hem
 // idempotency kontrolü (InsertRawPosts ON CONFLICT DO NOTHING) hem de
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
@@ -471,6 +531,12 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			idea.ExampleQuotes = []string{
 				fmt.Sprintf("Kanıt (%s): %s — %s", seed.Name, seed.Evidence, seed.SourceURL),
 			}
+		}
+
+		// ADVISORY özgünlük merceği (#101 v3): kart üretimini bloklamaz.
+		// Hata verirse alanlar NULL kalır, kart yine de yazılır.
+		if err := distinctivenessAdvise(ctx, chat, &idea); err != nil {
+			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, err)
 		}
 
 		dup, existing, err := findDuplicate(ctx, st, chat, idea)

@@ -357,3 +357,151 @@ func TestProcessSeedsDuplicateSkipsCard(t *testing.T) {
 		t.Errorf("mükerrer tohumda MergeIdeaEvidence çağrılmamalı (evidence_count 3 sabit kalmalı), geldi: %d", evidenceCount)
 	}
 }
+
+// TestSeedLensesExcludeDistinctiveness: özgünlük merceği ADVISORY olduğundan
+// (#101 v3) bloklayıcı seedLenses/trendingLenses listelerinde YER ALMAMALI —
+// kart üretildikten SONRA ayrıca çağrılır (bkz. distinctivenessAdvise).
+func TestSeedLensesExcludeDistinctiveness(t *testing.T) {
+	for _, l := range seedLenses {
+		if l.system == lensDistinctivenessSystem {
+			t.Error("seedLenses özgünlük merceğini İÇERMEMELİ (advisory, bloklamaz)")
+		}
+	}
+	for _, l := range trendingLenses {
+		if l.system == lensDistinctivenessSystem {
+			t.Error("trendingLenses özgünlük merceğini İÇERMEMELİ (advisory, bloklamaz)")
+		}
+	}
+}
+
+// advisorySeedChat: 3 bloklayıcı mercek + kart üretimi + dedup normal
+// davranır (pass/cardResponse/same:false); kart-sonrası ADVISORY özgünlük
+// merceği (lensDistinctivenessSystem) ayrıca yapılandırılabilir bir cevap ya
+// da hata döner — #101 v3'ün "kart her durumda yazılır" davranışını
+// doğrulamak için.
+type advisorySeedChat struct {
+	cardResponse      string
+	distinctVerdict   string // pass/fail/unsure; boşsa "pass"
+	distinctCriterion string // boşsa "none"
+	distinctErr       bool   // true ise lensDistinctivenessSystem hata döner
+}
+
+func (f *advisorySeedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	switch {
+	case system == dupJudgeSystem:
+		return `{"same": false}`, nil
+	case strings.Contains(system, `"market_derived"`):
+		return f.cardResponse, nil
+	case system == lensDistinctivenessSystem:
+		if f.distinctErr {
+			return "", fmt.Errorf("simulated özgünlük merceği hatası")
+		}
+		v := f.distinctVerdict
+		if v == "" {
+			v = "pass"
+		}
+		c := f.distinctCriterion
+		if c == "" {
+			c = "none"
+		}
+		return fmt.Sprintf(`{"verdict":%q,"criterion":%q,"reason":"test-reason"}`, v, c), nil
+	default:
+		return `{"verdict":"pass","reason":"test-reason"}`, nil
+	}
+}
+
+// TestProcessSeedsDistinctivenessFailStillWritesCard: özgünlük merceği
+// "fail" (K1) dönse bile kart YAZILIR, alanlar karta doğru işlenir (#101 v3).
+func TestProcessSeedsDistinctivenessFailStillWritesCard(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-obvious"
+	title := "Test Bariz Fikir"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Obvious Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	chat := &advisorySeedChat{
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+		distinctVerdict:   "fail",
+		distinctCriterion: "K1",
+	}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("özgünlük merceği fail dönse de kart yazılmalı (advisory), n=1 beklenirdi, geldi: %d", n)
+	}
+
+	var verdict, criterion, reason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason FROM ideas WHERE title = $1", title).
+		Scan(&verdict, &criterion, &reason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
+	if verdict == nil || *verdict != "fail" {
+		t.Errorf("distinctiveness_verdict=fail beklenirdi, geldi: %v", verdict)
+	}
+	if criterion == nil || *criterion != "K1" {
+		t.Errorf("distinctiveness_criterion=K1 beklenirdi, geldi: %v", criterion)
+	}
+	if reason == nil || *reason == "" {
+		t.Error("distinctiveness_reason boş olmamalı")
+	}
+}
+
+// TestProcessSeedsDistinctivenessErrorStillWritesCard: mercek çağrısı HATA
+// verirse (ağ/kota) kart yine de yazılır, distinctiveness_* alanları NULL
+// kalır (#101 v3 edge case).
+func TestProcessSeedsDistinctivenessErrorStillWritesCard(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-distinct-err"
+	title := "Test Ozgunluk Hata Tohum Fikri"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Distinct Err Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	chat := &advisorySeedChat{
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+		distinctErr: true,
+	}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("mercek HATA verse de kart yazılmalı, n=1 beklenirdi, geldi: %d", n)
+	}
+
+	var verdict, criterion, reason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason FROM ideas WHERE title = $1", title).
+		Scan(&verdict, &criterion, &reason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
+	if verdict != nil || criterion != nil || reason != nil {
+		t.Errorf("mercek hatasında distinctiveness_* alanları NULL kalmalı, geldi: verdict=%v criterion=%v reason=%v", verdict, criterion, reason)
+	}
+}
