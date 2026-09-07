@@ -71,3 +71,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AirTrack (Niki Kravchuk) — uçuş fiyatı takip eden Telegram botu, 1M+ kullanıcı, $7K/ay (2026-09-06)
 - CalBuddy (Tomer Cnaan) — Cal AI'nin İsrail pazarı için İbranice klonu, kalori takip uygulaması, $81K/ay (2026-09-06)
 - Glowy (Will Baker) — "lazymaxing" yöntemiyle yapılan yüz analiz/skorlama uygulaması, ~$10K/ay, satışa hazır varlık olarak üretildi (2026-09-06)
+- MonAI (Florian, Charlie Alvarez) — konuşarak/yazarak masraf kaydı tutan AI kişisel finans uygulaması, influencer ortaklığıyla 1 yılda $300'den $35K MRR'a (2026-09-07)
+- Career Hound (Roman) — şirketlerin kariyer sayfalarından iş ilanı kazıyan, LinkedIn/Indeed dışı iş bulma platformu, $28K/ay ($12K MRR) (2026-09-07)
+- Pushscroll (Alejandro, Mario) — push-up yapmadan sosyal medya uygulamalarını kilitleyen fitness/ekran-süresi uygulaması, sıfır reklam bütçesiyle $30K/ay (2026-09-07)
