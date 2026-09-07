@@ -96,7 +96,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleListIdeas, `GET /api/ideas?source_type=&q=&limit=`.
+// handleListIdeas, `GET /api/ideas?source_type=&q=&limit=&flag=`.
 func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
@@ -115,6 +115,13 @@ func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// flag beyaz listedir: yalnız "doubtful" tanınır (özgünlük merceği
+	// fail/unsure). Tanınmayan değer sessizce filtresiz sayılır.
+	flag := strings.TrimSpace(r.URL.Query().Get("flag"))
+	if flag != store.FlagDoubtful {
+		flag = ""
+	}
+
 	// limit geçersiz/boşsa 0'a düşer; ListIdeasFiltered <=0 -> 60,
 	// >200 -> 200 kuralını zaten uyguluyor.
 	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
@@ -124,6 +131,7 @@ func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
 		Query:      q,
 		Limit:      limit,
 		SessionID:  sid,
+		Flag:       flag,
 	})
 	if err != nil {
 		logHata(r, err)

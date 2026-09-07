@@ -237,3 +237,13 @@
 <script src="/static/app.js?v={{ .AssetVer }}" defer></script>
 </body>
 </html>
+
+{{/* ---------- özgünlük rozeti (#101, advisory) ----------
+     Bağlam: DistinctBadge. Show=false ise hiçbir öğe basılmaz — özgünlük
+     merceğinin "pass" dediği ya da hiç çalışmadığı (NULL) kart üzerinde tek
+     bir iz bile kalmaz. Rozet bir karar değil uyarıdır: kartı geçersiz
+     kılmaz, PO'ya bakılacak yeri gösterir. */}}
+{{ define "distinct-badge" }}{{ if .Show }}<span class="badge badge-doubtful">
+  <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false"><path d="M12 4.6 21 19.4H3L12 4.6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10.2v3.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg>
+  {{ .Label }}
+</span>{{ end }}{{ end }}

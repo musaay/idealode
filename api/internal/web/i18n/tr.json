@@ -35,6 +35,9 @@
   "gallery.search_clear": "Aramayı temizle",
   "gallery.filter_label": "Kaynak türüne göre filtrele",
   "gallery.filter.all": "Tümü",
+  "gallery.filter.doubtful": "Şüpheli",
+  "gallery.filter.doubtful_on": "Şüpheli kartları göster",
+  "gallery.filter.doubtful_off": "Şüpheli filtresini kaldır",
   "gallery.empty.title": "Eşleşen fikir yok",
   "gallery.empty.body": "Arama veya filtreyi değiştirip yeniden deneyin.",
   "gallery.clear": "Filtreleri temizle",
@@ -47,6 +50,15 @@
   "source_type.user_created": "Kullanıcı Fikri",
 
   "card.evidence": "%d kanıt",
+
+  "distinct.fail": "Özgünlük: şüpheli",
+  "distinct.unsure": "Özgünlük: belirsiz",
+  "distinct.why": "Neden?",
+  "distinct.note": "Bu bir AI değerlendirmesidir; kartı geçersiz kılmaz, yalnız dikkat çeker.",
+  "distinct.criterion.K1": "pazar doygunluğu — çok sayıda bilinen ürün aynı işi yapıyor",
+  "distinct.criterion.K2": "yerleşik çözüm — sorunu platform/işletim sistemi zaten çözüyor",
+  "distinct.criterion.K3": "TR talebi — Türkiye'de ödeme yapacak somut bir kesim görünmüyor",
+  "distinct.criterion.K4": "platform kırılganlığı — tek bir güncelleme fikri geçersiz kılabilir",
 
   "platform.radar_seed": "Radar",
   "platform.hackernews": "Hacker News",

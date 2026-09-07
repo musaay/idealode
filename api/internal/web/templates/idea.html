@@ -37,6 +37,31 @@
 
     <h1 id="idea-title">{{ .Heading }}</h1>
 
+    {{/* Özgünlük merceği (#101, advisory). Gerekçe <details> ile açılır:
+         JS'siz çalışır, açık/kapalı durumu tarayıcının kendi işidir. Gövdede
+         gösterilecek bir şey yoksa yalnız rozet basılır. */}}
+    {{ if .Distinct.Show }}
+    {{ if .Distinct.HasDetail }}
+    <details class="distinct">
+      <summary class="distinct-summary">
+        {{ template "distinct-badge" .Distinct }}
+        <span class="distinct-toggle">{{ .T "distinct.why" }}</span>
+      </summary>
+      <div class="distinct-body">
+        {{ if .Distinct.CriterionText }}
+        <p class="distinct-criterion">{{ .Distinct.CriterionText }}</p>
+        {{ end }}
+        {{ if .Distinct.Reason }}
+        <p class="distinct-reason">{{ .Distinct.Reason }}</p>
+        {{ end }}
+        <p class="distinct-note">{{ .T "distinct.note" }}</p>
+      </div>
+    </details>
+    {{ else }}
+    <p class="distinct distinct-bare">{{ template "distinct-badge" .Distinct }}</p>
+    {{ end }}
+    {{ end }}
+
     {{ if .ParentHref }}
     <p class="idea-parent">
       <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>

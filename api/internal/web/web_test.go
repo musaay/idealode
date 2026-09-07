@@ -52,6 +52,16 @@ func (f *fakeStore) ListIdeasFiltered(ctx context.Context, flt store.IdeaFilter)
 			!strings.Contains(strings.ToLower(i.ProblemStatement), q) {
 			continue
 		}
+		// Gerçek sorgunun "şüpheli" kuralı: yalnız fail/unsure (#104).
+		if flt.Flag == store.FlagDoubtful {
+			v := ""
+			if i.DistinctivenessVerdict != nil {
+				v = *i.DistinctivenessVerdict
+			}
+			if v != "fail" && v != "unsure" {
+				continue
+			}
+		}
 		out = append(out, i)
 	}
 	return out, nil
@@ -1723,5 +1733,234 @@ func TestMomentumDerivedDetailAndEN(t *testing.T) {
 	// Kart içeriği ASLA çevrilmez.
 	if !strings.Contains(en, "Terminal içi rebase yardımcısı") {
 		t.Error("kart başlığı EN'de değişti")
+	}
+}
+
+// ------------------------------------------------- özgünlük rozeti (#104)
+
+// distinctStore, özgünlük merceğinin dört durumunu da taşıyan fikstür:
+// fail (K1), unsure, pass ve mercek hiç koşmamış (NULL).
+func distinctStore() *fakeStore {
+	base := time.Date(2026, 9, 4, 9, 0, 0, 0, time.UTC)
+	str := func(s string) *string { return &s }
+	return &fakeStore{
+		ideas: []store.Idea{
+			{
+				ID:               10,
+				Title:            "Ekran süresi koçu",
+				ProblemStatement: "Kullanıcılar telefonda geçen süreyi kontrol edemiyor.",
+				ProposedSolution: "Günlük hedef ve nazik hatırlatma.",
+				EvidenceCount:    2,
+				SourceType:       "pain_point",
+				DomainTags:       []string{"wellbeing"},
+				CreatedAt:        base,
+
+				DistinctivenessVerdict:   str("fail"),
+				DistinctivenessCriterion: str("K1"),
+				DistinctivenessReason:    str("Onlarca bilinen ürün aynı işi yapıyor; ayırt edici bir açı görünmüyor."),
+			},
+			{
+				ID:               11,
+				Title:            "Fatura ayrıştırıcı",
+				ProblemStatement: "Serbest çalışanlar faturaları elle giriyor.",
+				ProposedSolution: "E-postadan otomatik ayrıştırma.",
+				EvidenceCount:    3,
+				SourceType:       "market_derived",
+				CreatedAt:        base,
+
+				DistinctivenessVerdict:   str("unsure"),
+				DistinctivenessCriterion: str("none"),
+				DistinctivenessReason:    str("Rakip yoğunluğu net değil; TR tarafında ödeyen kesim ölçülemedi."),
+			},
+			{
+				ID:               12,
+				Title:            "Kooperatif stok paneli",
+				ProblemStatement: "Üretici kooperatifleri stoğu defterde tutuyor.",
+				ProposedSolution: "Ortak stok paneli.",
+				EvidenceCount:    4,
+				SourceType:       "pain_point",
+				CreatedAt:        base,
+
+				DistinctivenessVerdict:   str("pass"),
+				DistinctivenessCriterion: str("none"),
+				DistinctivenessReason:    str("Bu gerekçe kullanıcıya ASLA gösterilmemeli."),
+			},
+			{
+				ID:               13,
+				Title:            "Mercek koşmamış kart",
+				ProblemStatement: "Mercek hata verdiği için alanlar NULL kaldı.",
+				SourceType:       "pain_point",
+				CreatedAt:        base,
+			},
+		},
+	}
+}
+
+// TestDistinctivenessBadgeGallery: fail/unsure kartta rozet var, pass ve NULL
+// kartta hiçbir iz yok.
+func TestDistinctivenessBadgeGallery(t *testing.T) {
+	body := do(t, newTestServer(t, distinctStore()), http.MethodGet, "/").Body.String()
+
+	for _, want := range []string{
+		`class="badge badge-doubtful"`,
+		"Özgünlük: şüpheli · K1",
+		"Özgünlük: belirsiz",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("galeri gövdesinde %q yok", want)
+		}
+	}
+	// pass/NULL kartlar listede ama rozetsiz: yalnız iki rozet basılmalı.
+	if n := strings.Count(body, "badge-doubtful"); n != 2 {
+		t.Errorf("özgünlük rozeti sayısı = %d, 2 bekleniyor (yalnız fail+unsure)", n)
+	}
+	// Gerekçe galeri kartında hiç basılmaz (yalnız detayda).
+	if strings.Contains(body, "Onlarca bilinen ürün") {
+		t.Error("gerekçe metni galeri kartına sızdı")
+	}
+	if strings.Contains(body, "ASLA gösterilmemeli") {
+		t.Error("pass kartın gerekçesi sayfaya sızdı")
+	}
+	// "belirsiz" kararında kriter kısaltması gösterilmez.
+	if strings.Contains(body, "Özgünlük: belirsiz ·") {
+		t.Error("unsure rozetine kriter eklendi")
+	}
+}
+
+// TestDistinctivenessDetail: detayda rozet + <details> gerekçe (JS gerekmez).
+func TestDistinctivenessDetail(t *testing.T) {
+	h := newTestServer(t, distinctStore())
+
+	body := do(t, h, http.MethodGet, "/ideas/10").Body.String()
+	for _, want := range []string{
+		`<details class="distinct">`,
+		`<summary class="distinct-summary">`,
+		"Özgünlük: şüpheli · K1",
+		"K1 — pazar doygunluğu",
+		"Onlarca bilinen ürün aynı işi yapıyor; ayırt edici bir açı görünmüyor.",
+		"Neden?",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detay gövdesinde %q yok", want)
+		}
+	}
+
+	unsure := do(t, h, http.MethodGet, "/ideas/11").Body.String()
+	if !strings.Contains(unsure, "Özgünlük: belirsiz") {
+		t.Error("unsure kartta rozet yok")
+	}
+	if !strings.Contains(unsure, "Rakip yoğunluğu net değil") {
+		t.Error("unsure kartta gerekçe yok")
+	}
+	if strings.Contains(unsure, "K1 —") {
+		t.Error("criterion=none kartta kriter satırı basıldı")
+	}
+
+	// pass ve NULL: tek bir iz bile yok.
+	for _, path := range []string{"/ideas/12", "/ideas/13"} {
+		b := do(t, h, http.MethodGet, path).Body.String()
+		for _, bad := range []string{"badge-doubtful", "distinct", "Özgünlük"} {
+			if strings.Contains(b, bad) {
+				t.Errorf("%s sayfasında %q izi var (pass/NULL iz bırakmamalı)", path, bad)
+			}
+		}
+	}
+}
+
+// TestDistinctivenessDetailEN: rozet ve kriter açıklaması çevrilir; kart
+// içeriği (başlık, gerekçe) ASLA çevrilmez.
+func TestDistinctivenessDetailEN(t *testing.T) {
+	body := do(t, newTestServer(t, distinctStore()), http.MethodGet, "/ideas/10?lang=en").Body.String()
+	for _, want := range []string{
+		"Distinctiveness: doubtful · K1",
+		"K1 — saturation",
+		"Why?",
+		"Ekran süresi koçu",
+		"Onlarca bilinen ürün aynı işi yapıyor",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("EN detay gövdesinde %q yok", want)
+		}
+	}
+	if strings.Contains(body, "Özgünlük: şüpheli") {
+		t.Error("EN sayfada TR rozet etiketi kaldı")
+	}
+}
+
+// TestDoubtfulFilterChip: "Şüpheli" çipi store'a flag geçirir, yalnız
+// fail/unsure kartları bırakır ve diğer filtrelerle birleşir.
+func TestDoubtfulFilterChip(t *testing.T) {
+	fs := distinctStore()
+	h := newTestServer(t, fs)
+
+	plain := do(t, h, http.MethodGet, "/").Body.String()
+	if !strings.Contains(plain, "flag=doubtful") {
+		t.Error("Şüpheli filtre çipi galeride yok")
+	}
+	if !strings.Contains(plain, ">Şüpheli</a>") {
+		t.Error("Şüpheli çip etiketi yok")
+	}
+
+	rec := do(t, h, http.MethodGet, "/?flag=doubtful")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d", rec.Code)
+	}
+	if fs.lastFilter.Flag != store.FlagDoubtful {
+		t.Errorf("flag store'a geçmedi: %+v", fs.lastFilter)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Ekran süresi koçu") || !strings.Contains(body, "Fatura ayrıştırıcı") {
+		t.Error("şüpheli kartlar listelenmedi")
+	}
+	if strings.Contains(body, "Kooperatif stok paneli") || strings.Contains(body, "Mercek koşmamış kart") {
+		t.Error("pass/NULL kart şüpheli filtresine sızdı")
+	}
+	if !strings.Contains(body, "2 fikir") {
+		t.Error("şüpheli filtresinde kart sayısı yanlış")
+	}
+	// Etkin çip açık/kapa çalışır: bağlantı filtreyi kaldırır, adı bunu söyler.
+	if !strings.Contains(body, "chip chip-doubtful is-active") {
+		t.Error("etkin Şüpheli çipi is-active taşımıyor")
+	}
+	if !strings.Contains(body, "Şüpheli filtresini kaldır") {
+		t.Error("etkin çipte kaldırma etiketi yok")
+	}
+
+	// Diğer filtrelerle birleşir: tür + şüpheli aynı anda.
+	fs2 := distinctStore()
+	rec = do(t, newTestServer(t, fs2), http.MethodGet, "/?flag=doubtful&source_type=market_derived")
+	if fs2.lastFilter.Flag != store.FlagDoubtful || fs2.lastFilter.SourceType != "market_derived" {
+		t.Errorf("iki filtre birleşmedi: %+v", fs2.lastFilter)
+	}
+	combined := rec.Body.String()
+	if !strings.Contains(combined, "Fatura ayrıştırıcı") || strings.Contains(combined, "Ekran süresi koçu") {
+		t.Error("tür + şüpheli birleşimi yanlış süzdü")
+	}
+	// Arama formu yürürlükteki flag'i korur (JS'siz).
+	if !strings.Contains(combined, `<input type="hidden" name="flag" value="doubtful">`) {
+		t.Error("arama formu flag'i taşımıyor")
+	}
+
+	// Bilinmeyen flag sessizce yok sayılır (ham değer sorguya gitmez).
+	fs3 := distinctStore()
+	do(t, newTestServer(t, fs3), http.MethodGet, "/?flag=drop%20table")
+	if fs3.lastFilter.Flag != "" {
+		t.Errorf("bilinmeyen flag sorguya sızdı: %q", fs3.lastFilter.Flag)
+	}
+}
+
+// TestDoubtfulFilterEmptyState: şüpheli filtresinde eşleşme yoksa tasarlanmış
+// boş durum ve "temizle" bağlantısı gösterilir.
+func TestDoubtfulFilterEmptyState(t *testing.T) {
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/?flag=doubtful")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("durum = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Eşleşen fikir yok") {
+		t.Error("boş durum metni yok")
+	}
+	if !strings.Contains(body, "Filtreleri temizle") {
+		t.Error("filtre uygulanmışken temizleme bağlantısı yok")
 	}
 }

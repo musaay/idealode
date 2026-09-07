@@ -47,17 +47,24 @@ func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
 		// Bilinmeyen tür sessizce yok sayılır; sorguya ham değer gitmez.
 		sourceType = ""
 	}
+	// Beyaz liste: yalnız "doubtful" (özgünlük merceği fail/unsure) tanınır;
+	// başka her değer filtresiz sayılır — sorguya ham değer gitmez.
+	flag := strings.TrimSpace(r.URL.Query().Get("flag"))
+	if flag != store.FlagDoubtful {
+		flag = ""
+	}
 
 	ideas, err := s.ideas.ListIdeasFiltered(r.Context(), store.IdeaFilter{
 		SourceType: sourceType,
 		Query:      q,
+		Flag:       flag,
 	})
 	if err != nil {
 		s.renderUpstreamError(w, r, base, err)
 		return
 	}
 
-	page := buildGallery(base, ideas, sourceType, q)
+	page := buildGallery(base, ideas, sourceType, q, flag)
 	page.Title = page.T("gallery.title") + " — " + page.T("app.name")
 	page.MobileTitle = page.T("app.name")
 	page.NavCount = strconv.Itoa(page.Count)

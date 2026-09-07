@@ -607,7 +607,13 @@ type IdeaFilter struct {
 	Query      string // title/problem_statement ILIKE araması; boş = arama yok
 	Limit      int    // <= 0 ise DefaultIdeaLimit
 	SessionID  string // ai_blended görünürlük kuralı için istek sahibinin oturumu
+	Flag       string // boş = hepsi; FlagDoubtful = özgünlük merceği şüpheli bulmuş
 }
+
+// FlagDoubtful, IdeaFilter.Flag'in tek geçerli değeri: özgünlük merceğinin
+// (#101, advisory) fail ya da unsure dediği kartlar. Beyaz liste burada
+// tektir — api, apiclient ve web aynı sabite bakar.
+const FlagDoubtful = "doubtful"
 
 // DefaultIdeaLimit, galeri listelemesinin varsayılan üst sınırı.
 const DefaultIdeaLimit = 60
@@ -674,6 +680,13 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		limit = maxIdeaLimit
 	}
 
+	// $5 (Flag) beyaz listedir: yalnız FlagDoubtful tanınır, başka her değer
+	// filtresiz sayılır — sorguya ham değer geçmez.
+	flag := ""
+	if f.Flag == FlagDoubtful {
+		flag = FlagDoubtful
+	}
+
 	// $1 boşsa kaynak türü filtresi devre dışı; $2 boşsa arama devre dışı.
 	// $4 (SessionID): ai_blended kart yalnız üreten oturuma görünür — herkese
 	// açık galeriye anonim kart girmez (doğrulanmışlık ilkesi).
@@ -689,6 +702,7 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		  AND (i.source_type <> 'ai_blended' OR i.created_by_session_id = $4)
 		  AND i.archived_at IS NULL
 		  AND i.published_at IS NOT NULL
+		  AND ($5 = '' OR i.distinctiveness_verdict IN ('fail', 'unsure'))
 		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT $3`
 
@@ -697,7 +711,7 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 		pattern = "%" + escapeLike(t) + "%"
 	}
 
-	rows, err := s.Pool.Query(ctx, q, f.SourceType, pattern, limit, f.SessionID)
+	rows, err := s.Pool.Query(ctx, q, f.SourceType, pattern, limit, f.SessionID, flag)
 	if err != nil {
 		return nil, err
 	}

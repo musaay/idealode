@@ -225,7 +225,7 @@
   /* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
      yerine krem metin + çok düşük opaklıklı krem zemin. */
   :root:not([data-theme="light"]) .switch-option.is-active,
-  :root:not([data-theme="light"]) .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended) {
+  :root:not([data-theme="light"]) .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended):not(.chip-doubtful) {
     background: var(--color-nav-active-bg);
     color: var(--color-nav-active-fg);
   }
@@ -377,7 +377,7 @@
 /* Dil anahtarı ve filtre çipi de nav pill mantığına uyar: yeşil dolgu
    yerine krem metin + çok düşük opaklıklı krem zemin. */
 :root[data-theme="dark"] .switch-option.is-active,
-:root[data-theme="dark"] .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended) {
+:root[data-theme="dark"] .chip.is-active:not(.chip-market_derived):not(.chip-momentum_derived):not(.chip-ai_blended):not(.chip-doubtful) {
   background: var(--color-nav-active-bg);
   color: var(--color-nav-active-fg);
 }
@@ -1109,6 +1109,14 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   color: var(--badge-ai-fg);
 }
 
+/* "Şüpheli" çipi (özgünlük merceği): kaynak türü değil bir uyarı ekseni
+   olduğu için rozetle aynı kehribar tonu taşır — yeni token açılmaz. */
+.chip-doubtful.is-active {
+  background: var(--badge-market-bg);
+  border-color: var(--badge-market-bd);
+  color: var(--badge-market-fg);
+}
+
 /* -------------------------------------------------------------- kartlar */
 .card-grid {
   display: grid;
@@ -1233,6 +1241,72 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 .badge-momentum_derived { background: var(--badge-momentum-bg); color: var(--badge-momentum-fg); border-color: var(--badge-momentum-bd); }
 .badge-ai_blended,
 .badge-ai_generated { background: var(--badge-ai-bg); color: var(--badge-ai-fg); border-color: var(--badge-ai-bd); }
+
+/* Özgünlük rozeti (#101, advisory): kehribar. Kaynak türü rozeti de kehribar
+   olabildiğinden (Pazar Verisi) ayrım renkle değil uyarı üçgeni ikonuyla
+   kurulur; ikon aria-hidden, anlam metinde. */
+.badge-doubtful { background: var(--badge-market-bg); color: var(--badge-market-fg); border-color: var(--badge-market-bd); }
+
+/* Galeri kartında kaynak rozeti + özgünlük rozeti tek grup: kanıt hapı
+   sağda kalır, iki rozet dar ekranda kendi arasında sarar. */
+.card-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
+/* ----------------------------------------------- özgünlük gerekçesi */
+/* <details>: JS'siz açılır. Açık/kapalı durumu tarayıcının işidir. */
+.distinct { margin-top: var(--space-2); }
+
+.distinct-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Varsayılan açılır üçgen gizlenir; yerine metin ipucu ("Neden?") var. */
+.distinct-summary::-webkit-details-marker { display: none; }
+.distinct-summary::marker { content: ""; }
+
+.distinct-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.distinct-summary:hover .distinct-toggle { color: var(--color-text); }
+
+.distinct-body {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--badge-market-bd);
+  border-radius: var(--radius-card);
+  background: var(--badge-market-bg);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.distinct-criterion {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--badge-market-fg);
+}
+
+.distinct-reason { line-height: 1.6; }
+
+/* Not metnidir, etiket değil: gövde ölçüsünde kalır (bkz. .note-inline). */
+.distinct-note { color: var(--color-text-muted); font-size: 1rem; }
+
+.distinct-bare { margin-top: var(--space-2); }
 
 .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
 

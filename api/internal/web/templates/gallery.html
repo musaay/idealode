@@ -8,6 +8,7 @@
 
     <form class="search" method="get" action="/" role="search">
       {{ if .SourceType }}<input type="hidden" name="source_type" value="{{ .SourceType }}">{{ end }}
+      {{ if .Flag }}<input type="hidden" name="flag" value="{{ .Flag }}">{{ end }}
       <label class="visually-hidden" for="q">{{ .T "gallery.search_label" }}</label>
       <span class="search-field">
         <span class="search-icon" aria-hidden="true">
@@ -28,9 +29,12 @@
   </div>
 
   <nav class="chips" aria-label="{{ .T "gallery.filter_label" }}">
+    {{/* "Şüpheli" çipi açık/kapa çalışır: etkinken bağlantı filtreyi kaldırır,
+         bu yüzden aria-current yerine ne yapacağını söyleyen bir ad taşır. */}}
     {{ range .Chips }}
     <a class="chip chip-{{ .Kind }}{{ if .Active }} is-active{{ end }}" href="{{ .Href }}"
-       {{ if .Active }}aria-current="page"{{ end }}>{{ .Label }}</a>
+       {{ if .Aria }}aria-label="{{ .Aria }}"{{ end }}
+       {{ if .Current }}aria-current="page"{{ end }}>{{ .Label }}</a>
     {{ end }}
   </nav>
 </section>
@@ -41,7 +45,10 @@
   <li class="card-cell">
     <article class="card" aria-labelledby="card-title-{{ .ID }}">
       <div class="card-top">
-        <span class="badge badge-{{ .Badge.Kind }}">{{ .Badge.Label }}</span>
+        <span class="card-badges">
+          <span class="badge badge-{{ .Badge.Kind }}">{{ .Badge.Label }}</span>
+          {{ template "distinct-badge" .Distinct }}
+        </span>
         <span class="pill">{{ $.T "card.evidence" .EvidenceCount }}</span>
       </div>
 

@@ -74,6 +74,48 @@ func TestListIdeasHappyPath(t *testing.T) {
 	}
 }
 
+// TestListIdeasDoubtfulFlag: `flag` yalnız beyaz listedeki değerle gönderilir
+// ve distinctiveness_* alanları JSON'dan çözülür (#104).
+func TestListIdeasDoubtfulFlag(t *testing.T) {
+	var gotQuery string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		jsonHandler(http.StatusOK, `{"ideas":[
+			{"id":1,"title":"Ekran süresi koçu","source_type":"pain_point",
+			 "distinctiveness_verdict":"fail","distinctiveness_criterion":"K1",
+			 "distinctiveness_reason":"Onlarca bilinen ürün aynı işi yapıyor."}]}`)(w, r)
+	})
+
+	ideas, err := c.ListIdeasFiltered(context.Background(), store.IdeaFilter{Flag: store.FlagDoubtful})
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotQuery != "flag=doubtful" {
+		t.Errorf("sorgu = %q", gotQuery)
+	}
+	if len(ideas) != 1 {
+		t.Fatalf("kart sayısı = %d, 1 bekleniyor", len(ideas))
+	}
+	i := ideas[0]
+	if i.DistinctivenessVerdict == nil || *i.DistinctivenessVerdict != "fail" {
+		t.Errorf("verdict çözülmedi: %v", i.DistinctivenessVerdict)
+	}
+	if i.DistinctivenessCriterion == nil || *i.DistinctivenessCriterion != "K1" {
+		t.Errorf("criterion çözülmedi: %v", i.DistinctivenessCriterion)
+	}
+	if i.DistinctivenessReason == nil || *i.DistinctivenessReason != "Onlarca bilinen ürün aynı işi yapıyor." {
+		t.Errorf("reason çözülmedi: %v", i.DistinctivenessReason)
+	}
+
+	// Beyaz liste dışındaki değer hiç gönderilmez.
+	if _, err := c.ListIdeasFiltered(context.Background(), store.IdeaFilter{Flag: "drop table"}); err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("bilinmeyen flag sorguya sızdı: %q", gotQuery)
+	}
+}
+
 func TestListIdeasNoFilterSendsNoQuery(t *testing.T) {
 	var gotQuery string
 	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
