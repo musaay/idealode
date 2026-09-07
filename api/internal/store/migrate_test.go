@@ -64,3 +64,56 @@ func TestMigrateIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestMigratePublishedBackfillOnlyOnce, 015_published.sql'in backfill'inin
+// yalnız kolon İLK eklendiğinde çalıştığını doğrular (reviewer bulgusu):
+// migrate() -> beklemedeki kart insert edilir (published_at NULL) ->
+// migrate() TEKRAR -> kart HÂLÂ beklemede olmalı. Sabit tarihe göre koşullu
+// eski backfill bu ikinci migrate'te kartı sessizce yayınlıyordu.
+func TestMigratePublishedBackfillOnlyOnce(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ilk Migrate: %v", err)
+	}
+
+	s, err := Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.InsertIdea(ctx, Idea{
+		Title: "test-migrate-backfill-pending", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+
+	// Insert sonrası kolon zaten var, kart beklemede (published_at NULL).
+	var publishedAt *string
+	if err := s.Pool.QueryRow(ctx, "SELECT published_at::text FROM ideas WHERE id = $1", id).Scan(&publishedAt); err != nil {
+		t.Fatal(err)
+	}
+	if publishedAt != nil {
+		t.Fatalf("insert sonrası kart beklemede olmalı (published_at NULL), geldi: %v", *publishedAt)
+	}
+
+	// İkinci Migrate: backfill kolon zaten var olduğundan çalışmamalı,
+	// beklemedeki kart yayınlanmamalı.
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ikinci Migrate: %v", err)
+	}
+	if err := s.Pool.QueryRow(ctx, "SELECT published_at::text FROM ideas WHERE id = $1", id).Scan(&publishedAt); err != nil {
+		t.Fatal(err)
+	}
+	if publishedAt != nil {
+		t.Errorf("ikinci Migrate beklemedeki kartı sessizce yayınlamamalı (published_at hâlâ NULL olmalı), geldi: %v", *publishedAt)
+	}
+}

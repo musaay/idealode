@@ -556,6 +556,39 @@ func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
 	return out, rows.Err()
 }
 
+// PendingIdea, PendingIdeas'ın döndürdüğü hafif özet satırı — `idealode run`
+// log özeti için yalnız id+title (#102).
+type PendingIdea struct {
+	ID    int64
+	Title string
+}
+
+// PendingIdeas, henüz PO onayı almamış (published_at IS NULL) ve arşivde
+// olmayan kartları döner — `idealode run` sonunda "beklemede N kart"
+// özetini beslemek için (#102 moderasyon kuyruğu). Onay şimdilik sözlü:
+// lead DB'den `UPDATE ideas SET published_at = now() WHERE id = ...` ile
+// açar.
+func (s *Store) PendingIdeas(ctx context.Context) ([]PendingIdea, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, title FROM ideas
+		WHERE published_at IS NULL AND archived_at IS NULL
+		ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PendingIdea
+	for rows.Next() {
+		var p PendingIdea
+		if err := rows.Scan(&p.ID, &p.Title); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // UpdateSourceLastSeen, kaynağın ilerleme imlecini günceller.
 func (s *Store) UpdateSourceLastSeen(ctx context.Context, sourceID int64, ref string) error {
 	_, err := s.Pool.Exec(ctx,
@@ -591,7 +624,8 @@ const ideaSelect = `
 	       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
 	       i.local_evidence, i.parent_idea_id, COALESCE(i.created_by_session_id, ''),
 	       COALESCE(t.theme_name, ''), i.created_at,
-	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason
+	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason,
+	       i.published_at
 	FROM ideas i
 	LEFT JOIN themes t ON t.id = i.source_theme_id`
 
@@ -605,7 +639,8 @@ func scanIdea(row pgx.Row, i *Idea) error {
 		&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.LocalEvidence,
 		&i.ParentIdeaID, &i.CreatedBySessionID,
 		&i.SourceTheme, &i.CreatedAt,
-		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason); err != nil {
+		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason,
+		&i.PublishedAt); err != nil {
 		return err
 	}
 	if i.ExampleQuotes == nil {
@@ -642,12 +677,18 @@ func (s *Store) ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, er
 	// $1 boşsa kaynak türü filtresi devre dışı; $2 boşsa arama devre dışı.
 	// $4 (SessionID): ai_blended kart yalnız üreten oturuma görünür — herkese
 	// açık galeriye anonim kart girmez (doğrulanmışlık ilkesi).
+	// published_at IS NOT NULL: moderasyon kuyruğu (#102) — pipeline'ın
+	// ürettiği kart PO onaylayıp published_at'i doldurana dek galeride
+	// görünmez. ai_blended kartlar InsertBlendedIdea'da published_at=now()
+	// yazdığından (zaten yalnız sahibine görünüyorlardı) bu şart onları
+	// etkilemez.
 	q := ideaSelect + `
 		WHERE ($1 = '' OR i.source_type = $1)
 		  AND ($2 = '' OR i.title ILIKE $2 OR i.problem_statement ILIKE $2
 		       OR i.proposed_solution ILIKE $2)
 		  AND (i.source_type <> 'ai_blended' OR i.created_by_session_id = $4)
 		  AND i.archived_at IS NULL
+		  AND i.published_at IS NOT NULL
 		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT $3`
 
@@ -685,10 +726,14 @@ func escapeLike(s string) string {
 // başkasının ai_blended kartı da ErrNotFound döner (var olduğu sızdırılmaz,
 // 404 — bkz. spec kabul kriteri 4). Arşivlenmiş kart (archived_at doluysa)
 // da aynı şekilde ErrNotFound döner — galeriden kaldırılan kart erişilemez
-// olmalı (#74).
+// olmalı (#74). Beklemedeki (published_at NULL) kart da aynı şekilde
+// ErrNotFound döner (#102 moderasyon kuyruğu — varlığı sızdırılmaz);
+// IdeaSources/ListChat/AppendChat/InsertBlendedIdea çağrıları hep önce
+// GetIdea'dan geçtiğinden (bkz. internal/api/handlers.go) bu tek nokta
+// sohbet/kaynak/blend uçlarını da otomatik kapatır — ayrı kontrol gerekmez.
 func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error) {
 	var i Idea
-	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1 AND i.archived_at IS NULL`, id), &i)
+	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1 AND i.archived_at IS NULL AND i.published_at IS NOT NULL`, id), &i)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -830,6 +875,11 @@ func (s *Store) AppendChat(ctx context.Context, ideaID int64, sid, role, message
 // LLM'den GELMEZ — kaynak karttan (parent) birebir kopyalanır (kart tohumu
 // değişmez ilkesi, 001_init yorumu). Tek INSERT ... RETURNING zaten atomik
 // (tek tx); ayrı bir Begin/Commit gerekmez.
+// published_at = now() (#102): blend kartı moderasyon kuyruğuna girmez —
+// zaten yalnız üreten oturuma görünüyordu (setMine/ai_blended kuralı), bu
+// davranış değişmesin; ayrıca GetIdea artık published_at IS NOT NULL
+// aradığından, bu satır olmadan kart oluşur oluşmaz kendi GetIdea çağrısı
+// (fonksiyonun sonunda) ErrNotFound dönerdi.
 func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft BlendDraft, sid string) (*Idea, error) {
 	// nil slice guard: pgx nil []string'i SQL NULL yazar, NOT NULL
 	// kolonları kırar (bkz. InsertPostAnalyses'teki aynı koruma).
@@ -852,8 +902,8 @@ func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft Blend
 			(title, problem_statement, proposed_solution, target_user, evidence_count,
 			 example_quotes, source_type, source_theme_id, local_evidence,
 			 parent_idea_id, created_by_session_id,
-			 urgency_score, monetization_signal, domain_tags)
-		VALUES ($1, $2, $3, $4, $5, $6, 'ai_blended', $7, $8, $9, $10, $11, $12, $13)
+			 urgency_score, monetization_signal, domain_tags, published_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'ai_blended', $7, $8, $9, $10, $11, $12, $13, now())
 		RETURNING id`,
 		draft.Title, draft.ProblemStatement, draft.ProposedSolution, draft.TargetUser,
 		parent.EvidenceCount, quotes, parent.SourceThemeID, localEvidence,

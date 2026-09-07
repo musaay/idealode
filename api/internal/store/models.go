@@ -78,6 +78,12 @@ type Idea struct {
 	DistinctivenessVerdict   *string `json:"distinctiveness_verdict,omitempty"`   // pass | fail | unsure | NULL
 	DistinctivenessCriterion *string `json:"distinctiveness_criterion,omitempty"` // K1 | K2 | K3 | K4 | none | NULL
 	DistinctivenessReason    *string `json:"distinctiveness_reason,omitempty"`
+
+	// PublishedAt, moderasyon kuyruğu damgası (#102): NULL = beklemede (PO
+	// onayı yok, herkese açık galeri/detayda görünmez); dolu = yayında.
+	// `dump` (ListIdeas, DB'ye dokunan lead aracı) bekleyenleri de döner —
+	// bu alan sayesinde lead hangilerinin beklemede olduğunu ayırt eder.
+	PublishedAt *time.Time `json:"published_at,omitempty"`
 }
 
 // ChatMessage, kart sohbeti satırı (idea_conversations). Girişsiz kimlik

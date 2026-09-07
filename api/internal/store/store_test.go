@@ -150,6 +150,13 @@ func TestArchivedIdeaHidden(t *testing.T) {
 		s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id IN ($1, $2)", active, archived)
 	})
 
+	// InsertIdea artık published_at YAZMAZ (#102 moderasyon kuyruğu) — bu
+	// test archived_at davranışını izole ediyor, ikisini de PO onaylamış
+	// (yayında) varsayalım ki arşivsiz kart published_at yüzünden değil
+	// gerçekten arşivsiz olduğu için görünsün.
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET published_at = now() WHERE id IN ($1, $2)", active, archived); err != nil {
+		t.Fatalf("publish update: %v", err)
+	}
 	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET archived_at = now() WHERE id = $1", archived); err != nil {
 		t.Fatalf("archive update: %v", err)
 	}
@@ -181,6 +188,163 @@ func TestArchivedIdeaHidden(t *testing.T) {
 	}
 	if _, err := s.GetIdea(ctx, archived, ""); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetIdea(arşivli): ErrNotFound bekleniyordu, alınan: %v", err)
+	}
+}
+
+// TestPendingIdeaHiddenUntilPublished, #102 moderasyon kuyruğunu doğrular:
+// InsertIdea'nın bıraktığı published_at=NULL kart galeride/detayda
+// görünmez; PO onayını (published_at=now()) simüle eden UPDATE'ten SONRA
+// görünür.
+func TestPendingIdeaHiddenUntilPublished(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertIdea(ctx, Idea{
+		Title:            "test-pending-idea",
+		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
+		SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id)
+	})
+
+	// InsertIdea published_at YAZMAZ -> beklemede -> ne galeride ne detayda.
+	out, err := s.ListIdeasFiltered(ctx, IdeaFilter{Limit: 200})
+	if err != nil {
+		t.Fatalf("ListIdeasFiltered: %v", err)
+	}
+	for _, i := range out {
+		if i.ID == id {
+			t.Error("beklemedeki (published_at NULL) kart galeride görünmemeli")
+		}
+	}
+	if _, err := s.GetIdea(ctx, id, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetIdea(beklemede): ErrNotFound bekleniyordu, alınan: %v", err)
+	}
+
+	// PO onayı simülasyonu.
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET published_at = now() WHERE id = $1", id); err != nil {
+		t.Fatalf("publish update: %v", err)
+	}
+
+	out, err = s.ListIdeasFiltered(ctx, IdeaFilter{Limit: 200})
+	if err != nil {
+		t.Fatalf("ListIdeasFiltered (yayın sonrası): %v", err)
+	}
+	var seen bool
+	for _, i := range out {
+		if i.ID == id {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Error("published_at set edildikten sonra kart galeride görünmeli")
+	}
+	if _, err := s.GetIdea(ctx, id, ""); err != nil {
+		t.Errorf("GetIdea(yayında): beklenmeyen hata: %v", err)
+	}
+}
+
+// TestPendingIdeasQuery, PendingIdeas'ın yalnız beklemedeki (published_at
+// NULL, archived_at NULL) kartları döndüğünü doğrular — `idealode run`
+// özet logu (#102) bu sorguyla beslenir.
+func TestPendingIdeasQuery(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	pendingID, err := s.InsertIdea(ctx, Idea{
+		Title: "test-pendinglist-pending", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("insert pending: %v", err)
+	}
+	publishedID, err := s.InsertIdea(ctx, Idea{
+		Title: "test-pendinglist-published", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("insert published: %v", err)
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id IN ($1, $2)", pendingID, publishedID)
+	})
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET published_at = now() WHERE id = $1", publishedID); err != nil {
+		t.Fatalf("publish update: %v", err)
+	}
+
+	pending, err := s.PendingIdeas(ctx)
+	if err != nil {
+		t.Fatalf("PendingIdeas: %v", err)
+	}
+	var sawPending, sawPublished bool
+	for _, p := range pending {
+		if p.ID == pendingID {
+			sawPending = true
+		}
+		if p.ID == publishedID {
+			sawPublished = true
+		}
+	}
+	if !sawPending {
+		t.Error("beklemedeki kart PendingIdeas'ta olmalı")
+	}
+	if sawPublished {
+		t.Error("yayındaki kart PendingIdeas'ta olmamalı")
+	}
+}
+
+// TestInsertBlendedIdeaPublishedImmediately, blend kartının (#102)
+// published_at=now() ile yazıldığını doğrular — GetIdea artık
+// published_at IS NOT NULL aradığından, bu olmasaydı kart oluşur oluşmaz
+// kendi sahibine bile görünmezdi.
+func TestInsertBlendedIdeaPublishedImmediately(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	sid := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+	parentID, err := s.InsertIdea(ctx, Idea{
+		Title: "test-blend-parent", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", DomainTags: []string{"x"},
+	})
+	if err != nil {
+		t.Fatalf("parent insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", parentID) })
+
+	// InsertBlendedIdea parent'ı yalnız Go struct'ı üzerinden okur, DB'den
+	// yeniden çekmez — parent'ın kendisinin yayında olması (published_at)
+	// gerekmez, elle kuruyoruz (GetIdea'ya gerek yok).
+	parent := &Idea{ID: parentID, Title: "test-blend-parent", ProblemStatement: "p",
+		ProposedSolution: "s", TargetUser: "u", SourceType: "pain_point", DomainTags: []string{"x"}}
+
+	draft := BlendDraft{
+		Title: "test-blend-child", ProblemStatement: "p2", ProposedSolution: "s2",
+		TargetUser: "u2", DomainTags: []string{"y"}, UrgencyScore: 3, MonetizationSignal: 2,
+	}
+	blended, err := s.InsertBlendedIdea(ctx, parent, draft, sid)
+	if err != nil {
+		t.Fatalf("InsertBlendedIdea: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", blended.ID) })
+
+	// InsertBlendedIdea kendi içinde GetIdea çağırıp döner — hata dönmediyse
+	// (yukarıda zaten kontrol edildi) published_at zaten dolu demektir; yine
+	// de doğrudan kolonu da doğrulayalım.
+	var publishedAt *string
+	if err := s.Pool.QueryRow(ctx, "SELECT published_at::text FROM ideas WHERE id = $1", blended.ID).Scan(&publishedAt); err != nil {
+		t.Fatal(err)
+	}
+	if publishedAt == nil {
+		t.Error("blend kartının published_at'i NULL olmamalı (owner'a hemen görünmeli)")
+	}
+
+	// Sahibi (aynı sid) GetIdea ile görebilmeli.
+	if _, err := s.GetIdea(ctx, blended.ID, sid); err != nil {
+		t.Errorf("GetIdea(blend, sahibi): beklenmeyen hata: %v", err)
 	}
 }
 

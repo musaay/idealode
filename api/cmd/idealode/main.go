@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -137,6 +138,7 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		if err := cmdSeeds(ctx, cfg); err != nil {
 			return fmt.Errorf("seeds: %w", err)
 		}
+		logPendingIdeas(ctx, lockSt)
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
@@ -150,6 +152,22 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return cmdMigrate(ctx, cfg)
 	}
 	return fmt.Errorf("bilinmeyen komut: %q", cmd)
+}
+
+// logPendingIdeas, `run` sonunda moderasyon kuyruğu özetini loglar (#102) —
+// lead PO onayını (published_at) buradan takip eder. Sorgu hatası koşuyu
+// düşürmez, yalnız loglanır (özet bilgi, kritik değil).
+func logPendingIdeas(ctx context.Context, st *store.Store) {
+	pending, err := st.PendingIdeas(ctx)
+	if err != nil {
+		log.Printf("run: beklemede kart sorgusu HATA: %v", err)
+		return
+	}
+	ids := make([]string, len(pending))
+	for i, p := range pending {
+		ids[i] = fmt.Sprintf("%d", p.ID)
+	}
+	log.Printf("run: beklemede %d kart (id: %s)", len(pending), strings.Join(ids, ", "))
 }
 
 // newChat, cfg'deki LLM ayarlarından (env ile seçilir, #96) canlı istemci
