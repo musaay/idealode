@@ -71,6 +71,13 @@ type Idea struct {
 	CreatedBySessionID      string     `json:"-"`                        // ai_blended: üreten anonim oturum (görünürlük kuralı; store'da hesaplanır: source_type='ai_blended' AND created_by_session_id = $sid)
 	CreatedAt               time.Time  `json:"created_at"`
 	FusedAt                 *time.Time `json:"fused_at,omitempty"` // ilk füzyon denemesi damgası; dolu+eski = haftalık ivme yeniden deneme adayı (#50 B)
+
+	// Özgünlük merceği (#101 v3) — ADVISORY: kart üretimini bloklamaz, yalnız
+	// işaretler. NULL = mercek hiç çağrılamadı (geçici hata) ya da bu alanları
+	// taşımayan kart türü (ai_blended: kaynak karttan kopyalanmaz, hep NULL).
+	DistinctivenessVerdict   *string `json:"distinctiveness_verdict,omitempty"`   // pass | fail | unsure | NULL
+	DistinctivenessCriterion *string `json:"distinctiveness_criterion,omitempty"` // K1 | K2 | K3 | K4 | none | NULL
+	DistinctivenessReason    *string `json:"distinctiveness_reason,omitempty"`
 }
 
 // ChatMessage, kart sohbeti satırı (idea_conversations). Girişsiz kimlik

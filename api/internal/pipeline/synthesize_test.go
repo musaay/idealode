@@ -3,9 +3,11 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/musaay/idealode/api/internal/config"
 	"github.com/musaay/idealode/api/internal/store"
@@ -57,7 +59,15 @@ func TestParseIdeaResponseRejectsEmpty(t *testing.T) {
 
 // fakeChat, synthesize entegrasyon testi için sabit yanıt döner; tutarlılık
 // denetimi çağrısına ise tüm post'ları tutarlı sayan bir cevap verir.
-type fakeChat struct{ response string }
+// distinctVerdict/distinctCriterion, kart-sonrası ADVISORY özgünlük
+// merceğinin (#101 v3) döneceği cevabı belirler — distinctVerdict boşsa
+// (zero value) "pass" varsayılır, mevcut mutlu yol testleri değişmeden
+// geçsin diye.
+type fakeChat struct {
+	response          string
+	distinctVerdict   string
+	distinctCriterion string
+}
 
 func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
 	if system == coherenceSystem {
@@ -65,6 +75,17 @@ func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, e
 	}
 	if system == dupJudgeSystem {
 		return `{"same": false}`, nil
+	}
+	if system == lensDistinctivenessSystem {
+		v := f.distinctVerdict
+		if v == "" {
+			v = "pass"
+		}
+		c := f.distinctCriterion
+		if c == "" {
+			c = "none"
+		}
+		return fmt.Sprintf(`{"verdict":%q,"criterion":%q,"reason":"test-reason"}`, v, c), nil
 	}
 	return f.response, nil
 }
@@ -211,11 +232,186 @@ func TestSynthesizeIdeasIntegration(t *testing.T) {
 	}
 }
 
+// synthDistinctErrChat: coherence/dup/kart üretimi normal davranır, ama
+// kart-sonrası ADVISORY özgünlük merceği (lensDistinctivenessSystem)
+// çağrısında hata verir — ağ/kota kesintisi simülasyonu (#101 v3: bloklama
+// YOK, kart yine de yazılır; yalnız distinctiveness_* alanları NULL kalır).
+type synthDistinctErrChat struct{ response string }
+
+func (f *synthDistinctErrChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	if system == coherenceSystem {
+		return `{"indices":[0,1,2]}`, nil
+	}
+	if system == lensDistinctivenessSystem {
+		return "", fmt.Errorf("simulated özgünlük merceği hatası")
+	}
+	if system == dupJudgeSystem {
+		return `{"same": false}`, nil
+	}
+	return f.response, nil
+}
+
+// setupSynthTheme, DB'de bir tema kurar (post + analiz + tema gruplama) —
+// distinctiveness testlerinin ortak fikstürü.
+func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platform, tag string) {
+	t.Helper()
+	posts := []store.RawPost{
+		{Platform: platform, SourceRef: "s1", Community: "c", Title: "I wish X", Body: "quote one"},
+		{Platform: platform, SourceRef: "s2", Community: "c", Title: "I wish Y", Body: "quote two"},
+		{Platform: platform, SourceRef: "s3", Community: "c", Title: "I wish Z", Body: "quote three"},
+	}
+	if _, err := st.InsertRawPosts(ctx, posts); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := st.Pool.Query(ctx, "SELECT id FROM raw_posts WHERE platform = $1", platform)
+	var analyses []store.PostAnalysis
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		analyses = append(analyses, store.PostAnalysis{
+			PostID: id, Classification: "pain_point", DomainTags: []string{tag},
+		})
+	}
+	rows.Close()
+	if err := st.InsertPostAnalyses(ctx, analyses); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GroupThemes(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSynthesizeIdeasDistinctivenessFailStillWritesCard: özgünlük merceği
+// "fail" (K2) dönse bile kart YAZILIR (#101 v3: bloklama YOK, işaretle) —
+// tema damgalanmaz (MarkThemeIncoherent bu yüzden çağrılmaz), alanlar
+// karta doğru yazılır.
+func TestSynthesizeIdeasDistinctivenessFailStillWritesCard(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Bariz Sentez Fikri"
+	platform, tag := "test-syn-distinct-fail", "test-syn-distinct-fail-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	setupSynthTheme(t, ctx, st, platform, tag)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &fakeChat{
+		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
+		distinctVerdict:   "fail",
+		distinctCriterion: "K2",
+	}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("özgünlük merceği fail dönse de kart yazılmalı (advisory), n=1 beklenirdi, geldi: %d", n)
+	}
+
+	var verdict, criterion, reason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason FROM ideas WHERE title = $1", title).
+		Scan(&verdict, &criterion, &reason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
+	if verdict == nil || *verdict != "fail" {
+		t.Errorf("distinctiveness_verdict=fail beklenirdi, geldi: %v", verdict)
+	}
+	if criterion == nil || *criterion != "K2" {
+		t.Errorf("distinctiveness_criterion=K2 beklenirdi, geldi: %v", criterion)
+	}
+	if reason == nil || *reason == "" {
+		t.Error("distinctiveness_reason boş olmamalı")
+	}
+
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT incoherent_at FROM themes WHERE theme_name = $1", tag).Scan(&incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt != nil {
+		t.Error("advisory mercek MarkThemeIncoherent çağırmamalı (bloklama YOK)")
+	}
+}
+
+// TestSynthesizeIdeasDistinctivenessErrorStillWritesCard: mercek çağrısı
+// HATA verirse (ağ/kota) kart yine de yazılır, distinctiveness_* alanları
+// NULL kalır (#101 v3 edge case).
+func TestSynthesizeIdeasDistinctivenessErrorStillWritesCard(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Ozgunluk Hata Sentez Fikri"
+	platform, tag := "test-syn-distinct-err", "test-syn-distinct-err-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	setupSynthTheme(t, ctx, st, platform, tag)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &synthDistinctErrChat{response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+		"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+		"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag)}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("mercek HATA verse de kart yazılmalı, n=1 beklenirdi, geldi: %d", n)
+	}
+
+	var verdict, criterion, reason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason FROM ideas WHERE title = $1", title).
+		Scan(&verdict, &criterion, &reason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
+	if verdict != nil || criterion != nil || reason != nil {
+		t.Errorf("mercek hatasında distinctiveness_* alanları NULL kalmalı, geldi: verdict=%v criterion=%v reason=%v", verdict, criterion, reason)
+	}
+}
+
 func TestSynthesizeSystemPromptMentionsConstraints(t *testing.T) {
 	// Ortak prompt prensibi kritik kısıtları içermeli (plan madde 7)
 	for _, want := range []string{"SOFTWARE-heavy", "NOT a filter", "VERBATIM", "ORIGINAL language"} {
 		if !strings.Contains(synthesizeSystemTmpl, want) {
 			t.Errorf("synthesis prompt'unda %q bekleniyordu", want)
 		}
+	}
+	// DISTINCTIVENESS RULE v1/v2'den kaldırıldı (#101 v3: bloklama YOK,
+	// mercek advisory) — prompt'ta artık geçmemeli.
+	if strings.Contains(synthesizeSystemTmpl, "DISTINCTIVENESS RULE") {
+		t.Error("synthesizeSystemTmpl artık DISTINCTIVENESS RULE içermemeli (#101 v3)")
 	}
 }

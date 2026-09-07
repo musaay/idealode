@@ -520,12 +520,14 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 		INSERT INTO ideas
 			(title, problem_statement, proposed_solution, target_user, evidence_count,
 			 example_quotes, source_type, source_theme_id, created_by_user_id,
-			 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13)
+			 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags,
+			 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16)
 		RETURNING id`,
 		i.Title, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
 		i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
-		i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags).Scan(&id)
+		i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags,
+		i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("ideas insert: %w", err)
 	}
@@ -588,7 +590,8 @@ const ideaSelect = `
 	       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
 	       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
 	       i.local_evidence, i.parent_idea_id, COALESCE(i.created_by_session_id, ''),
-	       COALESCE(t.theme_name, ''), i.created_at
+	       COALESCE(t.theme_name, ''), i.created_at,
+	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason
 	FROM ideas i
 	LEFT JOIN themes t ON t.id = i.source_theme_id`
 
@@ -601,7 +604,8 @@ func scanIdea(row pgx.Row, i *Idea) error {
 		&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
 		&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.LocalEvidence,
 		&i.ParentIdeaID, &i.CreatedBySessionID,
-		&i.SourceTheme, &i.CreatedAt); err != nil {
+		&i.SourceTheme, &i.CreatedAt,
+		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason); err != nil {
 		return err
 	}
 	if i.ExampleQuotes == nil {
