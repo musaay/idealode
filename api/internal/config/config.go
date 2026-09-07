@@ -10,6 +10,14 @@ import (
 	"strings"
 )
 
+// LLM sağlayıcısı için varsayılanlar (#96). Sağlayıcı env ile seçilir; kod
+// değişikliği gerekmez. Varsayılan değerler geriye dönük olarak Groq'u
+// hedefler.
+const (
+	defaultLLMBaseURL = "https://api.groq.com/openai/v1"
+	defaultLLMModel   = "openai/gpt-oss-120b"
+)
+
 // Config, tek binary'nin tüm subcommand'ları için ortak konfigürasyon.
 // Faz 0'da yalnızca bir kısmı kullanılır; alanlar şema gibi baştan nihai
 // tutulur ki sonraki fazlarda yapı değişmesin.
@@ -17,9 +25,12 @@ type Config struct {
 	// Zorunlu
 	DatabaseURL string // DATABASE_URL — cv-search Railway Postgres instance'ı, idealode şeması
 
-	// LLM (analyze/synthesize/generate için zorunlu; ingest/dump için değil)
-	GroqAPIKey string // GROQ_API_KEY
-	GroqModel  string // GROQ_MODEL (default: openai/gpt-oss-120b)
+	// LLM (analyze/synthesize/generate için zorunlu; ingest/dump için değil).
+	// Sağlayıcı env ile seçilir (#96): LLM_BASE_URL/LLM_MODEL/LLM_API_KEY
+	// boşsa GROQ_API_KEY/GROQ_MODEL'e düşer (Railway'de mevcut env bozulmasın).
+	LLMBaseURL string // LLM_BASE_URL (default: https://api.groq.com/openai/v1; sondaki "/" kırpılır)
+	LLMModel   string // LLM_MODEL (default: openai/gpt-oss-120b); boşsa GROQ_MODEL
+	LLMAPIKey  string // LLM_API_KEY; boşsa GROQ_API_KEY
 
 	// Çıktı dili — üretilen kullanıcıya dönük metinler bu dilde (Rev 2: tr).
 	// EN'e geçiş = env değişikliği; tag'ler kanonik EN slug olduğu için
@@ -52,8 +63,6 @@ type Config struct {
 func Load() (*Config, error) {
 	c := &Config{
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		GroqAPIKey:         os.Getenv("GROQ_API_KEY"),
-		GroqModel:          getenvDefault("GROQ_MODEL", "openai/gpt-oss-120b"),
 		OutputLang:         getenvDefault("OUTPUT_LANG", "tr"),
 		StackExchangeKey:   os.Getenv("STACKEXCHANGE_KEY"),
 		GitHubToken:        os.Getenv("GITHUB_TOKEN"),
@@ -64,6 +73,7 @@ func Load() (*Config, error) {
 		RedditPassword:     os.Getenv("REDDIT_PASSWORD"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 	}
+	c.LLMBaseURL, c.LLMModel, c.LLMAPIKey = loadLLMEnv()
 
 	var err error
 	if c.MinThemeEvidence, err = getenvInt("MIN_THEME_EVIDENCE", 3); err != nil {
@@ -85,10 +95,30 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
-// RequireGroq, LLM gerektiren subcommand'ların başında çağrılır.
-func (c *Config) RequireGroq() error {
-	if c.GroqAPIKey == "" {
-		return fmt.Errorf("bu komut LLM kullanır; zorunlu ortam değişkeni eksik: GROQ_API_KEY")
+// loadLLMEnv, LLM_* değişkenlerini okur; her biri boşsa sırayla eski
+// GROQ_* değişkenine, o da yoksa sabit varsayılana düşer (#96 — geriye
+// uyumluluk, Railway'deki mevcut env bozulmasın). Base URL sonundaki "/"
+// kırpılır ki `BaseURL+"/chat/completions"` birleştirmesi çift eğik çizgi
+// üretmesin.
+func loadLLMEnv() (baseURL, model, apiKey string) {
+	apiKey = os.Getenv("LLM_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("GROQ_API_KEY")
+	}
+
+	model = os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = getenvDefault("GROQ_MODEL", defaultLLMModel)
+	}
+
+	baseURL = strings.TrimSuffix(getenvDefault("LLM_BASE_URL", defaultLLMBaseURL), "/")
+	return
+}
+
+// RequireLLM, LLM gerektiren subcommand'ların başında çağrılır.
+func (c *Config) RequireLLM() error {
+	if c.LLMAPIKey == "" {
+		return fmt.Errorf("bu komut LLM kullanır; zorunlu ortam değişkeni eksik: LLM_API_KEY (veya GROQ_API_KEY)")
 	}
 	return nil
 }

@@ -25,7 +25,7 @@ var validClassifications = map[string]bool{
 	"noise":           true,
 }
 
-// Analyze, analiz edilmemiş post'ları ön-filtreden geçirir, kalanları Groq
+// Analyze, analiz edilmemiş post'ları ön-filtreden geçirir, kalanları LLM
 // ile chunk'lar hâlinde sınıflandırır ve post_analysis'e yazar.
 func Analyze(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat) (int, error) {
 	posts, err := st.UnanalyzedPosts(ctx, analyzeBatchLimit)

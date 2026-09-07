@@ -29,15 +29,17 @@ ingest  →  analyze  →  synthesize
 
 ## Kurulum
 
-Gereksinimler: Go 1.22+, PostgreSQL (`pg_trgm` extension'ı ile), bir
-[Groq](https://groq.com) API anahtarı.
+Gereksinimler: Go 1.22+, PostgreSQL (`pg_trgm` extension'ı ile), OpenAI-uyumlu
+chat-completions endpoint'i sunan bir LLM sağlayıcısının API anahtarı
+(varsayılan: [Groq](https://groq.com); `LLM_BASE_URL` ile başka bir
+sağlayıcıya geçilebilir, kod değişikliği gerekmez — bkz. `.env.example`).
 
 ```sh
 # 1. Derle
 cd api && go build -o idealode ./cmd/idealode
 
 # 2. Konfigürasyon — .env.example'ı kopyalayıp doldur
-#    (en az DATABASE_URL + GROQ_API_KEY)
+#    (en az DATABASE_URL + LLM_API_KEY)
 
 # 3. Veritabanı şemasını kur
 ./idealode migrate
@@ -62,8 +64,9 @@ Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
 `./idealode api` — pipeline'ın ürettiği idea card'ları JSON olarak sunar
 (#18) ve kart sohbeti/"Idea Copilot"u (#66) çalıştırır. `DATABASE_URL`'i
 gören TEK süreçtir; `serve` dahil hiçbir başka süreç veritabanına doğrudan
-bağlanmaz. Groq'a yalnız bu süreç gider — `GROQ_API_KEY` (ve isteğe bağlı
-`GROQ_MODEL`) artık `api` için de zorunludur. Adres: `PORT` ortam değişkeni
+bağlanmaz. LLM'e yalnız bu süreç gider — `LLM_API_KEY` (geriye uyumlu:
+`GROQ_API_KEY`) `api` için de zorunludur; `LLM_BASE_URL`/`LLM_MODEL`
+isteğe bağlıdır (varsayılan sağlayıcı: Groq). Adres: `PORT` ortam değişkeni
 (varsayılan `8080`). Uçlar:
 
 ```

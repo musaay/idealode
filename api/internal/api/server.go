@@ -40,7 +40,7 @@ type IdeaStore interface {
 // Server, JSON API handler'larını taşır.
 type Server struct {
 	ideas   IdeaStore
-	chat    llm.Chat // Groq istemcisi (Idea Copilot); RequireGroq `api` komutunda garanti eder
+	chat    llm.Chat // LLM istemcisi (Idea Copilot); RequireLLM `api` komutunda garanti eder
 	mux     *http.ServeMux
 	timeout time.Duration
 
