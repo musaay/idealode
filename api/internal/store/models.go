@@ -31,7 +31,7 @@ type RawPost struct {
 	CreatedAt time.Time
 }
 
-// PostAnalysis, Groq classification çıktısı (post_analysis satırı).
+// PostAnalysis, LLM classification çıktısı (post_analysis satırı).
 type PostAnalysis struct {
 	PostID           int64
 	Classification   string   // pain_point | feature_request | complaint | noise

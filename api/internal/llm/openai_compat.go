@@ -1,4 +1,6 @@
-// Package llm, Groq chat-completions istemcisi. "Sakin ilerleme" prensibi
+// Package llm, OpenAI'ın chat-completions şemasını konuşan istemci sağlar.
+// Sağlayıcı (base URL/model/API key) config üzerinden env'den gelir (#96) —
+// sağlayıcı değişimi kod değişikliği istemez. "Sakin ilerleme" prensibi
 // (plan madde 5, cv-search pattern reuse): exponential backoff + retry-on-429,
 // Retry-After header'ına uyum; sleep + retry BİRLİKTE (reprocess_cvs hatası
 // tekrarlanmaz).
@@ -11,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -22,20 +25,22 @@ type Chat interface {
 	ChatJSON(ctx context.Context, system, user string) (string, error)
 }
 
-// GroqClient, api.groq.com'un OpenAI-uyumlu endpoint'ini kullanır.
-type GroqClient struct {
+// OpenAICompatClient, OpenAI'ın chat-completions şemasıyla uyumlu herhangi
+// bir endpoint'i kullanır (base URL config'ten gelir, test için override
+// edilebilir).
+type OpenAICompatClient struct {
 	APIKey     string
 	Model      string
 	BaseURL    string // test için override edilebilir
 	HTTPClient *http.Client
 }
 
-// NewGroq canlı Groq API istemcisi döner.
-func NewGroq(apiKey, model string) *GroqClient {
-	return &GroqClient{
+// NewOpenAICompat canlı istemci döner.
+func NewOpenAICompat(baseURL, apiKey, model string) *OpenAICompatClient {
+	return &OpenAICompatClient{
 		APIKey:     apiKey,
 		Model:      model,
-		BaseURL:    "https://api.groq.com/openai/v1",
+		BaseURL:    baseURL,
 		HTTPClient: &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -69,7 +74,7 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
-func (c *GroqClient) ChatJSON(ctx context.Context, system, user string) (string, error) {
+func (c *OpenAICompatClient) ChatJSON(ctx context.Context, system, user string) (string, error) {
 	payload, err := json.Marshal(chatRequest{
 		Model: c.Model,
 		Messages: []chatMessage{
@@ -102,18 +107,19 @@ func (c *GroqClient) ChatJSON(ctx context.Context, system, user string) (string,
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("groq: %d denemede başarısız: %w", maxRetries+1, lastErr)
+	return "", fmt.Errorf("%s: %d denemede başarısız: %w", c.host(), maxRetries+1, lastErr)
 }
 
 // rateLimitError, Retry-After bilgisini backoff hesabına taşır.
 type rateLimitError struct {
+	host       string // hata metninde sağlayıcı adı yerine base URL host'u kullanılır
 	status     int
 	retryAfter time.Duration
 	body       string
 }
 
 func (e *rateLimitError) Error() string {
-	return fmt.Sprintf("groq HTTP %d: %s", e.status, e.body)
+	return fmt.Sprintf("%s HTTP %d: %s", e.host, e.status, e.body)
 }
 
 func retryDelay(err error, attempt int) time.Duration {
@@ -123,7 +129,7 @@ func retryDelay(err error, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second // 2s, 4s, 8s
 }
 
-func (c *GroqClient) doRequest(ctx context.Context, payload []byte) (content string, retryable bool, err error) {
+func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (content string, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
@@ -150,23 +156,32 @@ func (c *GroqClient) doRequest(ctx context.Context, payload []byte) (content str
 				after = time.Duration(secs * float64(time.Second))
 			}
 		}
-		return "", true, &rateLimitError{status: resp.StatusCode, retryAfter: after, body: truncate(string(body), 200)}
+		return "", true, &rateLimitError{host: c.host(), status: resp.StatusCode, retryAfter: after, body: truncate(string(body), 200)}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("groq HTTP %d: %s", resp.StatusCode, truncate(string(body), 400))
+		return "", false, fmt.Errorf("%s HTTP %d: %s", c.host(), resp.StatusCode, truncate(string(body), 400))
 	}
 
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", false, fmt.Errorf("groq yanıtı parse edilemedi: %w", err)
+		return "", false, fmt.Errorf("%s yanıtı parse edilemedi: %w", c.host(), err)
 	}
 	if parsed.Error != nil {
-		return "", false, fmt.Errorf("groq: %s", parsed.Error.Message)
+		return "", false, fmt.Errorf("%s: %s", c.host(), parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", false, fmt.Errorf("groq: boş yanıt")
+		return "", false, fmt.Errorf("%s: boş yanıt", c.host())
 	}
 	return parsed.Choices[0].Message.Content, false, nil
+}
+
+// host, hata metinlerinde sağlayıcı adı yerine kullanılan base URL host'unu
+// döner (#96 — sağlayıcı artık koda çakılı değil).
+func (c *OpenAICompatClient) host() string {
+	if u, err := url.Parse(c.BaseURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return c.BaseURL
 }
 
 func truncate(s string, n int) string {

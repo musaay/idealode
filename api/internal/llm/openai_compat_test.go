@@ -25,7 +25,7 @@ func TestChatJSONRetryOn429(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &GroqClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
 	out, err := c.ChatJSON(context.Background(), "sys", "user")
 	if err != nil {
 		t.Fatalf("ChatJSON: %v", err)
@@ -46,11 +46,24 @@ func TestChatJSONNonRetryableError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &GroqClient{APIKey: "bad", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	c := &OpenAICompatClient{APIKey: "bad", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
 	if _, err := c.ChatJSON(context.Background(), "s", "u"); err == nil {
 		t.Fatal("401'de hata beklenir")
 	}
 	if calls.Load() != 1 {
 		t.Errorf("401 retry edilmemeli; çağrı sayısı: %d", calls.Load())
+	}
+}
+
+func TestHostFallsBackToBaseURL(t *testing.T) {
+	// Geçersiz/host'suz bir BaseURL verilirse hata metni yine anlamlı kalsın.
+	c := &OpenAICompatClient{BaseURL: "not-a-url"}
+	if got := c.host(); got != "not-a-url" {
+		t.Errorf("host() ham BaseURL'e düşmeli, geldi: %q", got)
+	}
+
+	c2 := &OpenAICompatClient{BaseURL: "https://api.example.com/v1"}
+	if got := c2.host(); got != "api.example.com" {
+		t.Errorf("host() parse edilmiş host dönmeli, geldi: %q", got)
 	}
 }

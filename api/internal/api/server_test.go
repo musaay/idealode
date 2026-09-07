@@ -165,7 +165,7 @@ func newFakeStore() *fakeStore {
 	}
 }
 
-// fakeLLM, llm.Chat'i sahte olarak uygular — canlı Groq'a hiç gitmez.
+// fakeLLM, llm.Chat'i sahte olarak uygular — canlı LLM'e hiç gitmez.
 type fakeLLM struct {
 	response string
 	err      error

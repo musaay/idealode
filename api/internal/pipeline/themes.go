@@ -8,7 +8,7 @@ import (
 )
 
 // GroupThemes, sinyal taşıyan (pain_point / feature_request) analizleri tag
-// bazlı temalara bağlar (V1: embeddingsiz — Groq embedding sunmuyor).
+// bazlı temalara bağlar (V1: embeddingsiz — mevcut LLM sağlayıcı embedding sunmuyor).
 //
 // Gruplama anahtarı post'un birincil domain_tag'i (classification prompt'u
 // tag'leri en spesifikten sıralar). noise/complaint tema oluşturmaz.

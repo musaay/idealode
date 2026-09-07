@@ -3,7 +3,7 @@
 // Subcommand'lar:
 //
 //	ingest      aktif kaynaklardan yeni post'ları çek ve raw_posts'a yaz
-//	analyze     ön-filtre + Groq classification -> post_analysis
+//	analyze     ön-filtre + LLM classification -> post_analysis
 //	synthesize  tema gruplama + idea synthesis -> themes/ideas
 //	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
@@ -38,7 +38,7 @@ Kullanım: idealode <komut>
 
 Komutlar:
   ingest      aktif kaynaklardan yeni post'ları çek (raw_posts)
-  analyze     ön-filtre + Groq classification (post_analysis)
+  analyze     ön-filtre + LLM classification (post_analysis)
   synthesize  tema gruplama + idea synthesis (themes, ideas)
   seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
@@ -152,6 +152,12 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 	return fmt.Errorf("bilinmeyen komut: %q", cmd)
 }
 
+// newChat, cfg'deki LLM ayarlarından (env ile seçilir, #96) canlı istemci
+// kurar. Tüm LLM kullanan subcommand'lar bu tek yardımcıyı paylaşır.
+func newChat(cfg *config.Config) llm.Chat {
+	return llm.NewOpenAICompat(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel)
+}
+
 // cmdMigrate, embed edilmiş .sql dosyalarını DB'ye elle tetiklenerek uygular
 // (bkz. internal/store/migrate.go). Otomatik/örtük çalışmaz.
 func cmdMigrate(ctx context.Context, cfg *config.Config) error {
@@ -184,7 +190,7 @@ func cmdIngest(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
-	if err := cfg.RequireGroq(); err != nil {
+	if err := cfg.RequireLLM(); err != nil {
 		return err
 	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
@@ -196,7 +202,7 @@ func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
-	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	chat := newChat(cfg)
 	n, err := pipeline.Analyze(ctx, cfg, st, chat)
 	log.Printf("analyze tamam: %d post işlendi", n)
 	return err
@@ -204,7 +210,7 @@ func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 
 // cmdFuse, market_derived kartlara yerel talep kanıtı eşleştirir (#43).
 func cmdFuse(ctx context.Context, cfg *config.Config) error {
-	if err := cfg.RequireGroq(); err != nil {
+	if err := cfg.RequireLLM(); err != nil {
 		return err
 	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
@@ -216,7 +222,7 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
-	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	chat := newChat(cfg)
 	n, err := pipeline.FuseEvidence(ctx, cfg, st, chat)
 	if err != nil {
 		return err
@@ -226,7 +232,7 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
-	if err := cfg.RequireGroq(); err != nil {
+	if err := cfg.RequireLLM(); err != nil {
 		return err
 	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
@@ -241,7 +247,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	if _, err := pipeline.GroupThemes(ctx, st); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
-	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	chat := newChat(cfg)
 	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)
 	log.Printf("synthesize tamam: %d yeni idea", n)
 	return err
@@ -250,7 +256,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 // cmdSeeds, elle küratörlüğü yapılan pazar tohumlarını (radar-seeds.jsonl)
 // 3 mercekten geçirip market_derived kart üretir (#56).
 func cmdSeeds(ctx context.Context, cfg *config.Config) error {
-	if err := cfg.RequireGroq(); err != nil {
+	if err := cfg.RequireLLM(); err != nil {
 		return err
 	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
@@ -262,7 +268,7 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
-	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	chat := newChat(cfg)
 	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL)
 	if err != nil {
 		return err
@@ -274,9 +280,9 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 // cmdAPI, JSON API sunucusunu ayağa kaldırır (#18). DATABASE_URL'i gören TEK
 // süreçtir; `serve` (web) buraya HTTP ile bağlanır. Public domain almaz —
 // yalnız Railway iç ağında (idealode-web) erişilir. Kart sohbeti/blend
-// (#66) Groq'a yalnız BU süreçten gider — RequireGroq bu yüzden zorunlu.
+// (#66) LLM'e yalnız BU süreçten gider — RequireLLM bu yüzden zorunlu.
 func cmdAPI(ctx context.Context, cfg *config.Config) error {
-	if err := cfg.RequireGroq(); err != nil {
+	if err := cfg.RequireLLM(); err != nil {
 		return err
 	}
 	if err := cfg.RequireDatabaseURL(); err != nil {
@@ -288,7 +294,7 @@ func cmdAPI(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
-	chat := llm.NewGroq(cfg.GroqAPIKey, cfg.GroqModel)
+	chat := newChat(cfg)
 
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -1,5 +1,5 @@
 // Package copilot, kart sohbeti ("Idea Copilot") ve sohbetten kart türetme
-// ("blend") için Groq LLM prompt'larını kurar, cevabı savunmacı ayrıştırır
+// ("blend") için LLM prompt'larını kurar, cevabı savunmacı ayrıştırır
 // ve doğrular. api paketinin HTTP handler'ları bu paketi kullanır; DB'ye
 // dokunmaz (store'daki BlendDraft/ChatMessage/Idea tiplerini kullanır).
 package copilot

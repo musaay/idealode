@@ -9,7 +9,7 @@ import (
 	"github.com/musaay/idealode/api/internal/store"
 )
 
-// fakeChat, llm.Chat'i sahte olarak uygular — canlı Groq'a hiç gitmez.
+// fakeChat, llm.Chat'i sahte olarak uygular — canlı LLM'e hiç gitmez.
 type fakeChat struct {
 	response string
 	err      error
