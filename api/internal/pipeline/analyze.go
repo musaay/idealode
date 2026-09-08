@@ -192,11 +192,15 @@ func normalizeTags(tags []string) []string {
 	return out
 }
 
+// clip, s'yi en fazla n RUNE'a kırpar (byte değil — Türkçe çok baytlı
+// karakterler ortadan kesilip geçersiz UTF-8 üretmesin diye, #108) ve
+// kırpıldıysa "…" ekler.
 func clip(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }
 
 // langName, OUTPUT_LANG kodunu prompt'ta kullanılacak dil adına çevirir.

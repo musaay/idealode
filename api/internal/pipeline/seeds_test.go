@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/musaay/idealode/api/internal/config"
 	"github.com/musaay/idealode/api/internal/store"
@@ -555,5 +556,85 @@ func TestProcessSeedsDistinctivenessErrorStillWritesCard(t *testing.T) {
 	}
 	if verdict != nil || criterion != nil || reason != nil {
 		t.Errorf("mercek hatasında distinctiveness_* alanları NULL kalmalı, geldi: verdict=%v criterion=%v reason=%v", verdict, criterion, reason)
+	}
+}
+
+// sp, testte *string literal üretmek için kısa yardımcı.
+func sp(s string) *string { return &s }
+
+// TestDistinctivenessLogSuffix, kart üretim log satırına eklenen özgünlük
+// özetini doğrular (#108): fail -> kriter kodu + TR açıklaması + sebep (ilk
+// 160 karakter), pass/unsure -> yalnız karar, alanlar NULL -> boş string.
+func TestDistinctivenessLogSuffix(t *testing.T) {
+	longReason := strings.Repeat("a", 200)
+	cases := []struct {
+		name string
+		idea store.Idea
+		want string
+	}{
+		{
+			name: "fail K3 bilinen kriter",
+			idea: store.Idea{
+				DistinctivenessVerdict:   sp("fail"),
+				DistinctivenessCriterion: sp("K3"),
+				DistinctivenessReason:    sp("TR'de ödeyen segment yok"),
+			},
+			want: " · özgünlük: fail K3 — talep (TR'de ödeyen yok) — TR'de ödeyen segment yok",
+		},
+		{
+			name: "pass",
+			idea: store.Idea{
+				DistinctivenessVerdict:   sp("pass"),
+				DistinctivenessCriterion: sp("none"),
+				DistinctivenessReason:    sp("her şey yolunda"),
+			},
+			want: " · özgünlük: pass",
+		},
+		{
+			name: "unsure",
+			idea: store.Idea{
+				DistinctivenessVerdict: sp("unsure"),
+			},
+			want: " · özgünlük: unsure",
+		},
+		{
+			name: "mercek hiç çalışmadı (alanlar NULL)",
+			idea: store.Idea{},
+			want: "",
+		},
+		{
+			name: "fail sebep 160 karaktere kırpılır",
+			idea: store.Idea{
+				DistinctivenessVerdict:   sp("fail"),
+				DistinctivenessCriterion: sp("K1"),
+				DistinctivenessReason:    sp(longReason),
+			},
+			want: " · özgünlük: fail K1 — doygunluk (10+ bilinir benzer ürün) — " + clip(longReason, 160),
+		},
+		{
+			// "a" + çok baytlı Türkçe karakterler (ğ, 2 bayt/rune): 160. BAYT
+			// tam bir "ğ"nin ortasına denk gelir (1 + 2k tek, 160 çift) —
+			// byte-bazlı kırpma bu durumda geçersiz UTF-8 üretirdi. Rune-bazlı
+			// clip() bunu doğru kırpar (#108 reviewer bulgusu).
+			name: "fail sebep çok baytlı Türkçe karakterle 160 rune'a kırpılır (geçerli UTF-8)",
+			idea: store.Idea{
+				DistinctivenessVerdict:   sp("fail"),
+				DistinctivenessCriterion: sp("K4"),
+				DistinctivenessReason:    sp("a" + strings.Repeat("ğ", 200)),
+			},
+			want: " · özgünlük: fail K4 — kırılganlık (tek güncellemeyle anlamsız) — " + clip("a"+strings.Repeat("ğ", 200), 160),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := distinctivenessLogSuffix(tc.idea)
+			if got != tc.want {
+				t.Errorf("distinctivenessLogSuffix() = %q, want %q", got, tc.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("distinctivenessLogSuffix() geçersiz UTF-8 ürettü: %q", got)
+			}
+		})
 	}
 }

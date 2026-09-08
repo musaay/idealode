@@ -163,11 +163,37 @@ func logPendingIdeas(ctx context.Context, st *store.Store) {
 		log.Printf("run: beklemede kart sorgusu HATA: %v", err)
 		return
 	}
-	ids := make([]string, len(pending))
+	entries := make([]string, len(pending))
 	for i, p := range pending {
-		ids[i] = fmt.Sprintf("%d", p.ID)
+		entries[i] = pendingIdeaSummary(p)
 	}
-	log.Printf("run: beklemede %d kart (id: %s)", len(pending), strings.Join(ids, ", "))
+	log.Printf("run: beklemede %d kart: %s", len(pending), strings.Join(entries, "; "))
+}
+
+// pendingIdeaSummary, `run: beklemede …` özetindeki tek kart satırını üretir
+// (#108): id + başlık (60 karaktere kırpılır) + özgünlük kararı — fail ise
+// kriter koduyla birlikte (`[fail K3]`), değilse yalnız karar (`[pass]`),
+// mercek hiç çalışmadıysa (alanlar NULL) `[?]`.
+func pendingIdeaSummary(p store.PendingIdea) string {
+	title := truncateRunes(p.Title, 60)
+	tag := "?"
+	if p.DistinctivenessVerdict != nil {
+		tag = *p.DistinctivenessVerdict
+		if tag == "fail" && p.DistinctivenessCriterion != nil {
+			tag = fmt.Sprintf("fail %s", *p.DistinctivenessCriterion)
+		}
+	}
+	return fmt.Sprintf("%d %q [%s]", p.ID, title, tag)
+}
+
+// truncateRunes, s'yi en fazla n RUNE'a kırpar (Türkçe çok baytlı karakterler
+// ortadan kesilmesin diye byte değil rune sayılır) ve kırpıldıysa "…" ekler.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // newChat, cfg'deki LLM ayarlarından (env ile seçilir, #96) canlı istemci

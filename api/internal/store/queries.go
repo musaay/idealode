@@ -557,10 +557,12 @@ func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
 }
 
 // PendingIdea, PendingIdeas'ın döndürdüğü hafif özet satırı — `idealode run`
-// log özeti için yalnız id+title (#102).
+// log özeti için id+title+özgünlük kararı (#102, #108).
 type PendingIdea struct {
-	ID    int64
-	Title string
+	ID                       int64
+	Title                    string
+	DistinctivenessVerdict   *string
+	DistinctivenessCriterion *string
 }
 
 // PendingIdeas, henüz PO onayı almamış (published_at IS NULL) ve arşivde
@@ -570,7 +572,7 @@ type PendingIdea struct {
 // açar.
 func (s *Store) PendingIdeas(ctx context.Context) ([]PendingIdea, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, title FROM ideas
+		SELECT id, title, distinctiveness_verdict, distinctiveness_criterion FROM ideas
 		WHERE published_at IS NULL AND archived_at IS NULL
 		ORDER BY created_at, id`)
 	if err != nil {
@@ -581,7 +583,7 @@ func (s *Store) PendingIdeas(ctx context.Context) ([]PendingIdea, error) {
 	var out []PendingIdea
 	for rows.Next() {
 		var p PendingIdea
-		if err := rows.Scan(&p.ID, &p.Title); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.DistinctivenessVerdict, &p.DistinctivenessCriterion); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
