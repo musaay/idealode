@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,7 +25,7 @@ const (
 // uygular.
 type fakeStore struct {
 	ideas       []store.Idea
-	byID        map[int64]*store.Idea
+	bySlug      map[string]*store.Idea
 	sources     map[int64][]store.IdeaSource
 	lastFilter  store.IdeaFilter
 	listErr     error
@@ -69,11 +70,11 @@ func (f *fakeStore) ListIdeasFiltered(ctx context.Context, filt store.IdeaFilter
 	return out, nil
 }
 
-func (f *fakeStore) GetIdea(ctx context.Context, id int64, sid string) (*store.Idea, error) {
+func (f *fakeStore) GetIdeaBySlug(ctx context.Context, slug string, sid string) (*store.Idea, error) {
 	if f.forceGetErr != nil {
 		return nil, f.forceGetErr
 	}
-	idea, ok := f.byID[id]
+	idea, ok := f.bySlug[slug]
 	if !ok {
 		return nil, store.ErrNotFound
 	}
@@ -130,6 +131,7 @@ func (f *fakeStore) InsertBlendedIdea(ctx context.Context, parent *store.Idea, d
 	parentID := parent.ID
 	ni := &store.Idea{
 		ID:                 f.nextIdeaID,
+		Slug:               fmt.Sprintf("blended-%d", f.nextIdeaID),
 		Title:              draft.Title,
 		ProblemStatement:   draft.ProblemStatement,
 		ProposedSolution:   draft.ProposedSolution,
@@ -141,24 +143,28 @@ func (f *fakeStore) InsertBlendedIdea(ctx context.Context, parent *store.Idea, d
 		DomainTags:         draft.DomainTags,
 		LocalEvidence:      parent.LocalEvidence,
 		ParentIdeaID:       &parentID,
+		ParentSlug:         parent.Slug,
 		CreatedBySessionID: sid,
 		Mine:               true,
 		UrgencyScore:       draft.UrgencyScore,
 		MonetizationSignal: draft.MonetizationSignal,
 		CreatedAt:          time.Now(),
 	}
-	f.byID[ni.ID] = ni
+	if f.bySlug == nil {
+		f.bySlug = map[string]*store.Idea{}
+	}
+	f.bySlug[ni.Slug] = ni
 	f.ideas = append(f.ideas, *ni)
 	return ni, nil
 }
 
 func newFakeStore() *fakeStore {
-	idea1 := store.Idea{ID: 1, Title: "Kart 1", SourceType: "pain_point"}
-	idea2 := store.Idea{ID: 2, Title: "Kart 2", SourceType: "market_derived"}
-	idea3 := store.Idea{ID: 3, Title: "Kart 3 (blended)", SourceType: "ai_blended", CreatedBySessionID: testSID}
+	idea1 := store.Idea{ID: 1, Slug: "kart-1", Title: "Kart 1", SourceType: "pain_point"}
+	idea2 := store.Idea{ID: 2, Slug: "kart-2", Title: "Kart 2", SourceType: "market_derived"}
+	idea3 := store.Idea{ID: 3, Slug: "kart-3", Title: "Kart 3 (blended)", SourceType: "ai_blended", CreatedBySessionID: testSID}
 	return &fakeStore{
-		ideas: []store.Idea{idea1, idea2, idea3},
-		byID:  map[int64]*store.Idea{1: &idea1, 2: &idea2, 3: &idea3},
+		ideas:  []store.Idea{idea1, idea2, idea3},
+		bySlug: map[string]*store.Idea{"kart-1": &idea1, "kart-2": &idea2, "kart-3": &idea3},
 		sources: map[int64][]store.IdeaSource{
 			1: {{Platform: "reddit", Community: "r/test", URL: "https://x", CreatedAt: time.Now()}},
 		},
@@ -365,7 +371,7 @@ func TestListIdeas_LimitBounds(t *testing.T) {
 
 func TestGetIdea_Happy(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/1")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -382,7 +388,7 @@ func TestGetIdea_Happy(t *testing.T) {
 
 func TestGetIdea_NotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/999")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-999")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -391,19 +397,22 @@ func TestGetIdea_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetIdea_InvalidID(t *testing.T) {
+// TestGetIdea_UnknownSlug, tabloda karşılığı olmayan her değerin (sayısal
+// görünenler dahil) düz 404 aldığını doğrular — id'ye asla düşülmez, 301
+// yönlendirme yok (#110, PO kararı).
+func TestGetIdea_UnknownSlug(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	for _, id := range []string{"abc", "-1", "0", "1.5"} {
-		rec := doReq(t, s.Handler(), "/api/ideas/"+id)
+	for _, slug := range []string{"abc", "-1", "0", "1.5", "1"} {
+		rec := doReq(t, s.Handler(), "/api/ideas/"+slug)
 		if rec.Code != http.StatusNotFound {
-			t.Errorf("id=%q: status %d bekleniyordu 404", id, rec.Code)
+			t.Errorf("slug=%q: status %d bekleniyordu 404", slug, rec.Code)
 		}
 	}
 }
 
 func TestGetIdea_MissingSessionID(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/1", "", nil)
+	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/kart-1", "", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -412,7 +421,7 @@ func TestGetIdea_MissingSessionID(t *testing.T) {
 func TestGetIdea_OthersAIBlended_NotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
 	// idea3 testSID'e ait; testSID2 ile isteyince 404 (var olduğu sızmaz).
-	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/3", testSID2, nil)
+	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/kart-3", testSID2, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d (404 bekleniyordu)", rec.Code)
 	}
@@ -420,7 +429,7 @@ func TestGetIdea_OthersAIBlended_NotFound(t *testing.T) {
 
 func TestGetIdea_OwnAIBlended_Visible(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/3", testSID, nil)
+	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/kart-3", testSID, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -435,7 +444,7 @@ func TestGetIdea_OwnAIBlended_Visible(t *testing.T) {
 
 func TestIdeaSources_Happy(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/1/sources")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-1/sources")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -453,7 +462,7 @@ func TestIdeaSources_Happy(t *testing.T) {
 func TestIdeaSources_EmptyNotNull(t *testing.T) {
 	// idea 2 var ama sources map'inde kaydı yok -> fakeStore nil döner.
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/2/sources")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-2/sources")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -467,7 +476,7 @@ func TestIdeaSources_EmptyNotNull(t *testing.T) {
 
 func TestIdeaSources_CardNotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/999/sources")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-999/sources")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -496,7 +505,7 @@ func TestNotFoundPath(t *testing.T) {
 
 func TestGetChat_EmptyIsEmptyArrayNotNull(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/1/chat")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-1/chat")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -507,7 +516,7 @@ func TestGetChat_EmptyIsEmptyArrayNotNull(t *testing.T) {
 
 func TestGetChat_MissingSessionID(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/1/chat", "", nil)
+	rec := doReqSID(t, s.Handler(), http.MethodGet, "/api/ideas/kart-1/chat", "", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -515,7 +524,7 @@ func TestGetChat_MissingSessionID(t *testing.T) {
 
 func TestGetChat_CardNotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{})
-	rec := doReq(t, s.Handler(), "/api/ideas/999/chat")
+	rec := doReq(t, s.Handler(), "/api/ideas/kart-999/chat")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -524,7 +533,7 @@ func TestGetChat_CardNotFound(t *testing.T) {
 func TestPostChat_Happy(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeChatOK})
 	body, _ := json.Marshal(map[string]string{"message": "Bu fikri nasıl büyütebilirim?", "lang": "tr"})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, body)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -543,7 +552,7 @@ func TestPostChat_Happy(t *testing.T) {
 	}
 
 	// GET /chat artık geçmişi göstermeli (kullanıcı + asistan mesajı).
-	getRec := doReq(t, s.Handler(), "/api/ideas/1/chat")
+	getRec := doReq(t, s.Handler(), "/api/ideas/kart-1/chat")
 	var getBody struct {
 		Messages []store.ChatMessage `json:"messages"`
 	}
@@ -559,7 +568,7 @@ func TestPostChat_Happy(t *testing.T) {
 func TestPostChat_EmptyMessage_BadRequest(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeChatOK})
 	body, _ := json.Marshal(map[string]string{"message": "   ", "lang": "tr"})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, body)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -568,7 +577,7 @@ func TestPostChat_EmptyMessage_BadRequest(t *testing.T) {
 func TestPostChat_TooLongMessage_BadRequest(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeChatOK})
 	body, _ := json.Marshal(map[string]string{"message": strings.Repeat("a", 1001), "lang": "tr"})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, body)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -576,7 +585,7 @@ func TestPostChat_TooLongMessage_BadRequest(t *testing.T) {
 
 func TestPostChat_MalformedJSON_BadRequest(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeChatOK})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, []byte(`{bozuk`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, []byte(`{bozuk`))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -585,7 +594,7 @@ func TestPostChat_MalformedJSON_BadRequest(t *testing.T) {
 func TestPostChat_CardNotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeChatOK})
 	body, _ := json.Marshal(map[string]string{"message": "merhaba", "lang": "tr"})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/999/chat", testSID, body)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-999/chat", testSID, body)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -594,7 +603,7 @@ func TestPostChat_CardNotFound(t *testing.T) {
 func TestPostChat_UpstreamError(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{err: context.DeadlineExceeded})
 	body, _ := json.Marshal(map[string]string{"message": "merhaba", "lang": "tr"})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, body)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, body)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -609,7 +618,7 @@ func TestPostChat_RateLimited(t *testing.T) {
 
 	var last *httptest.ResponseRecorder
 	for i := 0; i < chatRateLimit+1; i++ {
-		last = doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID, body)
+		last = doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID, body)
 	}
 	if last.Code != http.StatusTooManyRequests {
 		t.Fatalf("%d. istek status: %d (429 bekleniyordu)", chatRateLimit+1, last.Code)
@@ -619,7 +628,7 @@ func TestPostChat_RateLimited(t *testing.T) {
 	}
 
 	// Farklı bir oturum aynı anda kotasını tüketmemiş olmalı.
-	freshRec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/chat", testSID2, body)
+	freshRec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/chat", testSID2, body)
 	if freshRec.Code != http.StatusOK {
 		t.Errorf("farklı oturum kotası paylaşmamalı, status: %d", freshRec.Code)
 	}
@@ -629,7 +638,7 @@ func TestPostChat_RateLimited(t *testing.T) {
 
 func TestPostBlend_NoConversation_Conflict(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeBlendOK})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", testSID, []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -644,7 +653,7 @@ func TestPostBlend_Happy(t *testing.T) {
 		1: {testSID: {{ID: 1, Role: "user", Message: "merhaba", CreatedAt: time.Now()}}},
 	}
 	s := newTestServer(fs, &fakeLLM{response: fakeBlendOK})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", testSID, []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -671,7 +680,7 @@ func TestPostBlend_UpstreamError(t *testing.T) {
 		1: {testSID: {{ID: 1, Role: "user", Message: "merhaba", CreatedAt: time.Now()}}},
 	}
 	s := newTestServer(fs, &fakeLLM{err: context.DeadlineExceeded})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", testSID, []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -684,7 +693,7 @@ func TestPostBlend_InvalidDraft_Upstream(t *testing.T) {
 	}
 	// title çok kısa -> copilot.Blend ErrInvalidDraft döner -> 502, kart yazılmaz.
 	s := newTestServer(fs, &fakeLLM{response: `{"title":"kısa","problem_statement":"x","proposed_solution":"y","domain_tags":["a"]}`})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", testSID, []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
 	}
@@ -702,7 +711,7 @@ func TestPostBlend_RateLimited(t *testing.T) {
 
 	var last *httptest.ResponseRecorder
 	for i := 0; i < blendRateLimit+1; i++ {
-		last = doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", testSID, []byte(`{"lang":"tr"}`))
+		last = doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{"lang":"tr"}`))
 	}
 	if last.Code != http.StatusTooManyRequests {
 		t.Fatalf("%d. istek status: %d (429 bekleniyordu)", blendRateLimit+1, last.Code)
@@ -711,7 +720,7 @@ func TestPostBlend_RateLimited(t *testing.T) {
 
 func TestPostBlend_MissingSessionID(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeBlendOK})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/1/blend", "", []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", "", []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rec.Code)
 	}
@@ -719,7 +728,7 @@ func TestPostBlend_MissingSessionID(t *testing.T) {
 
 func TestPostBlend_CardNotFound(t *testing.T) {
 	s := newTestServer(newFakeStore(), &fakeLLM{response: fakeBlendOK})
-	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/999/blend", testSID, []byte(`{"lang":"tr"}`))
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-999/blend", testSID, []byte(`{"lang":"tr"}`))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rec.Code)
 	}

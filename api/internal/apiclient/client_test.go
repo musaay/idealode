@@ -156,16 +156,16 @@ func TestGetIdeaHappyPath(t *testing.T) {
 	var gotPath string
 	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		jsonHandler(http.StatusOK, `{"idea":{"id":7,"title":"Kart","source_type":"market_derived"}}`)(w, r)
+		jsonHandler(http.StatusOK, `{"idea":{"id":7,"slug":"kart-7ab2","title":"Kart","source_type":"market_derived"}}`)(w, r)
 	})
-	idea, err := c.GetIdea(context.Background(), 7)
+	idea, err := c.GetIdeaBySlug(context.Background(), "kart-7ab2")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
-	if gotPath != "/api/ideas/7" {
+	if gotPath != "/api/ideas/kart-7ab2" {
 		t.Errorf("yol = %q", gotPath)
 	}
-	if idea.ID != 7 || idea.Title != "Kart" {
+	if idea.ID != 7 || idea.Slug != "kart-7ab2" || idea.Title != "Kart" {
 		t.Errorf("kart yanlış: %+v", idea)
 	}
 	if idea.ParentIdeaID != nil || idea.Mine {
@@ -175,7 +175,7 @@ func TestGetIdeaHappyPath(t *testing.T) {
 
 func TestGetIdeaNotFound(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusNotFound, `{"error":"not_found"}`))
-	_, err := c.GetIdea(context.Background(), 404)
+	_, err := c.GetIdeaBySlug(context.Background(), "yok-404x")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("hata = %v, store.ErrNotFound bekleniyor", err)
 	}
@@ -183,7 +183,7 @@ func TestGetIdeaNotFound(t *testing.T) {
 
 func TestGetIdeaMissingIdeaFieldIsError(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusOK, `{}`))
-	_, err := c.GetIdea(context.Background(), 1)
+	_, err := c.GetIdeaBySlug(context.Background(), "kart-1a2b")
 	if err == nil {
 		t.Fatal("hata bekleniyordu")
 	}
@@ -200,11 +200,11 @@ func TestIdeaSourcesHappyPathAndZeroTime(t *testing.T) {
 			{"platform":"hackernews","community":"news","url":"https://example.com/a","created_at":"2026-08-20T09:30:00Z"},
 			{"platform":"radar_seed","community":"","url":"https://example.com/b"}]}`)(w, r)
 	})
-	src, err := c.IdeaSources(context.Background(), 3)
+	src, err := c.IdeaSources(context.Background(), "kart-3c4d")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
-	if gotPath != "/api/ideas/3/sources" {
+	if gotPath != "/api/ideas/kart-3c4d/sources" {
 		t.Errorf("yol = %q", gotPath)
 	}
 	if len(src) != 2 {
@@ -223,7 +223,7 @@ func TestIdeaSourcesHappyPathAndZeroTime(t *testing.T) {
 
 func TestIdeaSourcesEmptyNeverNil(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusOK, `{"sources":[]}`))
-	src, err := c.IdeaSources(context.Background(), 1)
+	src, err := c.IdeaSources(context.Background(), "kart-1a2b")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestIdeaSourcesEmptyNeverNil(t *testing.T) {
 
 func TestIdeaSourcesNotFound(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusNotFound, `{"error":"not_found"}`))
-	_, err := c.IdeaSources(context.Background(), 9)
+	_, err := c.IdeaSources(context.Background(), "kart-9z8y")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("hata = %v, store.ErrNotFound bekleniyor", err)
 	}
@@ -288,7 +288,7 @@ func TestTimeoutIsWrapped(t *testing.T) {
 	t.Cleanup(func() { close(release); srv.Close() })
 
 	c := New(srv.URL, 50*time.Millisecond)
-	_, err := c.GetIdea(context.Background(), 1)
+	_, err := c.GetIdeaBySlug(context.Background(), "kart-1a2b")
 	if err == nil {
 		t.Fatal("zaman aşımı hatası bekleniyordu")
 	}
@@ -338,16 +338,16 @@ func TestBaseURLTrailingSlashTrimmed(t *testing.T) {
 
 func TestGetIdeaCarriesParentAndMine(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusOK,
-		`{"idea":{"id":9,"title":"Türetilmiş","source_type":"ai_blended","parent_idea_id":3,"mine":true}}`))
+		`{"idea":{"id":9,"slug":"turetilmis-9x8y","title":"Türetilmiş","source_type":"ai_blended","parent_idea_id":3,"parent_slug":"kaynak-3a2b","mine":true}}`))
 
-	idea, err := c.GetIdea(context.Background(), 9)
+	idea, err := c.GetIdeaBySlug(context.Background(), "turetilmis-9x8y")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
-	if idea.ID != 9 || idea.SourceType != "ai_blended" {
+	if idea.ID != 9 || idea.Slug != "turetilmis-9x8y" || idea.SourceType != "ai_blended" {
 		t.Errorf("kart yanlış: %+v", idea)
 	}
-	if idea.ParentIdeaID == nil || *idea.ParentIdeaID != 3 || !idea.Mine {
+	if idea.ParentIdeaID == nil || *idea.ParentIdeaID != 3 || idea.ParentSlug != "kaynak-3a2b" || !idea.Mine {
 		t.Errorf("ek alanlar = %+v", idea)
 	}
 }
@@ -361,13 +361,13 @@ func TestSessionHeaderSentFromContext(t *testing.T) {
 	})
 
 	ctx := web.WithSession(context.Background(), "abc123")
-	if _, err := c.ListChat(ctx, 5); err != nil {
+	if _, err := c.ListChat(ctx, "kart-5e6f"); err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
 	if gotSID != "abc123" {
 		t.Errorf("X-Session-Id = %q", gotSID)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/api/ideas/5/chat" {
+	if gotMethod != http.MethodGet || gotPath != "/api/ideas/kart-5e6f/chat" {
 		t.Errorf("istek = %s %s", gotMethod, gotPath)
 	}
 }
@@ -377,7 +377,7 @@ func TestListChatHappyPathAndNeverNil(t *testing.T) {
 		`{"messages":[{"id":101,"role":"user","message":"Selam","created_at":"2026-09-02T10:00:00Z"},`+
 			`{"id":102,"role":"assistant","message":"Merhaba","created_at":"2026-09-02T10:00:05Z"}]}`))
 
-	msgs, err := c.ListChat(context.Background(), 1)
+	msgs, err := c.ListChat(context.Background(), "kart-1a2b")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestListChatHappyPathAndNeverNil(t *testing.T) {
 	}
 
 	empty := newFake(t, jsonHandler(http.StatusOK, `{"messages":null}`))
-	got, err := empty.ListChat(context.Background(), 1)
+	got, err := empty.ListChat(context.Background(), "kart-1a2b")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestSendChatSendsBodyAndParsesReply(t *testing.T) {
 				`"suggestions":["a","b"]}`)(w, r)
 	})
 
-	reply, err := c.SendChat(context.Background(), 4, "Soru", "tr")
+	reply, err := c.SendChat(context.Background(), "kart-4d3c", "Soru", "tr")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestChatStatusCodesMapToTypedErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		c := newFake(t, jsonHandler(tt.status, `{"error":"x"}`))
-		_, err := c.SendChat(context.Background(), 1, "soru", "tr")
+		_, err := c.SendChat(context.Background(), "kart-1a2b", "soru", "tr")
 		if !errors.Is(err, tt.want) {
 			t.Errorf("durum %d -> hata %v, beklenen %v", tt.status, err, tt.want)
 		}
@@ -444,7 +444,7 @@ func TestChatStatusCodesMapToTypedErrors(t *testing.T) {
 
 	// Beklenmeyen durum tipli hataya çevrilmez (web 502 sayfası gösterir).
 	c := newFake(t, jsonHandler(http.StatusTeapot, `{}`))
-	_, err := c.SendChat(context.Background(), 1, "soru", "tr")
+	_, err := c.SendChat(context.Background(), "kart-1a2b", "soru", "tr")
 	if err == nil || errors.Is(err, web.ErrUpstream) {
 		t.Errorf("beklenmeyen durum yanlış eşlendi: %v", err)
 	}
@@ -455,24 +455,33 @@ func TestBlendParsesCreatedIdea(t *testing.T) {
 	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotMethod = r.URL.Path, r.Method
 		jsonHandler(http.StatusCreated,
-			`{"idea":{"id":42,"title":"Yeni","source_type":"ai_blended","evidence_count":4}}`)(w, r)
+			`{"idea":{"id":42,"slug":"yeni-8f2a","title":"Yeni","source_type":"ai_blended","evidence_count":4}}`)(w, r)
 	})
 
-	idea, err := c.Blend(context.Background(), 7, "en")
+	idea, err := c.Blend(context.Background(), "kart-7g8h", "en")
 	if err != nil {
 		t.Fatalf("beklenmeyen hata: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/api/ideas/7/blend" {
+	if gotMethod != http.MethodPost || gotPath != "/api/ideas/kart-7g8h/blend" {
 		t.Errorf("istek = %s %s", gotMethod, gotPath)
 	}
-	if idea.ID != 42 || idea.SourceType != "ai_blended" {
+	if idea.ID != 42 || idea.Slug != "yeni-8f2a" || idea.SourceType != "ai_blended" {
 		t.Errorf("kart = %+v", idea)
 	}
 }
 
 func TestBlendMissingIdeaIsError(t *testing.T) {
 	c := newFake(t, jsonHandler(http.StatusCreated, `{}`))
-	if _, err := c.Blend(context.Background(), 7, "tr"); err == nil {
+	if _, err := c.Blend(context.Background(), "kart-7g8h", "tr"); err == nil {
 		t.Fatal("sözleşme ihlali hata dönmeliydi")
+	}
+}
+
+// TestBlendMissingSlugIsError, sözleşme ihlalini (id var ama slug yok)
+// yakalar — Blend'in Slug boşsa da hata dönmesi gerekir (#110).
+func TestBlendMissingSlugIsError(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusCreated, `{"idea":{"id":42,"title":"Yeni","source_type":"ai_blended"}}`))
+	if _, err := c.Blend(context.Background(), "kart-7g8h", "tr"); err == nil {
+		t.Fatal("slug eksikken hata bekleniyordu")
 	}
 }

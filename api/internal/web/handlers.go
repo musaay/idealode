@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -72,18 +71,19 @@ func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "gallery", http.StatusOK, page)
 }
 
-// handleIdea, `GET /ideas/{id}` — kart detayı. Geçersiz id ve bulunamayan
-// kart aynı şekilde 404 sayfasına düşer.
+// handleIdea, `GET /ideas/{slug}` — kart detayı. Bulunamayan slug 404
+// sayfasına düşer (sayısal görünen eski değerler dahil — id'ye asla
+// düşülmez, 301 yönlendirme yok, #110 PO kararı).
 func (s *Server) handleIdea(w http.ResponseWriter, r *http.Request) {
 	base := s.newPage(w, r)
 
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
+	slug := r.PathValue("slug")
+	if slug == "" {
 		s.renderNotFound(w, r, base)
 		return
 	}
 
-	idea, err := s.ideas.GetIdea(r.Context(), id)
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.renderNotFound(w, r, base)
@@ -93,7 +93,7 @@ func (s *Server) handleIdea(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sources, err := s.ideas.IdeaSources(r.Context(), id)
+	sources, err := s.ideas.IdeaSources(r.Context(), slug)
 	if err != nil {
 		// Kart okunduktan sonra kaynak ucu 404 diyorsa kart bu arada
 		// kaldırılmıştır: kullanıcıya 404 gösterilir, 502 değil.
@@ -109,8 +109,8 @@ func (s *Server) handleIdea(w http.ResponseWriter, r *http.Request) {
 	// gösterilir, panelde tasarlanmış bir uyarı basılır.
 	var msgs []ChatMessage
 	chatErr := chatErrorText(base, r.URL.Query().Get("chat_error"))
-	if list, err := s.ideas.ListChat(r.Context(), id); err != nil {
-		log.Printf("hata: sohbet geçmişi okunamadı (kart %d): %v", id, err)
+	if list, err := s.ideas.ListChat(r.Context(), slug); err != nil {
+		log.Printf("hata: sohbet geçmişi okunamadı (kart %s): %v", slug, err)
 		if chatErr == "" {
 			chatErr = base.T("chat.error.history")
 		}
@@ -164,41 +164,41 @@ func chatErrorCode(err error) (code string, status int) {
 	}
 }
 
-// handleChat, `POST /ideas/{id}/chat`. İki yol da aynı doğrulamadan geçer:
+// handleChat, `POST /ideas/{slug}/chat`. İki yol da aynı doğrulamadan geçer:
 //   - form gönderimi (JS yok): 303 ile kart detayına, sohbet çapasına döner;
 //   - Accept: application/json (app.js): {"reply","suggestions"} JSON'u.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	base := s.newPage(w, r)
 	asJSON := wantsJSON(r)
 
-	id, ok := s.postIdea(w, r, base, asJSON)
+	slug, ok := s.postIdea(w, r, base, asJSON)
 	if !ok {
 		return
 	}
 
 	if err := parseAnyForm(r); err != nil {
-		s.chatFailure(w, r, base, id, asJSON, ErrBadRequest)
+		s.chatFailure(w, r, base, slug, asJSON, ErrBadRequest)
 		return
 	}
 
 	msg := firstNonEmpty(r.Form["message"])
 	switch {
 	case msg == "":
-		s.chatRedirect(w, r, base, id, asJSON, "empty", http.StatusBadRequest)
+		s.chatRedirect(w, r, base, slug, asJSON, "empty", http.StatusBadRequest)
 		return
 	case len([]rune(msg)) > chatMaxLen:
-		s.chatRedirect(w, r, base, id, asJSON, "too_long", http.StatusBadRequest)
+		s.chatRedirect(w, r, base, slug, asJSON, "too_long", http.StatusBadRequest)
 		return
 	}
 
-	reply, err := s.ideas.SendChat(r.Context(), id, msg, base.Lang)
+	reply, err := s.ideas.SendChat(r.Context(), slug, msg, base.Lang)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.chatNotFound(w, r, base, asJSON)
 			return
 		}
-		log.Printf("hata: sohbet gönderilemedi (kart %d): %v", id, err)
-		s.chatFailure(w, r, base, id, asJSON, err)
+		log.Printf("hata: sohbet gönderilemedi (kart %s): %v", slug, err)
+		s.chatFailure(w, r, base, slug, asJSON, err)
 		return
 	}
 
@@ -213,32 +213,32 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	http.Redirect(w, r, ideaChatURL(id, ""), http.StatusSeeOther)
+	http.Redirect(w, r, ideaChatURL(slug, ""), http.StatusSeeOther)
 }
 
-// handleBlend, `POST /ideas/{id}/blend` — sohbetten yeni `ai_blended` kart
-// türetir ve yeni kartın detayına yönlendirir.
+// handleBlend, `POST /ideas/{slug}/blend` — sohbetten yeni `ai_blended` kart
+// türetir ve yeni kartın detayına (kendi slug'ına) yönlendirir.
 func (s *Server) handleBlend(w http.ResponseWriter, r *http.Request) {
 	base := s.newPage(w, r)
 	asJSON := wantsJSON(r)
 
-	id, ok := s.postIdea(w, r, base, asJSON)
+	slug, ok := s.postIdea(w, r, base, asJSON)
 	if !ok {
 		return
 	}
 
-	idea, err := s.ideas.Blend(r.Context(), id, base.Lang)
+	idea, err := s.ideas.Blend(r.Context(), slug, base.Lang)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.chatNotFound(w, r, base, asJSON)
 			return
 		}
-		log.Printf("hata: kart türetilemedi (kart %d): %v", id, err)
-		s.chatFailure(w, r, base, id, asJSON, err)
+		log.Printf("hata: kart türetilemedi (kart %s): %v", slug, err)
+		s.chatFailure(w, r, base, slug, asJSON, err)
 		return
 	}
 
-	target := fmt.Sprintf("/ideas/%d", idea.ID)
+	target := "/ideas/" + url.PathEscape(idea.Slug)
 	if asJSON {
 		writeJSON(w, http.StatusOK, map[string]any{"href": target})
 		return
@@ -246,24 +246,24 @@ func (s *Server) handleBlend(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-// postIdea, POST uçlarının ortak girişi: CSRF kontrolü + id ayrıştırma.
-func (s *Server) postIdea(w http.ResponseWriter, r *http.Request, base Page, asJSON bool) (int64, bool) {
+// postIdea, POST uçlarının ortak girişi: CSRF kontrolü + slug ayrıştırma.
+func (s *Server) postIdea(w http.ResponseWriter, r *http.Request, base Page, asJSON bool) (string, bool) {
 	if !sameOrigin(r) {
 		log.Printf("uyarı: çapraz köken POST reddedildi: %s", r.URL.Path)
 		if asJSON {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
-			return 0, false
+			return "", false
 		}
 		s.renderForbidden(w, r, base)
-		return 0, false
+		return "", false
 	}
 
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
+	slug := r.PathValue("slug")
+	if slug == "" {
 		s.chatNotFound(w, r, base, asJSON)
-		return 0, false
+		return "", false
 	}
-	return id, true
+	return slug, true
 }
 
 // chatNotFound, POST yolunda kart yoksa: JSON'da 404 gövdesi, form yolunda
@@ -277,15 +277,15 @@ func (s *Server) chatNotFound(w http.ResponseWriter, r *http.Request, base Page,
 }
 
 // chatFailure, hatayı koda çevirip iki yolda da kullanıcıya bildirir.
-func (s *Server) chatFailure(w http.ResponseWriter, r *http.Request, base Page, id int64, asJSON bool, err error) {
+func (s *Server) chatFailure(w http.ResponseWriter, r *http.Request, base Page, slug string, asJSON bool, err error) {
 	code, status := chatErrorCode(err)
-	s.chatRedirect(w, r, base, id, asJSON, code, status)
+	s.chatRedirect(w, r, base, slug, asJSON, code, status)
 }
 
 // chatRedirect, form yolunda hata kodunu sorgu dizesinde taşıyarak karta
 // döner (303 → GET, yenilemede yeniden gönderim olmaz); JSON yolunda kodu
 // gövdede ve HTTP durumunda verir.
-func (s *Server) chatRedirect(w http.ResponseWriter, r *http.Request, base Page, id int64, asJSON bool, code string, status int) {
+func (s *Server) chatRedirect(w http.ResponseWriter, r *http.Request, base Page, slug string, asJSON bool, code string, status int) {
 	if asJSON {
 		writeJSON(w, status, map[string]any{
 			"error":   code,
@@ -293,12 +293,12 @@ func (s *Server) chatRedirect(w http.ResponseWriter, r *http.Request, base Page,
 		})
 		return
 	}
-	http.Redirect(w, r, ideaChatURL(id, code), http.StatusSeeOther)
+	http.Redirect(w, r, ideaChatURL(slug, code), http.StatusSeeOther)
 }
 
 // ideaChatURL, kart detayının sohbet çapasına giden adres.
-func ideaChatURL(id int64, errCode string) string {
-	u := fmt.Sprintf("/ideas/%d", id)
+func ideaChatURL(slug string, errCode string) string {
+	u := "/ideas/" + url.PathEscape(slug)
 	if errCode != "" {
 		u += "?chat_error=" + url.QueryEscape(errCode)
 	}

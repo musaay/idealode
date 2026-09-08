@@ -505,7 +505,13 @@ func (s *Store) IdeaTitleExists(ctx context.Context, title string) (bool, error)
 	return exists, err
 }
 
-// InsertIdea, idea card'ı yazar ve id döner.
+// maxSlugAttempts, InsertIdea/InsertBlendedIdea'nın slug UNIQUE çakışmasında
+// yeni bir rastgele ekle yeniden deneme üst sınırı (#110 spec).
+const maxSlugAttempts = 3
+
+// InsertIdea, idea card'ı yazar ve id döner. Slug başlıktan türetilir
+// (slugify + rastgele ek); UNIQUE çakışmasında yeni ek ile en fazla
+// maxSlugAttempts kez denenir.
 func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 	// nil slice'lar SQL NULL'a eşlenir; NOT NULL kolonlar için boş diziye
 	// indirgenir (bkz. InsertPostAnalyses'teki aynı koruma).
@@ -515,23 +521,31 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 	if i.ExampleQuotes == nil {
 		i.ExampleQuotes = []string{}
 	}
+
 	var id int64
-	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO ideas
-			(title, problem_statement, proposed_solution, target_user, evidence_count,
-			 example_quotes, source_type, source_theme_id, created_by_user_id,
-			 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags,
-			 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16)
-		RETURNING id`,
-		i.Title, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
-		i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
-		i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags,
-		i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason).Scan(&id)
-	if err != nil {
-		return 0, fmt.Errorf("ideas insert: %w", err)
+	var err error
+	for attempt := 0; attempt < maxSlugAttempts; attempt++ {
+		slug := newSlug(i.Title)
+		err = s.Pool.QueryRow(ctx, `
+			INSERT INTO ideas
+				(title, slug, problem_statement, proposed_solution, target_user, evidence_count,
+				 example_quotes, source_type, source_theme_id, created_by_user_id,
+				 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags,
+				 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17)
+			RETURNING id`,
+			i.Title, slug, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
+			i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
+			i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags,
+			i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !isSlugConflict(err) {
+			return 0, fmt.Errorf("ideas insert: %w", err)
+		}
 	}
-	return id, nil
+	return 0, fmt.Errorf("ideas insert: slug %d denemede benzersiz üretilemedi: %w", maxSlugAttempts, err)
 }
 
 // ListIdeas, idea card'ları tema adıyla birlikte döner (yeniden eskiye) —
@@ -624,28 +638,31 @@ const DefaultIdeaLimit = 60
 const maxIdeaLimit = 200
 
 // ideaSelect, Idea satırını okuyan ortak SELECT gövdesi. Kolon sırası
-// scanIdea ile birebir eşleşir; iki yerde değiştirilmelidir.
+// scanIdea ile birebir eşleşir; iki yerde değiştirilmelidir. pi (parent
+// ideas) self-join'i yalnız ai_blended kartın kaynak kart bağlantısını
+// slug'la kurabilmek için (#110) — parent yoksa parent_slug "" döner.
 const ideaSelect = `
-	SELECT i.id, i.title, i.problem_statement, i.proposed_solution, i.target_user,
+	SELECT i.id, i.slug, i.title, i.problem_statement, i.proposed_solution, i.target_user,
 	       i.evidence_count, i.example_quotes, i.source_type, i.source_theme_id,
 	       COALESCE(i.urgency_score, 0), COALESCE(i.monetization_signal, 0),
 	       COALESCE(i.known_competitors_ai_guess, ''), i.domain_tags,
-	       i.local_evidence, i.parent_idea_id, COALESCE(i.created_by_session_id, ''),
+	       i.local_evidence, i.parent_idea_id, COALESCE(pi.slug, ''), COALESCE(i.created_by_session_id, ''),
 	       COALESCE(t.theme_name, ''), i.created_at,
 	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason,
 	       i.published_at
 	FROM ideas i
-	LEFT JOIN themes t ON t.id = i.source_theme_id`
+	LEFT JOIN themes t ON t.id = i.source_theme_id
+	LEFT JOIN ideas pi ON pi.id = i.parent_idea_id`
 
 // scanIdea, ideaSelect kolon sırasını Idea'ya okur ve nil slice'ları boş
 // diziye indirger (şablon `range` ve len() güvenliği). Mine alanı burada
 // DOLDURULMAZ — çağıran (oturuma göre) ayrıca hesaplar (bkz. setMine).
 func scanIdea(row pgx.Row, i *Idea) error {
-	if err := row.Scan(&i.ID, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
+	if err := row.Scan(&i.ID, &i.Slug, &i.Title, &i.ProblemStatement, &i.ProposedSolution,
 		&i.TargetUser, &i.EvidenceCount, &i.ExampleQuotes, &i.SourceType,
 		&i.SourceThemeID, &i.UrgencyScore, &i.MonetizationSignal,
 		&i.KnownCompetitorsAIGuess, &i.DomainTags, &i.LocalEvidence,
-		&i.ParentIdeaID, &i.CreatedBySessionID,
+		&i.ParentIdeaID, &i.ParentSlug, &i.CreatedBySessionID,
 		&i.SourceTheme, &i.CreatedAt,
 		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason,
 		&i.PublishedAt); err != nil {
@@ -738,18 +755,20 @@ func escapeLike(s string) string {
 	return r.Replace(s)
 }
 
-// GetIdea, tek kartı döner; kayıt yoksa ErrNotFound. Görünürlük kuralı:
+// getIdeaWhere, GetIdea/GetIdeaBySlug'ın ortak gövdesi: tek eşitlik
+// koşuluyla satırı çeker ve görünürlük kuralını uygular. Görünürlük kuralı:
 // başkasının ai_blended kartı da ErrNotFound döner (var olduğu sızdırılmaz,
 // 404 — bkz. spec kabul kriteri 4). Arşivlenmiş kart (archived_at doluysa)
 // da aynı şekilde ErrNotFound döner — galeriden kaldırılan kart erişilemez
 // olmalı (#74). Beklemedeki (published_at NULL) kart da aynı şekilde
 // ErrNotFound döner (#102 moderasyon kuyruğu — varlığı sızdırılmaz);
 // IdeaSources/ListChat/AppendChat/InsertBlendedIdea çağrıları hep önce
-// GetIdea'dan geçtiğinden (bkz. internal/api/handlers.go) bu tek nokta
-// sohbet/kaynak/blend uçlarını da otomatik kapatır — ayrı kontrol gerekmez.
-func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error) {
+// GetIdea(BySlug)'dan geçtiğinden (bkz. internal/api/handlers.go) bu tek
+// nokta sohbet/kaynak/blend uçlarını da otomatik kapatır — ayrı kontrol
+// gerekmez.
+func (s *Store) getIdeaWhere(ctx context.Context, cond string, arg any, sid string) (*Idea, error) {
 	var i Idea
-	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1 AND i.archived_at IS NULL AND i.published_at IS NOT NULL`, id), &i)
+	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE `+cond+` AND i.archived_at IS NULL AND i.published_at IS NOT NULL`, arg), &i)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -761,6 +780,21 @@ func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error
 		return nil, ErrNotFound
 	}
 	return &i, nil
+}
+
+// GetIdea, id ile tek kartı döner; kayıt yoksa ErrNotFound (bkz.
+// getIdeaWhere). İç kullanım içindir (dump, pipeline) — URL yüzeyinde artık
+// slug var (#110); dış istekler GetIdeaBySlug kullanır.
+func (s *Store) GetIdea(ctx context.Context, id int64, sid string) (*Idea, error) {
+	return s.getIdeaWhere(ctx, "i.id = $1", id, sid)
+}
+
+// GetIdeaBySlug, slug ile tek kartı döner; kayıt yoksa ErrNotFound (bkz.
+// getIdeaWhere). Sayısal görünen bir değer de burada yalnız slug olarak
+// aranır — id'ye asla düşülmez (#110: eski `/ideas/{id}` bağlantıları düz
+// 404 alır, 301 yönlendirme yok — PO kararı).
+func (s *Store) GetIdeaBySlug(ctx context.Context, slug string, sid string) (*Idea, error) {
+	return s.getIdeaWhere(ctx, "i.slug = $1", slug, sid)
 }
 
 // maxIdeaSources, kart detayında listelenen kaynak satırı sayısı.
@@ -912,21 +946,29 @@ func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft Blend
 		tags = []string{}
 	}
 
+	// Slug başlıktan türetilir; UNIQUE çakışmasında yeni ek ile en fazla
+	// maxSlugAttempts kez denenir (#110, InsertIdea ile aynı ilke).
 	var id int64
-	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO ideas
-			(title, problem_statement, proposed_solution, target_user, evidence_count,
-			 example_quotes, source_type, source_theme_id, local_evidence,
-			 parent_idea_id, created_by_session_id,
-			 urgency_score, monetization_signal, domain_tags, published_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'ai_blended', $7, $8, $9, $10, $11, $12, $13, now())
-		RETURNING id`,
-		draft.Title, draft.ProblemStatement, draft.ProposedSolution, draft.TargetUser,
-		parent.EvidenceCount, quotes, parent.SourceThemeID, localEvidence,
-		parent.ID, sid, draft.UrgencyScore, draft.MonetizationSignal, tags).Scan(&id)
-	if err != nil {
-		return nil, fmt.Errorf("ai_blended ideas insert: %w", err)
+	var err error
+	for attempt := 0; attempt < maxSlugAttempts; attempt++ {
+		slug := newSlug(draft.Title)
+		err = s.Pool.QueryRow(ctx, `
+			INSERT INTO ideas
+				(title, slug, problem_statement, proposed_solution, target_user, evidence_count,
+				 example_quotes, source_type, source_theme_id, local_evidence,
+				 parent_idea_id, created_by_session_id,
+				 urgency_score, monetization_signal, domain_tags, published_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai_blended', $8, $9, $10, $11, $12, $13, $14, now())
+			RETURNING id`,
+			draft.Title, slug, draft.ProblemStatement, draft.ProposedSolution, draft.TargetUser,
+			parent.EvidenceCount, quotes, parent.SourceThemeID, localEvidence,
+			parent.ID, sid, draft.UrgencyScore, draft.MonetizationSignal, tags).Scan(&id)
+		if err == nil {
+			return s.GetIdea(ctx, id, sid)
+		}
+		if !isSlugConflict(err) {
+			return nil, fmt.Errorf("ai_blended ideas insert: %w", err)
+		}
 	}
-
-	return s.GetIdea(ctx, id, sid)
+	return nil, fmt.Errorf("ai_blended ideas insert: slug %d denemede benzersiz üretilemedi: %w", maxSlugAttempts, err)
 }

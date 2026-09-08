@@ -67,12 +67,24 @@ func (f *fakeStore) ListIdeasFiltered(ctx context.Context, flt store.IdeaFilter)
 	return out, nil
 }
 
-func (f *fakeStore) GetIdea(ctx context.Context, id int64) (*store.Idea, error) {
+// idFromSlug, fakeStore'daki kartlar arasında slug eşleşmesini bulur — kart
+// kimliği artık slug'dır (#110), iç sohbet haritaları (f.chat) yine int64
+// idea.ID ile anahtarlanır; bu fonksiyon ikisi arasındaki köprüdür.
+func (f *fakeStore) idFromSlug(slug string) (int64, bool) {
+	for i := range f.ideas {
+		if f.ideas[i].Slug == slug {
+			return f.ideas[i].ID, true
+		}
+	}
+	return 0, false
+}
+
+func (f *fakeStore) GetIdeaBySlug(ctx context.Context, slug string) (*store.Idea, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	for i := range f.ideas {
-		if f.ideas[i].ID == id {
+		if f.ideas[i].Slug == slug {
 			cp := f.ideas[i]
 			return &cp, nil
 		}
@@ -80,31 +92,22 @@ func (f *fakeStore) GetIdea(ctx context.Context, id int64) (*store.Idea, error) 
 	return nil, store.ErrNotFound
 }
 
-// hasIdea, gerçek API'nin görünürlük kuralını taklit eder: bilinmeyen kart
-// (ya da başkasının ai_blended kartı) 404 döner.
-func (f *fakeStore) hasIdea(id int64) bool {
-	for i := range f.ideas {
-		if f.ideas[i].ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (f *fakeStore) ListChat(ctx context.Context, ideaID int64) ([]ChatMessage, error) {
+func (f *fakeStore) ListChat(ctx context.Context, slug string) ([]ChatMessage, error) {
 	f.sids = append(f.sids, SessionFromContext(ctx))
 	if f.listChatErr != nil {
 		return nil, f.listChatErr
 	}
-	if !f.hasIdea(ideaID) {
+	id, ok := f.idFromSlug(slug)
+	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return f.chat[ideaID], nil
+	return f.chat[id], nil
 }
 
-func (f *fakeStore) SendChat(ctx context.Context, ideaID int64, message, lang string) (ChatReply, error) {
+func (f *fakeStore) SendChat(ctx context.Context, slug string, message, lang string) (ChatReply, error) {
 	f.sids = append(f.sids, SessionFromContext(ctx))
-	if !f.hasIdea(ideaID) {
+	id, ok := f.idFromSlug(slug)
+	if !ok {
 		return ChatReply{}, store.ErrNotFound
 	}
 	f.sent = append(f.sent, message)
@@ -121,16 +124,16 @@ func (f *fakeStore) SendChat(ctx context.Context, ideaID int64, message, lang st
 	if f.chat == nil {
 		f.chat = map[int64][]ChatMessage{}
 	}
-	f.chat[ideaID] = append(f.chat[ideaID],
+	f.chat[id] = append(f.chat[id],
 		ChatMessage{ID: "m-user", Role: "user", Message: message},
 		reply)
 	return ChatReply{Reply: reply, Suggestions: f.suggestions}, nil
 }
 
-func (f *fakeStore) Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error) {
+func (f *fakeStore) Blend(ctx context.Context, slug string, lang string) (*store.Idea, error) {
 	f.sids = append(f.sids, SessionFromContext(ctx))
 	f.langs = append(f.langs, lang)
-	if !f.hasIdea(ideaID) {
+	if _, ok := f.idFromSlug(slug); !ok {
 		return nil, store.ErrNotFound
 	}
 	if f.blendErr != nil {
@@ -139,10 +142,10 @@ func (f *fakeStore) Blend(ctx context.Context, ideaID int64, lang string) (*stor
 	if f.blended != nil {
 		return f.blended, nil
 	}
-	return &store.Idea{ID: 77, Title: "Türetilmiş kart", SourceType: "ai_blended"}, nil
+	return &store.Idea{ID: 77, Slug: "kart-77", Title: "Türetilmiş kart", SourceType: "ai_blended"}, nil
 }
 
-func (f *fakeStore) IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error) {
+func (f *fakeStore) IdeaSources(ctx context.Context, slug string) ([]store.IdeaSource, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -158,6 +161,7 @@ func sampleStore() *fakeStore {
 		ideas: []store.Idea{
 			{
 				ID:               1,
+				Slug:             "kart-1",
 				Title:            "Randevu hatırlatma botu",
 				ProblemStatement: "Küçük işletmeler randevu takibini elle yapıyor.",
 				ProposedSolution: "WhatsApp üzerinden otomatik hatırlatma.",
@@ -173,6 +177,7 @@ func sampleStore() *fakeStore {
 			},
 			{
 				ID:               2,
+				Slug:             "kart-2",
 				Title:            "Konuşma terapisi takip aracı",
 				ProblemStatement: "Terapistler seans notlarını dağınık tutuyor.",
 				ProposedSolution: "Tek panelde seans takibi.",
@@ -392,8 +397,8 @@ func TestGalleryListsIdeas(t *testing.T) {
 	for _, want := range []string{
 		"Randevu hatırlatma botu",
 		"Konuşma terapisi takip aracı",
-		`href="/ideas/1"`,
-		`href="/ideas/2"`,
+		`href="/ideas/kart-1"`,
+		`href="/ideas/kart-2"`,
 		"Kullanıcı İhtiyacı",
 		"Pazar Verisi",
 		"2 fikir",
@@ -456,7 +461,7 @@ func TestGalleryEmptyState(t *testing.T) {
 // ------------------------------------------------------------ kart detayı
 
 func TestIdeaDetail(t *testing.T) {
-	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("durum = %d", rec.Code)
 	}
@@ -481,7 +486,7 @@ func TestIdeaDetail(t *testing.T) {
 }
 
 func TestIdeaQuotesAreVerbatimAndEscaped(t *testing.T) {
-	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1")
 	body := rec.Body.String()
 
 	// Alıntı DB'deki metinle birebir aynıdır; HTML'de yalnız kaçışlanır.
@@ -499,7 +504,7 @@ func TestIdeaQuotesAreVerbatimAndEscaped(t *testing.T) {
 }
 
 func TestIdeaLocalEvidenceEmptyState(t *testing.T) {
-	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/2")
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-2")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("durum = %d", rec.Code)
 	}
@@ -511,7 +516,7 @@ func TestIdeaLocalEvidenceEmptyState(t *testing.T) {
 // Referans sadakati (#70): kanıt kartında kopyala düğmesi, arama kutusunda
 // temizle (X), bölüm başlıklarında renkli ikon kutuları.
 func TestIdeaQuoteCopyButtons(t *testing.T) {
-	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1")
 	body := rec.Body.String()
 
 	// Kart 1: 2 kanıt alıntısı + 1 yerel talep alıntısı = 3 düğme.
@@ -527,14 +532,14 @@ func TestIdeaQuoteCopyButtons(t *testing.T) {
 		t.Error("alıntı metni düğmeye kopyalanmış — birebirlik riski")
 	}
 
-	en := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1?lang=en").Body.String()
+	en := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1?lang=en").Body.String()
 	if !strings.Contains(en, `data-copied-label="Copied"`) {
 		t.Error("EN kopyalandı metni yok")
 	}
 }
 
 func TestIdeaSectionIcons(t *testing.T) {
-	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1").Body.String()
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1").Body.String()
 
 	for _, cls := range []string{"panel-icon-problem", "panel-icon-solution", "panel-icon-local"} {
 		if !strings.Contains(body, cls) {
@@ -573,7 +578,7 @@ func TestGallerySearchClearButton(t *testing.T) {
 
 func TestIdeaNotFound(t *testing.T) {
 	h := newTestServer(t, sampleStore())
-	for _, target := range []string{"/ideas/999", "/ideas/abc", "/ideas/-1", "/ideas/", "/bilinmeyen"} {
+	for _, target := range []string{"/ideas/kart-999", "/ideas/abc", "/ideas/-1", "/ideas/", "/bilinmeyen"} {
 		rec := do(t, h, http.MethodGet, target)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s durum = %d, 404 bekleniyor", target, rec.Code)
@@ -584,10 +589,28 @@ func TestIdeaNotFound(t *testing.T) {
 	}
 }
 
+// TestOldNumericIDPathIs404NotRedirect, eski `/ideas/{id}` yollarının artık
+// slug'a 301 İLE yönlendirilmediğini, sayısal görünen değerin de düz slug
+// gibi arandığını (bulunamayınca 404) doğrular (#110, PO kararı: "sayısal
+// görünen değer de slug gibi aranır, bulunamazsa düz 404" — 301 kaldırıldı).
+// idea1'in gerçek slug'ı "kart-1"dir; yalnız sayısal "1" yolu 404 olmalı.
+func TestOldNumericIDPathIs404NotRedirect(t *testing.T) {
+	rec := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("durum = %d, 404 bekleniyor (301 yönlendirme YOK)", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Errorf("Location başlığı yazılmamalı, geldi: %q", loc)
+	}
+	if !strings.Contains(rec.Body.String(), "Sayfa bulunamadı") {
+		t.Error("404 şablonu render edilmedi")
+	}
+}
+
 // TestAPIErrorRendersGatewayPage — API'ye ulaşılamadığında (ErrNotFound
 // DIŞI her hata) her sayfa 502 varyantını gösterir, süreç düşmez.
 func TestAPIErrorRendersGatewayPage(t *testing.T) {
-	for _, target := range []string{"/", "/?source_type=pain_point&q=bot", "/ideas/1"} {
+	for _, target := range []string{"/", "/?source_type=pain_point&q=bot", "/ideas/kart-1"} {
 		fs := sampleStore()
 		fs.err = context.DeadlineExceeded
 		rec := do(t, newTestServer(t, fs), http.MethodGet, target)
@@ -627,8 +650,8 @@ func TestAPIErrorGatewayPageEN(t *testing.T) {
 // bu 502 değil 404 olmalı.
 func TestWrappedNotFoundStillRenders404(t *testing.T) {
 	fs := sampleStore()
-	fs.err = fmt.Errorf("api (/api/ideas/1): %w", store.ErrNotFound)
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	fs.err = fmt.Errorf("api (/api/ideas/kart-1): %w", store.ErrNotFound)
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-1")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("durum = %d, 404 bekleniyor", rec.Code)
 	}
@@ -808,7 +831,7 @@ func TestStaticAssetsServed(t *testing.T) {
 
 func TestShellPresentOnEveryPage(t *testing.T) {
 	h := newTestServer(t, sampleStore())
-	for _, target := range []string{"/", "/ideas/1", "/ideas/999"} {
+	for _, target := range []string{"/", "/ideas/kart-1", "/ideas/kart-999"} {
 		body := do(t, h, http.MethodGet, target).Body.String()
 		for _, want := range []string{
 			`class="sidenav"`,       // masaüstü sol nav
@@ -837,7 +860,7 @@ func TestGalleryShellState(t *testing.T) {
 }
 
 func TestIdeaShellState(t *testing.T) {
-	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1").Body.String()
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1").Body.String()
 	if !strings.Contains(body, "crumb-current") {
 		t.Error("detayda breadcrumb kart adı yok")
 	}
@@ -940,7 +963,7 @@ func TestMarketDerivedSourceRow(t *testing.T) {
 		// created_at yok: seeds.go tohumu Go sıfır zamanıyla yazar.
 		{Platform: "radar_seed", Community: "radar", URL: "https://example.com/seed"},
 	}
-	body := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/2").Body.String()
+	body := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-2").Body.String()
 
 	if strings.Contains(body, "0001-01-01") {
 		t.Error("sıfır tarih sayfaya basıldı")
@@ -960,7 +983,7 @@ func TestMarketDerivedSourceRow(t *testing.T) {
 }
 
 func TestLocalEvidencePlatformLabelled(t *testing.T) {
-	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/1").Body.String()
+	body := do(t, newTestServer(t, sampleStore()), http.MethodGet, "/ideas/kart-1").Body.String()
 	if !strings.Contains(body, "Google Play") {
 		t.Error("yerel talep satırında platform etiketi çevrilmedi")
 	}
@@ -1016,7 +1039,7 @@ func TestTopbarHasControls(t *testing.T) {
 func TestTopbarControlsEN(t *testing.T) {
 	h := newTestServer(t, sampleStore())
 
-	body := do(t, h, http.MethodGet, "/ideas/1?lang=en").Body.String()
+	body := do(t, h, http.MethodGet, "/ideas/kart-1?lang=en").Body.String()
 	rest := body[strings.Index(body, `class="topbar-actions"`):]
 	if !strings.Contains(rest, "Light Mode") {
 		t.Error("EN tema etiketi yok")
@@ -1122,7 +1145,7 @@ func chatStore() *fakeStore {
 }
 
 func TestIdeaPageRendersChatPanel(t *testing.T) {
-	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/kart-1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("durum = %d, beklenen 200", rec.Code)
 	}
@@ -1130,8 +1153,8 @@ func TestIdeaPageRendersChatPanel(t *testing.T) {
 
 	for _, want := range []string{
 		`id="chat"`,
-		`action="/ideas/1/chat"`,
-		`action="/ideas/1/blend"`,
+		`action="/ideas/kart-1/chat"`,
+		`action="/ideas/kart-1/blend"`,
 		`data-chat-panel`,
 		`Randevu hatırlatma botu`, // panel başlığı kart adını taşır
 		translate("tr", "chat.subtitle"),
@@ -1153,7 +1176,7 @@ func TestIdeaPageRendersChatPanel(t *testing.T) {
 }
 
 func TestChatPanelEnglish(t *testing.T) {
-	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1?lang=en")
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/kart-1?lang=en")
 	body := rec.Body.String()
 	for _, want := range []string{
 		translate("en", "chat.subtitle"),
@@ -1177,7 +1200,7 @@ func TestChatHistoryRendersEscapedWithLineBreaks(t *testing.T) {
 		{ID: "2", Role: "assistant", Message: `<script>alert(1)</script> güvenli mi?`},
 	}
 
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-1")
 	body := rec.Body.String()
 
 	if !strings.Contains(body, "İlk satır<br>İkinci satır") {
@@ -1198,12 +1221,12 @@ func TestChatFormPostRedirectsToAnchor(t *testing.T) {
 	fs := chatStore()
 	h := newTestServer(t, fs)
 
-	rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"Bunu nasıl ölçerim?"}}, "")
+	rec := postForm(t, h, "/ideas/kart-1/chat", url.Values{"message": {"Bunu nasıl ölçerim?"}}, "")
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("durum = %d, beklenen 303", rec.Code)
 	}
-	if got := rec.Header().Get("Location"); got != "/ideas/1#chat" {
-		t.Errorf("Location = %q, beklenen /ideas/1#chat", got)
+	if got := rec.Header().Get("Location"); got != "/ideas/kart-1#chat" {
+		t.Errorf("Location = %q, beklenen /ideas/kart-1#chat", got)
 	}
 	if len(fs.sent) != 1 || fs.sent[0] != "Bunu nasıl ölçerim?" {
 		t.Errorf("gönderilen mesaj = %v", fs.sent)
@@ -1216,7 +1239,7 @@ func TestChatFormPostRedirectsToAnchor(t *testing.T) {
 func TestChatQuickPromptUsesFirstNonEmptyField(t *testing.T) {
 	fs := chatStore()
 	// Boş metin girişi + çipin taşıdığı değer aynı adla gelir.
-	rec := postForm(t, newTestServer(t, fs), "/ideas/1/chat",
+	rec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/chat",
 		url.Values{"message": {"", "Mimari sorusu"}}, "")
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("durum = %d, beklenen 303", rec.Code)
@@ -1230,7 +1253,7 @@ func TestChatJSONPathReturnsReplyAndSuggestions(t *testing.T) {
 	fs := chatStore()
 	fs.suggestions = []string{"Öneri 1", "Öneri 2", "Öneri 3", "Öneri 4"}
 
-	rec := postForm(t, newTestServer(t, fs), "/ideas/1/chat",
+	rec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/chat",
 		url.Values{"message": {"Merhaba"}}, "application/json")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("durum = %d, beklenen 200 (%s)", rec.Code, rec.Body.String())
@@ -1271,18 +1294,18 @@ func TestChatValidationErrors(t *testing.T) {
 			fs := chatStore()
 			h := newTestServer(t, fs)
 
-			rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {tt.message}}, "")
+			rec := postForm(t, h, "/ideas/kart-1/chat", url.Values{"message": {tt.message}}, "")
 			if rec.Code != http.StatusSeeOther {
 				t.Fatalf("durum = %d, beklenen 303", rec.Code)
 			}
-			if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error="+tt.wantCode+"#chat"; got != want {
+			if got, want := rec.Header().Get("Location"), "/ideas/kart-1?chat_error="+tt.wantCode+"#chat"; got != want {
 				t.Errorf("Location = %q, beklenen %q", got, want)
 			}
 			if len(fs.sent) != 0 {
 				t.Errorf("geçersiz mesaj API'ye gitti: %v", fs.sent)
 			}
 
-			jrec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {tt.message}}, "application/json")
+			jrec := postForm(t, h, "/ideas/kart-1/chat", url.Values{"message": {tt.message}}, "application/json")
 			if jrec.Code != http.StatusBadRequest {
 				t.Errorf("JSON durum = %d, beklenen 400", jrec.Code)
 			}
@@ -1307,15 +1330,15 @@ func TestChatUpstreamErrorsMapToCodes(t *testing.T) {
 			fs.sendErr = fmt.Errorf("api: %w", tt.err)
 			h := newTestServer(t, fs)
 
-			rec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"soru"}}, "")
+			rec := postForm(t, h, "/ideas/kart-1/chat", url.Values{"message": {"soru"}}, "")
 			if rec.Code != http.StatusSeeOther {
 				t.Fatalf("durum = %d, beklenen 303", rec.Code)
 			}
-			if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error="+tt.wantCode+"#chat"; got != want {
+			if got, want := rec.Header().Get("Location"), "/ideas/kart-1?chat_error="+tt.wantCode+"#chat"; got != want {
 				t.Errorf("Location = %q, beklenen %q", got, want)
 			}
 
-			jrec := postForm(t, h, "/ideas/1/chat", url.Values{"message": {"soru"}}, "application/json")
+			jrec := postForm(t, h, "/ideas/kart-1/chat", url.Values{"message": {"soru"}}, "application/json")
 			if jrec.Code != tt.wantStatus {
 				t.Errorf("JSON durum = %d, beklenen %d", jrec.Code, tt.wantStatus)
 			}
@@ -1329,13 +1352,13 @@ func TestChatUpstreamErrorsMapToCodes(t *testing.T) {
 func TestChatErrorMessageRenderedOnPage(t *testing.T) {
 	h := newTestServer(t, chatStore())
 
-	rec := do(t, h, http.MethodGet, "/ideas/1?chat_error=rate_limited")
+	rec := do(t, h, http.MethodGet, "/ideas/kart-1?chat_error=rate_limited")
 	if !strings.Contains(rec.Body.String(), translate("tr", "chat.error.rate_limited")) {
 		t.Error("kota mesajı sayfada görünmüyor")
 	}
 
 	// Beyaz liste dışı kod sessizce yok sayılır (URL'den metin enjekte edilemez).
-	rec = do(t, h, http.MethodGet, "/ideas/1?chat_error=%3Cscript%3E")
+	rec = do(t, h, http.MethodGet, "/ideas/kart-1?chat_error=%3Cscript%3E")
 	body := rec.Body.String()
 	if strings.Contains(body, "<script>alert") || strings.Contains(body, `class="chat-error"`) {
 		t.Error("bilinmeyen hata kodu sayfaya basıldı")
@@ -1346,7 +1369,7 @@ func TestChatHistoryFailureStillRendersCard(t *testing.T) {
 	fs := chatStore()
 	fs.listChatErr = fmt.Errorf("api kapalı")
 
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("durum = %d, beklenen 200 (kart yan bilgiden ötürü düşmemeli)", rec.Code)
 	}
@@ -1357,12 +1380,12 @@ func TestChatHistoryFailureStillRendersCard(t *testing.T) {
 
 func TestBlendRedirectsToNewIdea(t *testing.T) {
 	fs := chatStore()
-	rec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "")
+	rec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/blend", url.Values{}, "")
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("durum = %d, beklenen 303", rec.Code)
 	}
-	if got := rec.Header().Get("Location"); got != "/ideas/77" {
-		t.Errorf("Location = %q, beklenen /ideas/77", got)
+	if got := rec.Header().Get("Location"); got != "/ideas/kart-77" {
+		t.Errorf("Location = %q, beklenen /ideas/kart-77", got)
 	}
 }
 
@@ -1370,12 +1393,12 @@ func TestBlendWithoutConversation(t *testing.T) {
 	fs := chatStore()
 	fs.blendErr = fmt.Errorf("api: %w", ErrNoConversation)
 
-	rec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "")
-	if got, want := rec.Header().Get("Location"), "/ideas/1?chat_error=no_conversation#chat"; got != want {
+	rec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/blend", url.Values{}, "")
+	if got, want := rec.Header().Get("Location"), "/ideas/kart-1?chat_error=no_conversation#chat"; got != want {
 		t.Errorf("Location = %q, beklenen %q", got, want)
 	}
 
-	jrec := postForm(t, newTestServer(t, fs), "/ideas/1/blend", url.Values{}, "application/json")
+	jrec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/blend", url.Values{}, "application/json")
 	if jrec.Code != http.StatusConflict {
 		t.Errorf("JSON durum = %d, beklenen 409", jrec.Code)
 	}
@@ -1386,7 +1409,7 @@ func TestChatPostCSRFRejected(t *testing.T) {
 	h := newTestServer(t, fs)
 
 	// Origin/Referer yok → reddedilir.
-	req := httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+	req := httptest.NewRequest(http.MethodPost, "/ideas/kart-1/chat",
 		strings.NewReader("message=selam"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -1396,7 +1419,7 @@ func TestChatPostCSRFRejected(t *testing.T) {
 	}
 
 	// Yabancı köken → reddedilir.
-	req = httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+	req = httptest.NewRequest(http.MethodPost, "/ideas/kart-1/chat",
 		strings.NewReader("message=selam"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "https://kotu.example")
@@ -1413,10 +1436,10 @@ func TestChatPostCSRFRejected(t *testing.T) {
 	}
 
 	// Referer aynı kökende ise kabul edilir.
-	req = httptest.NewRequest(http.MethodPost, "/ideas/1/chat",
+	req = httptest.NewRequest(http.MethodPost, "/ideas/kart-1/chat",
 		strings.NewReader("message=selam"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", "http://"+req.Host+"/ideas/1")
+	req.Header.Set("Referer", "http://"+req.Host+"/ideas/kart-1")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
@@ -1427,7 +1450,7 @@ func TestChatPostCSRFRejected(t *testing.T) {
 func TestChatPostUnknownIdea(t *testing.T) {
 	h := newTestServer(t, chatStore())
 
-	rec := postForm(t, h, "/ideas/999/chat", url.Values{"message": {"selam"}}, "")
+	rec := postForm(t, h, "/ideas/kart-999/chat", url.Values{"message": {"selam"}}, "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("durum = %d, beklenen 404", rec.Code)
 	}
@@ -1444,7 +1467,7 @@ func TestSessionCookieIssuedAndReused(t *testing.T) {
 	fs := chatStore()
 	h := newTestServer(t, fs)
 
-	rec := do(t, h, http.MethodGet, "/ideas/1")
+	rec := do(t, h, http.MethodGet, "/ideas/kart-1")
 	var sid *http.Cookie
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == cookieSession {
@@ -1466,7 +1489,7 @@ func TestSessionCookieIssuedAndReused(t *testing.T) {
 
 	// İkinci istekte aynı kimlik kullanılır, yeni çerez yazılmaz.
 	fs.sids = nil
-	rec2 := do(t, h, http.MethodGet, "/ideas/1", sid)
+	rec2 := do(t, h, http.MethodGet, "/ideas/kart-1", sid)
 	for _, c := range rec2.Result().Cookies() {
 		if c.Name == cookieSession {
 			t.Error("var olan oturum için yeni sid yazıldı")
@@ -1479,7 +1502,7 @@ func TestSessionCookieIssuedAndReused(t *testing.T) {
 
 func TestInvalidSessionCookieReplaced(t *testing.T) {
 	fs := chatStore()
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/1",
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-1",
 		&http.Cookie{Name: cookieSession, Value: "elle-yazilmis"})
 
 	found := false
@@ -1515,18 +1538,20 @@ func TestBlendedCardShowsParentAndOwnership(t *testing.T) {
 	parent := int64(1)
 	fs.ideas = append(fs.ideas, store.Idea{
 		ID:               9,
+		Slug:             "kart-9",
 		Title:            "Türetilmiş kart",
 		ProblemStatement: "Sohbetten çıkan problem.",
 		SourceType:       "ai_blended",
 		EvidenceCount:    4,
 		ParentIdeaID:     &parent,
+		ParentSlug:       "kart-1",
 		Mine:             true,
 	})
 
-	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/9")
+	rec := do(t, newTestServer(t, fs), http.MethodGet, "/ideas/kart-9")
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `href="/ideas/1"`) {
+	if !strings.Contains(body, `href="/ideas/kart-1"`) {
 		t.Error("kaynak kart bağlantısı yok")
 	}
 	if !strings.Contains(body, translate("tr", "chat.parent_link")) {
@@ -1541,7 +1566,7 @@ func TestBlendedCardShowsParentAndOwnership(t *testing.T) {
 }
 
 func TestPlainCardHasNoParentRow(t *testing.T) {
-	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/1")
+	rec := do(t, newTestServer(t, chatStore()), http.MethodGet, "/ideas/kart-1")
 	if strings.Contains(rec.Body.String(), translate("tr", "chat.parent_link")) {
 		t.Error("kaynak kart satırı ilgisiz kartta basıldı")
 	}
@@ -1552,7 +1577,7 @@ func TestPlainCardHasNoParentRow(t *testing.T) {
 func TestCopilotEntriesActiveOnIdeaOnly(t *testing.T) {
 	h := newTestServer(t, chatStore())
 
-	idea := do(t, h, http.MethodGet, "/ideas/1").Body.String()
+	idea := do(t, h, http.MethodGet, "/ideas/kart-1").Body.String()
 	if strings.Count(idea, `data-chat-open`) < 3 {
 		t.Error("kart detayında Copilot girişleri (sol nav + üst çubuk + mobil sekme) sohbete bağlanmamış")
 	}
@@ -1638,7 +1663,7 @@ func TestChatAcceptsMultipartBody(t *testing.T) {
 		t.Fatalf("form kapatılamadı: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/ideas/1/chat", &buf)
+	req := httptest.NewRequest(http.MethodPost, "/ideas/kart-1/chat", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Origin", "http://"+req.Host)
 	rec := httptest.NewRecorder()
@@ -1657,6 +1682,7 @@ func momentumStore() *fakeStore {
 	fs := sampleStore()
 	fs.ideas = append(fs.ideas, store.Idea{
 		ID:               3,
+		Slug:             "kart-3",
 		Title:            "Terminal içi rebase yardımcısı",
 		ProblemStatement: "Geliştiriciler rebase çakışmalarını el yordamıyla çözüyor.",
 		ProposedSolution: "Çakışmayı adım adım anlatan TUI.",
@@ -1713,7 +1739,7 @@ func TestMomentumDerivedBadgeAndFilter(t *testing.T) {
 func TestMomentumDerivedDetailAndEN(t *testing.T) {
 	h := newTestServer(t, momentumStore())
 
-	body := do(t, h, http.MethodGet, "/ideas/3").Body.String()
+	body := do(t, h, http.MethodGet, "/ideas/kart-3").Body.String()
 	if !strings.Contains(body, `class="badge badge-momentum_derived"`) || !strings.Contains(body, ">İvme<") {
 		t.Error("kart detayında İvme rozeti yok")
 	}
@@ -1723,7 +1749,7 @@ func TestMomentumDerivedDetailAndEN(t *testing.T) {
 		t.Error("ivme kanıt satırı birebir basılmadı")
 	}
 
-	en := do(t, h, http.MethodGet, "/ideas/3?lang=en").Body.String()
+	en := do(t, h, http.MethodGet, "/ideas/kart-3?lang=en").Body.String()
 	if !strings.Contains(en, ">Momentum<") {
 		t.Error("EN rozet etiketi yok")
 	}
@@ -1747,6 +1773,7 @@ func distinctStore() *fakeStore {
 		ideas: []store.Idea{
 			{
 				ID:               10,
+				Slug:             "kart-10",
 				Title:            "Ekran süresi koçu",
 				ProblemStatement: "Kullanıcılar telefonda geçen süreyi kontrol edemiyor.",
 				ProposedSolution: "Günlük hedef ve nazik hatırlatma.",
@@ -1761,6 +1788,7 @@ func distinctStore() *fakeStore {
 			},
 			{
 				ID:               11,
+				Slug:             "kart-11",
 				Title:            "Fatura ayrıştırıcı",
 				ProblemStatement: "Serbest çalışanlar faturaları elle giriyor.",
 				ProposedSolution: "E-postadan otomatik ayrıştırma.",
@@ -1774,6 +1802,7 @@ func distinctStore() *fakeStore {
 			},
 			{
 				ID:               12,
+				Slug:             "kart-12",
 				Title:            "Kooperatif stok paneli",
 				ProblemStatement: "Üretici kooperatifleri stoğu defterde tutuyor.",
 				ProposedSolution: "Ortak stok paneli.",
@@ -1787,6 +1816,7 @@ func distinctStore() *fakeStore {
 			},
 			{
 				ID:               13,
+				Slug:             "kart-13",
 				Title:            "Mercek koşmamış kart",
 				ProblemStatement: "Mercek hata verdiği için alanlar NULL kaldı.",
 				SourceType:       "pain_point",
@@ -1831,7 +1861,7 @@ func TestDistinctivenessBadgeGallery(t *testing.T) {
 func TestDistinctivenessDetail(t *testing.T) {
 	h := newTestServer(t, distinctStore())
 
-	body := do(t, h, http.MethodGet, "/ideas/10").Body.String()
+	body := do(t, h, http.MethodGet, "/ideas/kart-10").Body.String()
 	for _, want := range []string{
 		`<details class="distinct">`,
 		`<summary class="distinct-summary">`,
@@ -1845,7 +1875,7 @@ func TestDistinctivenessDetail(t *testing.T) {
 		}
 	}
 
-	unsure := do(t, h, http.MethodGet, "/ideas/11").Body.String()
+	unsure := do(t, h, http.MethodGet, "/ideas/kart-11").Body.String()
 	if !strings.Contains(unsure, "Özgünlük: belirsiz") {
 		t.Error("unsure kartta rozet yok")
 	}
@@ -1857,7 +1887,7 @@ func TestDistinctivenessDetail(t *testing.T) {
 	}
 
 	// pass ve NULL: tek bir iz bile yok.
-	for _, path := range []string{"/ideas/12", "/ideas/13"} {
+	for _, path := range []string{"/ideas/kart-12", "/ideas/kart-13"} {
 		b := do(t, h, http.MethodGet, path).Body.String()
 		for _, bad := range []string{"badge-doubtful", "distinct", "Özgünlük"} {
 			if strings.Contains(b, bad) {
@@ -1870,7 +1900,7 @@ func TestDistinctivenessDetail(t *testing.T) {
 // TestDistinctivenessDetailEN: rozet ve kriter açıklaması çevrilir; kart
 // içeriği (başlık, gerekçe) ASLA çevrilmez.
 func TestDistinctivenessDetailEN(t *testing.T) {
-	body := do(t, newTestServer(t, distinctStore()), http.MethodGet, "/ideas/10?lang=en").Body.String()
+	body := do(t, newTestServer(t, distinctStore()), http.MethodGet, "/ideas/kart-10?lang=en").Body.String()
 	for _, want := range []string{
 		"Distinctiveness: doubtful · K1",
 		"K1 — saturation",

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -345,6 +347,207 @@ func TestInsertBlendedIdeaPublishedImmediately(t *testing.T) {
 	// Sahibi (aynı sid) GetIdea ile görebilmeli.
 	if _, err := s.GetIdea(ctx, blended.ID, sid); err != nil {
 		t.Errorf("GetIdea(blend, sahibi): beklenmeyen hata: %v", err)
+	}
+}
+
+// ------------------------------------------------------------ slug (#110)
+
+// TestInsertIdeaGeneratesSlug, InsertIdea'nın her kart için taban+rastgele
+// ek biçiminde, benzersiz bir slug yazdığını doğrular.
+func TestInsertIdeaGeneratesSlug(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertIdea(ctx, Idea{
+		Title: "Test Slug Üretimi Öğrenci Bütçesi", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", UrgencyScore: 1,
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+
+	var slug string
+	if err := s.Pool.QueryRow(ctx, "SELECT slug FROM ideas WHERE id = $1", id).Scan(&slug); err != nil {
+		t.Fatal(err)
+	}
+	wantBase := "test-slug-uretimi-ogrenci-butcesi"
+	if !strings.HasPrefix(slug, wantBase+"-") {
+		t.Errorf("slug = %q, %q- ile başlaması bekleniyordu", slug, wantBase)
+	}
+	if len(slug) != len(wantBase)+1+slugSuffixLen {
+		t.Errorf("slug uzunluğu = %d (%q), beklenen taban+tire+%d karakter", len(slug), slug, slugSuffixLen)
+	}
+}
+
+// TestInsertIdeaSlugConflictRetries, ilk denemede slug UNIQUE kısıtına
+// çarpınca (isSlugConflict) InsertIdea'nın yeni bir rastgele ekle yeniden
+// denediğini ve sonunda benzersiz bir slug ile başarılı olduğunu doğrular
+// (#110 spec: "çakışmada UNIQUE ihlalinde 1 kez tekrar"). Gerçek çakışma
+// crypto/rand ile pratikte olmayacağından, slugSuffixFn test süresince
+// deterministik bir üretici ile değiştirilir.
+func TestInsertIdeaSlugConflictRetries(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	title := "Test Slug Çakışma Yeniden Deneme"
+
+	firstID, err := s.InsertIdea(ctx, Idea{
+		Title: title, ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", UrgencyScore: 1,
+	})
+	if err != nil {
+		t.Fatalf("ilk insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", firstID) })
+
+	var firstSlug string
+	if err := s.Pool.QueryRow(ctx, "SELECT slug FROM ideas WHERE id = $1", firstID).Scan(&firstSlug); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstSlug) < slugSuffixLen+1 {
+		t.Fatalf("beklenmeyen slug biçimi: %q", firstSlug)
+	}
+	base := firstSlug[:len(firstSlug)-slugSuffixLen-1] // "-xxxx" öncesi
+	suffix1 := firstSlug[len(firstSlug)-slugSuffixLen:]
+
+	// Aynı başlıkla ikinci kart: taban aynı olacağından, ek de firstSlug'la
+	// aynıysa (suffix1) UNIQUE ihlali garanti; ikinci denemede farklı bir
+	// ek ("z9z9") ile başarılı olmalı.
+	calls := 0
+	orig := slugSuffixFn
+	t.Cleanup(func() { slugSuffixFn = orig })
+	slugSuffixFn = func() string {
+		calls++
+		if calls == 1 {
+			return suffix1
+		}
+		return "z9z9"
+	}
+
+	secondID, err := s.InsertIdea(ctx, Idea{
+		Title: title, ProblemStatement: "p2", ProposedSolution: "s2",
+		TargetUser: "u2", SourceType: "pain_point", UrgencyScore: 1,
+	})
+	if err != nil {
+		t.Fatalf("çakışma sonrası yeniden deneme başarısız olmamalı: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", secondID) })
+
+	if calls < 2 {
+		t.Errorf("çakışmada yeniden deneme tetiklenmedi, çağrı sayısı = %d", calls)
+	}
+
+	var secondSlug string
+	if err := s.Pool.QueryRow(ctx, "SELECT slug FROM ideas WHERE id = $1", secondID).Scan(&secondSlug); err != nil {
+		t.Fatal(err)
+	}
+	wantSecond := base + "-z9z9"
+	if secondSlug != wantSecond {
+		t.Errorf("ikinci kartın slug'ı = %q, beklenen %q", secondSlug, wantSecond)
+	}
+	if secondSlug == firstSlug {
+		t.Error("çakışan slug tekrar kullanıldı — UNIQUE kısıtı atlanmış olurdu")
+	}
+}
+
+// TestGetIdeaBySlug, GetIdea'nın uyguladığı görünürlük kurallarının
+// (yayında + arşivsiz + ai_blended sahiplik) slug ile aramada da aynı
+// şekilde çalıştığını doğrular.
+func TestGetIdeaBySlug(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	id, err := s.InsertIdea(ctx, Idea{
+		Title: "test-getideabyslug-kart", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", UrgencyScore: 1,
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+
+	var slug string
+	if err := s.Pool.QueryRow(ctx, "SELECT slug FROM ideas WHERE id = $1", id).Scan(&slug); err != nil {
+		t.Fatal(err)
+	}
+
+	// Beklemede (published_at NULL): ne id ne slug ile bulunur.
+	if _, err := s.GetIdeaBySlug(ctx, slug, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetIdeaBySlug(beklemede) = %v, ErrNotFound bekleniyordu", err)
+	}
+
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET published_at = now() WHERE id = $1", id); err != nil {
+		t.Fatalf("publish update: %v", err)
+	}
+
+	got, err := s.GetIdeaBySlug(ctx, slug, "")
+	if err != nil {
+		t.Fatalf("GetIdeaBySlug(yayında): beklenmeyen hata: %v", err)
+	}
+	if got.ID != id || got.Slug != slug {
+		t.Errorf("GetIdeaBySlug yanlış kart döndürdü: %+v", got)
+	}
+
+	// Sayısal görünen (id'nin kendisi) slug olarak aranmaz — kayıt yok.
+	if _, err := s.GetIdeaBySlug(ctx, strconv.FormatInt(id, 10), ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("sayısal id slug gibi arandı, ErrNotFound bekleniyordu: %v", err)
+	}
+
+	// Bilinmeyen slug -> ErrNotFound.
+	if _, err := s.GetIdeaBySlug(ctx, "yok-boyle-bir-slug-0000", ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetIdeaBySlug(bilinmeyen) = %v, ErrNotFound bekleniyordu", err)
+	}
+}
+
+// TestInsertBlendedIdeaHasSlugAndParentSlug, blend kartının kendi slug'ını
+// aldığını ve ideaSelect'in parent self-join'inin (#110) kaynak kartın
+// slug'ını doğru döndürdüğünü doğrular.
+func TestInsertBlendedIdeaHasSlugAndParentSlug(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	sid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+	parentID, err := s.InsertIdea(ctx, Idea{
+		Title: "test-blend-slug-parent", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", DomainTags: []string{"x"}, UrgencyScore: 1,
+	})
+	if err != nil {
+		t.Fatalf("parent insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", parentID) })
+
+	var parentSlug string
+	if err := s.Pool.QueryRow(ctx, "SELECT slug FROM ideas WHERE id = $1", parentID).Scan(&parentSlug); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := &Idea{ID: parentID, Title: "test-blend-slug-parent", ProblemStatement: "p",
+		ProposedSolution: "s", TargetUser: "u", SourceType: "pain_point", DomainTags: []string{"x"}}
+	draft := BlendDraft{
+		Title: "test-blend-slug-child", ProblemStatement: "p2", ProposedSolution: "s2",
+		TargetUser: "u2", DomainTags: []string{"y"}, UrgencyScore: 3, MonetizationSignal: 2,
+	}
+	blended, err := s.InsertBlendedIdea(ctx, parent, draft, sid)
+	if err != nil {
+		t.Fatalf("InsertBlendedIdea: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", blended.ID) })
+
+	if blended.Slug == "" {
+		t.Error("blend kartının slug'ı boş olmamalı")
+	}
+	if blended.ParentSlug != parentSlug {
+		t.Errorf("ParentSlug = %q, beklenen %q", blended.ParentSlug, parentSlug)
+	}
+
+	// GetIdeaBySlug ile de aynı ParentSlug gelmeli (self-join tekrar doğrulanır).
+	again, err := s.GetIdeaBySlug(ctx, blended.Slug, sid)
+	if err != nil {
+		t.Fatalf("GetIdeaBySlug(blend): %v", err)
+	}
+	if again.ParentSlug != parentSlug {
+		t.Errorf("GetIdeaBySlug sonrası ParentSlug = %q, beklenen %q", again.ParentSlug, parentSlug)
 	}
 }
 

@@ -80,15 +80,23 @@ func requireSessionID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return sid, true
 }
 
-// parseIdeaID, path'teki {id}'yi ayrıştırır; geçersizse 404 yazıp false
-// döner (mevcut olmayan kaynak ile aynı davranış — id sızdırmaz).
-func parseIdeaID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
+// maxSlugPathRunes, path'teki {slug} değerinin kabul edilen üst sınırı —
+// gerçek slug'lar çok daha kısadır (bkz. store.slugify, ≤60+1+4), aşırı
+// uzun bir değer sorguya hiç gitmeden 404'e düşer.
+const maxSlugPathRunes = 200
+
+// parseIdeaSlug, path'teki {slug}'ı ayrıştırır; boş ya da aşırı uzunsa 404
+// yazıp false döner. Sayısal görünen bir değer de (eski `/ideas/{id}`
+// bağlantıları) burada dönüştürülmez — düz metin olarak GetIdeaBySlug'a
+// gider; slug tablosunda karşılığı yoksa doğal olarak 404 olur (#110, PO
+// kararı: 301 yönlendirme yok).
+func parseIdeaSlug(w http.ResponseWriter, r *http.Request) (string, bool) {
+	slug := r.PathValue("slug")
+	if slug == "" || len([]rune(slug)) > maxSlugPathRunes {
 		writeError(w, http.StatusNotFound, "not_found")
-		return 0, false
+		return "", false
 	}
-	return id, true
+	return slug, true
 }
 
 // handleHealth, `GET /healthz`.
@@ -144,19 +152,20 @@ func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ideas": ideas})
 }
 
-// handleGetIdea, `GET /api/ideas/{id}`. Geçersiz id de 404 döner. Başkasının
-// ai_blended kartı da store katmanında ErrNotFound'a çevrilir (#66).
+// handleGetIdea, `GET /api/ideas/{slug}`. Geçersiz/eşleşmeyen slug 404 döner.
+// Başkasının ai_blended kartı da store katmanında ErrNotFound'a çevrilir
+// (#66).
 func (s *Server) handleGetIdea(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return
 	}
-	id, ok := parseIdeaID(w, r)
+	slug, ok := parseIdeaSlug(w, r)
 	if !ok {
 		return
 	}
 
-	idea, err := s.ideas.GetIdea(r.Context(), id, sid)
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug, sid)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found")
@@ -169,21 +178,22 @@ func (s *Server) handleGetIdea(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"idea": idea})
 }
 
-// handleIdeaSources, `GET /api/ideas/{id}/sources`. Kart yoksa (ya da
+// handleIdeaSources, `GET /api/ideas/{slug}/sources`. Kart yoksa (ya da
 // başkasının ai_blended kartıysa) 404.
 func (s *Server) handleIdeaSources(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return
 	}
-	id, ok := parseIdeaID(w, r)
+	slug, ok := parseIdeaSlug(w, r)
 	if !ok {
 		return
 	}
 
 	// Kart var mı (ve görünür mü) önce doğrulanır — kaynak listesi boş
 	// dönebileceğinden 404/200-boş-liste ayrımı buradan gelir.
-	if _, err := s.ideas.GetIdea(r.Context(), id, sid); err != nil {
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug, sid)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found")
 			return
@@ -193,7 +203,7 @@ func (s *Server) handleIdeaSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sources, err := s.ideas.IdeaSources(r.Context(), id)
+	sources, err := s.ideas.IdeaSources(r.Context(), idea.ID)
 	if err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -205,19 +215,20 @@ func (s *Server) handleIdeaSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
 }
 
-// handleGetChat, `GET /api/ideas/{id}/chat`. (kart, oturum) çiftinin
+// handleGetChat, `GET /api/ideas/{slug}/chat`. (kart, oturum) çiftinin
 // geçmişini kronolojik sırada döner (boşsa []).
 func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return
 	}
-	id, ok := parseIdeaID(w, r)
+	slug, ok := parseIdeaSlug(w, r)
 	if !ok {
 		return
 	}
 
-	if _, err := s.ideas.GetIdea(r.Context(), id, sid); err != nil {
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug, sid)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found")
 			return
@@ -227,7 +238,7 @@ func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := s.ideas.ListChat(r.Context(), id, sid, maxChatDisplay)
+	messages, err := s.ideas.ListChat(r.Context(), idea.ID, sid, maxChatDisplay)
 	if err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -271,13 +282,13 @@ func decodeJSONBody(r *http.Request, v any) error {
 	return nil
 }
 
-// handlePostChat, `POST /api/ideas/{id}/chat`.
+// handlePostChat, `POST /api/ideas/{slug}/chat`.
 func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return
 	}
-	id, ok := parseIdeaID(w, r)
+	slug, ok := parseIdeaSlug(w, r)
 	if !ok {
 		return
 	}
@@ -293,7 +304,7 @@ func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idea, err := s.ideas.GetIdea(r.Context(), id, sid)
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug, sid)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found")
@@ -309,7 +320,7 @@ func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := s.ideas.ListChat(r.Context(), id, sid, copilot.MaxHistoryWindow)
+	history, err := s.ideas.ListChat(r.Context(), idea.ID, sid, copilot.MaxHistoryWindow)
 	if err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -326,12 +337,12 @@ func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 	// Kullanıcı mesajı + asistan cevabı sohbete yazılır — yalnız BAŞARILI
 	// LLM turundan sonra (502 durumunda kullanıcı mesajı kaydedilmez ki
 	// istemci tekrar denediğinde geçmişte yinelenmesin).
-	if _, err := s.ideas.AppendChat(r.Context(), id, sid, "user", message); err != nil {
+	if _, err := s.ideas.AppendChat(r.Context(), idea.ID, sid, "user", message); err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	replyMsg, err := s.ideas.AppendChat(r.Context(), id, sid, "assistant", result.Reply)
+	replyMsg, err := s.ideas.AppendChat(r.Context(), idea.ID, sid, "assistant", result.Reply)
 	if err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -344,13 +355,13 @@ func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePostBlend, `POST /api/ideas/{id}/blend`.
+// handlePostBlend, `POST /api/ideas/{slug}/blend`.
 func (s *Server) handlePostBlend(w http.ResponseWriter, r *http.Request) {
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return
 	}
-	id, ok := parseIdeaID(w, r)
+	slug, ok := parseIdeaSlug(w, r)
 	if !ok {
 		return
 	}
@@ -361,7 +372,7 @@ func (s *Server) handlePostBlend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idea, err := s.ideas.GetIdea(r.Context(), id, sid)
+	idea, err := s.ideas.GetIdeaBySlug(r.Context(), slug, sid)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found")
@@ -372,7 +383,7 @@ func (s *Server) handlePostBlend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := s.ideas.ListChat(r.Context(), id, sid, copilot.MaxHistoryWindow)
+	history, err := s.ideas.ListChat(r.Context(), idea.ID, sid, copilot.MaxHistoryWindow)
 	if err != nil {
 		logHata(r, err)
 		writeError(w, http.StatusInternalServerError, "internal")
