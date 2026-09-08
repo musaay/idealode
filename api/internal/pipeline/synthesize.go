@@ -305,7 +305,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			return created, err
 		}
 		created++
-		log.Printf("synthesize: idea üretildi: %q (tema=%s, kanıt=%d)", idea.Title, th.Name, idea.EvidenceCount)
+		log.Printf("synthesize: idea üretildi: %q (tema=%s, kanıt=%d)%s", idea.Title, th.Name, idea.EvidenceCount, distinctivenessLogSuffix(idea))
 
 		if i < len(themes)-1 {
 			select {

@@ -203,6 +203,42 @@ func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea)
 	return nil
 }
 
+// distinctivenessCriteriaDesc, K1-K4 özgünlük kriterlerinin TR açıklaması —
+// tek yerde sabit (#108): log satırları ve PendingIdeas özetinde kullanılır.
+var distinctivenessCriteriaDesc = map[string]string{
+	"K1": "doygunluk (10+ bilinir benzer ürün)",
+	"K2": "yerleşik çözüm (OS/platform zaten yapıyor)",
+	"K3": "talep (TR'de ödeyen yok)",
+	"K4": "kırılganlık (tek güncellemeyle anlamsız)",
+}
+
+// distinctivenessLogSuffix, kart üretim log satırına eklenen özgünlük özeti
+// (#108): distinctivenessAdvise alanları NULL bıraktıysa (mercek hata verdi)
+// boş string döner; "fail" ise kriter kodu + TR açıklaması + sebebin ilk 160
+// karakteri eklenir, "pass"/"unsure" ise yalnız karar eklenir.
+func distinctivenessLogSuffix(idea store.Idea) string {
+	if idea.DistinctivenessVerdict == nil {
+		return ""
+	}
+	verdict := *idea.DistinctivenessVerdict
+	if verdict != "fail" {
+		return fmt.Sprintf(" · özgünlük: %s", verdict)
+	}
+
+	criterion := "none"
+	if idea.DistinctivenessCriterion != nil {
+		criterion = *idea.DistinctivenessCriterion
+	}
+	reason := ""
+	if idea.DistinctivenessReason != nil {
+		reason = clip(*idea.DistinctivenessReason, 160)
+	}
+	if desc, ok := distinctivenessCriteriaDesc[criterion]; ok {
+		return fmt.Sprintf(" · özgünlük: fail %s — %s — %s", criterion, desc, reason)
+	}
+	return fmt.Sprintf(" · özgünlük: fail %s — %s", criterion, reason)
+}
+
 // trendingGateStore, ivme tohumu kapısının (#89) ihtiyaç duyduğu store
 // operasyonlarını soyutlar — canlı DB olmadan fake ile test edilebilsin
 // diye (bkz. seeds_test.go). *store.Store bu arayüzü zaten sağlar.
@@ -569,7 +605,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			log.Printf("seeds: %q kart yazıldı ama mark HATA: %v — sonraki koşuda dedup yakalar", seed.Name, err)
 		}
 		created++
-		log.Printf("seeds: idea üretildi: %q (tohum=%s)", idea.Title, seed.Name)
+		log.Printf("seeds: idea üretildi: %q (tohum=%s)%s", idea.Title, seed.Name, distinctivenessLogSuffix(idea))
 
 		if i < len(seeds)-1 {
 			select {
