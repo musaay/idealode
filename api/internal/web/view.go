@@ -1,7 +1,6 @@
 package web
 
 import (
-	"fmt"
 	"html/template"
 	"net/url"
 	"regexp"
@@ -225,7 +224,7 @@ type SourceLink struct {
 	Date      string
 }
 
-// IdeaPage, `GET /ideas/{id}` görünüm modeli.
+// IdeaPage, `GET /ideas/{slug}` görünüm modeli.
 type IdeaPage struct {
 	Page
 	ID            int64
@@ -271,7 +270,7 @@ type QuickPrompt struct {
 
 // ChatPanel, kart sohbeti panelinin görünüm modeli.
 type ChatPanel struct {
-	IdeaID       int64
+	IdeaSlug     string
 	PostHref     string // POST hedefi (sohbet)
 	BlendHref    string // POST hedefi (kart olarak türet)
 	Title        string // "<kısaltılmış kart adı>… Copilot"
@@ -311,7 +310,7 @@ func messageBody(s string) template.HTML {
 const chatMaxLen = 1000
 
 // buildChatPanel, geçmişi ve sabit çipleri panel modeline çevirir.
-func buildChatPanel(lang string, ideaID int64, title string, msgs []ChatMessage, errMsg string) ChatPanel {
+func buildChatPanel(lang string, slug string, title string, msgs []ChatMessage, errMsg string) ChatPanel {
 	bubbles := make([]ChatBubble, 0, len(msgs))
 	for _, m := range msgs {
 		bubbles = append(bubbles, ChatBubble{
@@ -320,10 +319,11 @@ func buildChatPanel(lang string, ideaID int64, title string, msgs []ChatMessage,
 			Time:   formatClock(m.CreatedAt),
 		})
 	}
+	href := "/ideas/" + url.PathEscape(slug)
 	return ChatPanel{
-		IdeaID:    ideaID,
-		PostHref:  fmt.Sprintf("/ideas/%d/chat", ideaID),
-		BlendHref: fmt.Sprintf("/ideas/%d/blend", ideaID),
+		IdeaSlug:  slug,
+		PostHref:  href + "/chat",
+		BlendHref: href + "/blend",
 		Title:     translate(lang, "chat.title", clipChatTitle(title)),
 		Messages:  bubbles,
 		QuickPrompts: []QuickPrompt{
@@ -440,7 +440,7 @@ func buildGallery(base Page, ideas []store.Idea, sourceType, query, flag string)
 			EvidenceCount: i.EvidenceCount,
 			DomainTags:    i.DomainTags,
 			CreatedAt:     formatDate(i.CreatedAt),
-			Href:          fmt.Sprintf("/ideas/%d", i.ID),
+			Href:          "/ideas/" + url.PathEscape(i.Slug),
 		})
 	}
 	return GalleryPage{
@@ -564,10 +564,10 @@ func buildIdea(base Page, idea *store.Idea, sources []store.IdeaSource, msgs []C
 	}
 	page.HasMeta = page.Urgency > 0 || page.Monetization > 0 ||
 		page.SourceTheme != "" || page.Competitors != ""
-	if idea.ParentIdeaID != nil && *idea.ParentIdeaID > 0 {
-		page.ParentHref = fmt.Sprintf("/ideas/%d", *idea.ParentIdeaID)
+	if idea.ParentIdeaID != nil && *idea.ParentIdeaID > 0 && idea.ParentSlug != "" {
+		page.ParentHref = "/ideas/" + url.PathEscape(idea.ParentSlug)
 	}
 	page.Mine = idea.Mine
-	page.Chat = buildChatPanel(base.Lang, idea.ID, idea.Title, msgs, chatErr)
+	page.Chat = buildChatPanel(base.Lang, idea.Slug, idea.Title, msgs, chatErr)
 	return page
 }

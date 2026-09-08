@@ -52,6 +52,7 @@ type Theme struct {
 // Idea, paylaşılan idea card "tohumu".
 type Idea struct {
 	ID                      int64      `json:"id"`
+	Slug                    string     `json:"slug"` // URL-güvenli kimlik (#110); id dedup/log için ayrıca kalır
 	Title                   string     `json:"title"`
 	ProblemStatement        string     `json:"problem_statement"`
 	ProposedSolution        string     `json:"proposed_solution"`
@@ -66,6 +67,7 @@ type Idea struct {
 	DomainTags              []string   `json:"domain_tags"`
 	LocalEvidence           []string   `json:"local_evidence"`           // füzyonla eşleşen yerel talep satırları (#43)
 	ParentIdeaID            *int64     `json:"parent_idea_id,omitempty"` // ai_blended: türetildiği kart
+	ParentSlug              string     `json:"parent_slug,omitempty"`    // parent'ın slug'ı (ideaSelect self-join'i, #110); parent yoksa boş
 	Mine                    bool       `json:"mine"`                     // ai_blended ve bu oturuma ait
 	SourceTheme             string     `json:"source_theme,omitempty"`   // tema adı (dump görünümü)
 	CreatedBySessionID      string     `json:"-"`                        // ai_blended: üreten anonim oturum (görünürlük kuralı; store'da hesaplanır: source_type='ai_blended' AND created_by_session_id = $sid)

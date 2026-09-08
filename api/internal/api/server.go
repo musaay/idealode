@@ -27,7 +27,10 @@ const apiTimeout = 5 * time.Second
 // paketi kendi eşdeğerini tanımlar, web paketine bağımlı değildir).
 type IdeaStore interface {
 	ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]store.Idea, error)
-	GetIdea(ctx context.Context, id int64, sid string) (*store.Idea, error)
+	// GetIdeaBySlug, URL yüzeyindeki tek kimlik: kart uçları slug ile
+	// çözülür (#110) — sayısal görünen bir path değeri de yalnız slug
+	// olarak aranır, id'ye asla düşülmez.
+	GetIdeaBySlug(ctx context.Context, slug string, sid string) (*store.Idea, error)
 	IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error)
 
 	// Kart sohbeti (Idea Copilot, #66) — girişsiz kimlik: anonim oturum
@@ -67,11 +70,11 @@ func newServer(ideas IdeaStore, chat llm.Chat, timeout time.Duration) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/ideas", s.handleListIdeas)
-	mux.HandleFunc("GET /api/ideas/{id}", s.handleGetIdea)
-	mux.HandleFunc("GET /api/ideas/{id}/sources", s.handleIdeaSources)
-	mux.HandleFunc("GET /api/ideas/{id}/chat", s.handleGetChat)
-	mux.HandleFunc("POST /api/ideas/{id}/chat", s.handlePostChat)
-	mux.HandleFunc("POST /api/ideas/{id}/blend", s.handlePostBlend)
+	mux.HandleFunc("GET /api/ideas/{slug}", s.handleGetIdea)
+	mux.HandleFunc("GET /api/ideas/{slug}/sources", s.handleIdeaSources)
+	mux.HandleFunc("GET /api/ideas/{slug}/chat", s.handleGetChat)
+	mux.HandleFunc("POST /api/ideas/{slug}/chat", s.handlePostChat)
+	mux.HandleFunc("POST /api/ideas/{slug}/blend", s.handlePostBlend)
 	mux.HandleFunc("/", s.handleNotFound) // eşleşmeyen her yol
 	s.mux = mux
 	return s

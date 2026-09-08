@@ -70,15 +70,18 @@ var (
 // IdeaStore, web katmanının API sürecinden ihtiyaç duyduğu yüzey.
 // Somut istemci yerine arayüz kullanılır ki handler testleri canlı
 // veritabanı/LLM olmadan fake ile koşsun.
+// IdeaStore'un kart kimliği artık slug'dır (#110): apiclient bu değeri
+// doğrudan API'nin `/api/ideas/{slug}/...` yollarına taşır — sayısal id web
+// katmanına hiç uğramaz.
 type IdeaStore interface {
 	ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]store.Idea, error)
-	GetIdea(ctx context.Context, id int64) (*store.Idea, error)
-	IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error)
+	GetIdeaBySlug(ctx context.Context, slug string) (*store.Idea, error)
+	IdeaSources(ctx context.Context, slug string) ([]store.IdeaSource, error)
 
 	// Sohbet (dilim 2). Oturum kimliği ctx'ten taşınır.
-	ListChat(ctx context.Context, ideaID int64) ([]ChatMessage, error)
-	SendChat(ctx context.Context, ideaID int64, message, lang string) (ChatReply, error)
-	Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error)
+	ListChat(ctx context.Context, slug string) ([]ChatMessage, error)
+	SendChat(ctx context.Context, slug string, message, lang string) (ChatReply, error)
+	Blend(ctx context.Context, slug string, lang string) (*store.Idea, error)
 }
 
 // Server, HTTP handler'larını ve önceden parse edilmiş şablonları taşır.
@@ -116,9 +119,9 @@ func NewServer(ideas IdeaStore) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /static/", s.handleStatic)
-	mux.HandleFunc("GET /ideas/{id}", s.handleIdea)
-	mux.HandleFunc("POST /ideas/{id}/chat", s.handleChat)
-	mux.HandleFunc("POST /ideas/{id}/blend", s.handleBlend)
+	mux.HandleFunc("GET /ideas/{slug}", s.handleIdea)
+	mux.HandleFunc("POST /ideas/{slug}/chat", s.handleChat)
+	mux.HandleFunc("POST /ideas/{slug}/blend", s.handleBlend)
 	mux.HandleFunc("GET /{$}", s.handleGallery)
 	mux.HandleFunc("/", s.handleNotFound) // eşleşmeyen her yol
 	s.mux = mux

@@ -71,13 +71,14 @@ func (c *Client) ListIdeasFiltered(ctx context.Context, f store.IdeaFilter) ([]s
 	return body.Ideas, nil
 }
 
-// GetIdea, `GET /api/ideas/{id}` — tek kart; yoksa store.ErrNotFound.
-// `parent_idea_id` ve `mine` alanları store.Idea üzerinde çözülür.
-func (c *Client) GetIdea(ctx context.Context, id int64) (*store.Idea, error) {
+// GetIdeaBySlug, `GET /api/ideas/{slug}` — tek kart; yoksa store.ErrNotFound.
+// `parent_idea_id`/`parent_slug` ve `mine` alanları store.Idea üzerinde
+// çözülür (#110: URL yüzeyi artık slug, sayısal id'ye asla düşülmez).
+func (c *Client) GetIdeaBySlug(ctx context.Context, slug string) (*store.Idea, error) {
 	var body struct {
 		Idea *store.Idea `json:"idea"`
 	}
-	path := "/api/ideas/" + strconv.FormatInt(id, 10)
+	path := "/api/ideas/" + url.PathEscape(slug)
 	if err := c.get(ctx, path, nil, &body); err != nil {
 		return nil, err
 	}
@@ -100,12 +101,12 @@ func (m msgDTO) toWeb() web.ChatMessage {
 	return web.ChatMessage{ID: strconv.FormatInt(m.ID, 10), Role: m.Role, Message: m.Message, CreatedAt: m.CreatedAt}
 }
 
-// ListChat, `GET /api/ideas/{id}/chat` — bu oturumun kart sohbeti.
-func (c *Client) ListChat(ctx context.Context, ideaID int64) ([]web.ChatMessage, error) {
+// ListChat, `GET /api/ideas/{slug}/chat` — bu oturumun kart sohbeti.
+func (c *Client) ListChat(ctx context.Context, slug string) ([]web.ChatMessage, error) {
 	var body struct {
 		Messages []msgDTO `json:"messages"`
 	}
-	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/chat"
+	path := "/api/ideas/" + url.PathEscape(slug) + "/chat"
 	if err := c.get(ctx, path, nil, &body); err != nil {
 		return nil, err
 	}
@@ -116,14 +117,14 @@ func (c *Client) ListChat(ctx context.Context, ideaID int64) ([]web.ChatMessage,
 	return out, nil
 }
 
-// SendChat, `POST /api/ideas/{id}/chat` — mesaj gönderir, cevabı ve en
+// SendChat, `POST /api/ideas/{slug}/chat` — mesaj gönderir, cevabı ve en
 // fazla 3 öneriyi döner.
-func (c *Client) SendChat(ctx context.Context, ideaID int64, message, lang string) (web.ChatReply, error) {
+func (c *Client) SendChat(ctx context.Context, slug string, message, lang string) (web.ChatReply, error) {
 	var body struct {
 		Reply       msgDTO   `json:"reply"`
 		Suggestions []string `json:"suggestions"`
 	}
-	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/chat"
+	path := "/api/ideas/" + url.PathEscape(slug) + "/chat"
 	req := map[string]string{"message": message, "lang": lang}
 	if err := c.post(ctx, path, req, &body); err != nil {
 		return web.ChatReply{}, err
@@ -131,16 +132,16 @@ func (c *Client) SendChat(ctx context.Context, ideaID int64, message, lang strin
 	return web.ChatReply{Reply: body.Reply.toWeb(), Suggestions: body.Suggestions}, nil
 }
 
-// Blend, `POST /api/ideas/{id}/blend` — sohbetten yeni `ai_blended` kart.
-func (c *Client) Blend(ctx context.Context, ideaID int64, lang string) (*store.Idea, error) {
+// Blend, `POST /api/ideas/{slug}/blend` — sohbetten yeni `ai_blended` kart.
+func (c *Client) Blend(ctx context.Context, slug string, lang string) (*store.Idea, error) {
 	var body struct {
 		Idea *store.Idea `json:"idea"`
 	}
-	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/blend"
+	path := "/api/ideas/" + url.PathEscape(slug) + "/blend"
 	if err := c.post(ctx, path, map[string]string{"lang": lang}, &body); err != nil {
 		return nil, err
 	}
-	if body.Idea == nil || body.Idea.ID <= 0 {
+	if body.Idea == nil || body.Idea.ID <= 0 || body.Idea.Slug == "" {
 		return nil, fmt.Errorf("api yanıtında kart alanı yok (%s)", path)
 	}
 	return body.Idea, nil
@@ -155,12 +156,12 @@ type sourceDTO struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// IdeaSources, `GET /api/ideas/{id}/sources` — kartın kaynak gönderileri.
-func (c *Client) IdeaSources(ctx context.Context, ideaID int64) ([]store.IdeaSource, error) {
+// IdeaSources, `GET /api/ideas/{slug}/sources` — kartın kaynak gönderileri.
+func (c *Client) IdeaSources(ctx context.Context, slug string) ([]store.IdeaSource, error) {
 	var body struct {
 		Sources []sourceDTO `json:"sources"`
 	}
-	path := "/api/ideas/" + strconv.FormatInt(ideaID, 10) + "/sources"
+	path := "/api/ideas/" + url.PathEscape(slug) + "/sources"
 	if err := c.get(ctx, path, nil, &body); err != nil {
 		return nil, err
 	}
