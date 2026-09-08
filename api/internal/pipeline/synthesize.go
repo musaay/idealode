@@ -150,7 +150,8 @@ func coherentSubset(ctx context.Context, chat llm.Chat, evidence []store.RawPost
 		fmt.Fprintf(&sb, "[%d] %s\n%s\n\n", i, clip(p.Title, 200), clip(p.Body, 500))
 	}
 
-	raw, err := chat.ChatJSON(ctx, coherenceSystem, sb.String())
+	// Yargı çağrısı (tutarlılık denetimi): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, coherenceSystem, sb.String(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +192,8 @@ func findDuplicate(ctx context.Context, st *store.Store, chat llm.Chat, idea sto
 	user := fmt.Sprintf("Idea A:\nTitle: %s\nProblem: %s\n\nIdea B:\nTitle: %s\nProblem: %s",
 		existing.Title, clip(existing.ProblemStatement, 600),
 		idea.Title, clip(idea.ProblemStatement, 600))
-	raw, err := chat.ChatJSON(ctx, dupJudgeSystem, user)
+	// Yargı çağrısı (dedup hakemi): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, dupJudgeSystem, user, 0)
 	if err != nil {
 		// Hakem ulaşılamazsa temkinli davran: mükerrer sayma, kartı yaz.
 		log.Printf("synthesize: dedup hakemi HATA: %v — kart yazılıyor", err)

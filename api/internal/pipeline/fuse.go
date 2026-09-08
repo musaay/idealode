@@ -151,7 +151,8 @@ func fuseJudge(ctx context.Context, chat llm.Chat, idea store.Idea, candidates [
 		fmt.Fprintf(&sb, "[%d] %s\n%s\n\n", i, clip(p.Title, 150), clip(p.Body, 350))
 	}
 
-	raw, err := chat.ChatJSON(ctx, fuseJudgeSystem, sb.String())
+	// Yargı çağrısı (talep hakemi): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, fuseJudgeSystem, sb.String(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +215,8 @@ func fuseMomentumJudge(ctx context.Context, chat llm.Chat, idea store.Idea, cand
 		fmt.Fprintf(&sb, "[%d] %s\n%s\n\n", i, p.Title, clip(p.Body, 350))
 	}
 
-	raw, err := chat.ChatJSON(ctx, fuseMomentumSystem, sb.String())
+	// Yargı çağrısı (ivme hakemi): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, fuseMomentumSystem, sb.String(), 0)
 	if err != nil {
 		return nil, err
 	}

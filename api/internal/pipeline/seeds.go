@@ -190,8 +190,9 @@ func distinctivenessUserPrompt(title, problem, solution, targetUser string) stri
 // (dolayısıyla DB'de NULL) kalır ve hata döner — çağıran loglar, kartı yine
 // de yazar (bloklama YOK ilkesi buraya da uygulanır).
 func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
-	raw, err := chat.ChatJSON(ctx, lensDistinctivenessSystem,
-		distinctivenessUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser))
+	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
+		distinctivenessUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
 	if err != nil {
 		return err
 	}
@@ -471,7 +472,8 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		verdicts := make([]lensVerdict, len(lenses))
 		lensErr := false
 		for li, lens := range lenses {
-			raw, err := chat.ChatJSON(ctx, lens.system, lensUserPrompt(seed))
+			// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
+			raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, lensUserPrompt(seed), 0)
 			if err != nil {
 				log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lens.name, err)
 				lensErr = true

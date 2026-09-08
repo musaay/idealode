@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -52,6 +54,49 @@ func TestChatJSONNonRetryableError(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Errorf("401 retry edilmemeli; çağrı sayısı: %d", calls.Load())
+	}
+}
+
+func TestChatJSONWithTemperatureSendsZero(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": `{"ok":true}`}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	if _, err := c.ChatJSONWithTemperature(context.Background(), "sys", "user", 0); err != nil {
+		t.Fatalf("ChatJSONWithTemperature: %v", err)
+	}
+	// omitempty KULLANILMAZ: temperature 0 iken de gövdede görünmeli (#106).
+	if !strings.Contains(string(body), `"temperature":0`) {
+		t.Errorf("gövdede \"temperature\":0 bekleniyordu, geldi: %s", body)
+	}
+}
+
+func TestChatJSONUsesDefaultTemperature(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": `{"ok":true}`}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	if _, err := c.ChatJSON(context.Background(), "sys", "user"); err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if !strings.Contains(string(body), `"temperature":0.3`) {
+		t.Errorf("gövdede \"temperature\":0.3 bekleniyordu, geldi: %s", body)
 	}
 }
 

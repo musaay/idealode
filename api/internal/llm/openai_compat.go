@@ -19,10 +19,19 @@ import (
 )
 
 // Chat, pipeline'ın LLM bağımlılığını soyutlar (testlerde sahte uygulama).
+//
+// Sıcaklık politikası (#106): yargı çağrıları (sınıflandırma, tutarlılık,
+// dedup, mercekler, fuse hakemleri) ChatJSONWithTemperature ile 0 gönderir
+// (aynı girdiye tutarlı karar); üretim çağrıları (kart/sohbet metni)
+// ChatJSON ile 0.3'te kalır (metin çeşitliliği).
 type Chat interface {
 	// ChatJSON, JSON-mode'da tek tur sohbet yapar ve modelin ürettiği ham
-	// JSON string'ini döner.
+	// JSON string'ini döner (sabit 0.3 sıcaklıkla — üretim çağrıları için).
 	ChatJSON(ctx context.Context, system, user string) (string, error)
+
+	// ChatJSONWithTemperature, ChatJSON ile aynıdır ama sıcaklığı çağıran
+	// belirler (yargı çağrıları için 0).
+	ChatJSONWithTemperature(ctx context.Context, system, user string, temperature float64) (string, error)
 }
 
 // OpenAICompatClient, OpenAI'ın chat-completions şemasıyla uyumlu herhangi
@@ -74,14 +83,22 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
+// defaultTemperature, üretim çağrıları (kart/sohbet metni) için sabit
+// sıcaklıktır — metin çeşitliliği istenir (#106).
+const defaultTemperature = 0.3
+
 func (c *OpenAICompatClient) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, defaultTemperature)
+}
+
+func (c *OpenAICompatClient) ChatJSONWithTemperature(ctx context.Context, system, user string, temperature float64) (string, error) {
 	payload, err := json.Marshal(chatRequest{
 		Model: c.Model,
 		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-		Temperature:    0.3,
+		Temperature:    temperature,
 		ResponseFormat: &respFormat{Type: "json_object"},
 	})
 	if err != nil {

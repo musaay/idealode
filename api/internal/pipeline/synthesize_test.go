@@ -57,6 +57,43 @@ func TestParseIdeaResponseRejectsEmpty(t *testing.T) {
 	}
 }
 
+// TestSynthesizeOneUsesDefaultTemperature, üretim çağrısının (kart metni)
+// sabit 0.3 sıcaklıkla gittiğini doğrular (#106 — değişmez).
+func TestSynthesizeOneUsesDefaultTemperature(t *testing.T) {
+	chat := &fakeChat{response: `{"title":"Başlık Yeterince Uzun","problem_statement":"sorun",
+		"proposed_solution":"çözüm","target_user":"kullanıcı","domain_tags":["x"]}`}
+	cfg := &config.Config{OutputLang: "tr"}
+	th := store.Theme{ID: 1, Name: "test-tag", Frequency: 3}
+	evidence := []store.RawPost{{Title: "a", Body: "b"}}
+
+	if _, err := synthesizeOne(context.Background(), cfg, chat, th, evidence); err != nil {
+		t.Fatalf("synthesizeOne: %v", err)
+	}
+	found := false
+	for _, temp := range chat.lastTemp {
+		found = true
+		if temp != 0.3 {
+			t.Errorf("üretim çağrısı sıcaklık 0.3 olmalı, geldi: %v", temp)
+		}
+	}
+	if !found {
+		t.Fatal("chat hiç çağrılmamış")
+	}
+}
+
+// TestDistinctivenessAdviseUsesTemperatureZero, özgünlük merceğinin (yargı
+// çağrısı, #106) sıcaklık 0 ile çağrıldığını doğrular.
+func TestDistinctivenessAdviseUsesTemperatureZero(t *testing.T) {
+	chat := &fakeChat{}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+	if err := distinctivenessAdvise(context.Background(), chat, idea); err != nil {
+		t.Fatalf("distinctivenessAdvise: %v", err)
+	}
+	if got := chat.lastTemp[lensDistinctivenessSystem]; got != 0 {
+		t.Errorf("özgünlük merceği sıcaklık 0 ile çağrılmalı, geldi: %v", got)
+	}
+}
+
 // fakeChat, synthesize entegrasyon testi için sabit yanıt döner; tutarlılık
 // denetimi çağrısına ise tüm post'ları tutarlı sayan bir cevap verir.
 // distinctVerdict/distinctCriterion, kart-sonrası ADVISORY özgünlük
@@ -67,9 +104,21 @@ type fakeChat struct {
 	response          string
 	distinctVerdict   string
 	distinctCriterion string
+
+	// lastTemp, sıcaklık politikasını (#106) doğrulayan testler için son
+	// çağrının sıcaklığını sistem prompt'una göre kaydeder.
+	lastTemp map[string]float64
 }
 
 func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *fakeChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.lastTemp == nil {
+		f.lastTemp = map[string]float64{}
+	}
+	f.lastTemp[system] = temp
 	if system == coherenceSystem {
 		return `{"indices":[0,1,2]}`, nil
 	}
@@ -102,6 +151,18 @@ func TestCoherentSubsetFiltersInvalidIndices(t *testing.T) {
 	// Geçersiz (7, -1) ve tekrar eden (2) indeksler elenir.
 	if len(subset) != 2 || subset[0].Title != "c" || subset[1].Title != "a" {
 		t.Errorf("beklenen [c a], geldi: %+v", subset)
+	}
+}
+
+// TestCoherentSubsetUsesTemperatureZero, yargı çağrısının (#106) sıcaklık
+// 0 ile gittiğini doğrular.
+func TestCoherentSubsetUsesTemperatureZero(t *testing.T) {
+	chat := &indicesChat{response: `{"indices":[0]}`}
+	if _, err := coherentSubset(context.Background(), chat, []store.RawPost{{Title: "a"}}); err != nil {
+		t.Fatalf("coherentSubset: %v", err)
+	}
+	if chat.lastTemp != 0 {
+		t.Errorf("coherentSubset sıcaklık 0 ile çağırmalı, geldi: %v", chat.lastTemp)
 	}
 }
 
@@ -146,9 +207,17 @@ func TestCoherenceIndicesFlexibleFormats(t *testing.T) {
 }
 
 // indicesChat, tutarlılık denetimi birim testleri için sabit cevap döner.
-type indicesChat struct{ response string }
+type indicesChat struct {
+	response string
+	lastTemp float64 // son çağrının sıcaklığı (#106 doğrulaması için)
+}
 
 func (c *indicesChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *indicesChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.lastTemp = temp
 	return c.response, nil
 }
 
@@ -239,6 +308,10 @@ func TestSynthesizeIdeasIntegration(t *testing.T) {
 type synthDistinctErrChat struct{ response string }
 
 func (f *synthDistinctErrChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *synthDistinctErrChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
 	if system == coherenceSystem {
 		return `{"indices":[0,1,2]}`, nil
 	}

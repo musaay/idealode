@@ -36,9 +36,21 @@ type fakeSeedChat struct {
 	lensVerdict  string
 	cardResponse string
 	dupSame      bool
+
+	// lastTemp, sıcaklık politikasını (#106) doğrulayan testler için son
+	// çağrının sıcaklığını sistem prompt'una göre kaydeder.
+	lastTemp map[string]float64
 }
 
 func (f *fakeSeedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *fakeSeedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.lastTemp == nil {
+		f.lastTemp = map[string]float64{}
+	}
+	f.lastTemp[system] = temp
 	switch {
 	case system == dupJudgeSystem:
 		return fmt.Sprintf(`{"same": %v}`, f.dupSame), nil
@@ -119,6 +131,23 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		t.Errorf("raw_posts işaret satırı bulunamadı")
 	}
 
+	// Sıcaklık politikası (#106): 3 bloklayıcı mercek yargı=0, kart üretimi
+	// (LLM sistem prompt'unda "market_derived" geçer) üretim=0.3.
+	if len(chat.lastTemp) < 4 {
+		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (3 mercek + kart üretimi): %d", len(chat.lastTemp))
+	}
+	for sys, temp := range chat.lastTemp {
+		if strings.Contains(sys, `"market_derived"`) {
+			if temp != 0.3 {
+				t.Errorf("kart üretimi sıcaklık 0.3 olmalı, geldi: %v", temp)
+			}
+			continue
+		}
+		if temp != 0 {
+			t.Errorf("mercek çağrısı sıcaklık 0 olmalı, geldi: %v", temp)
+		}
+	}
+
 	// İkinci koşu aynı tohumu tekrar işlememeli (idempotency).
 	n2, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
 	if err != nil {
@@ -187,11 +216,19 @@ func (errChat) ChatJSON(ctx context.Context, system, user string) (string, error
 	return "", fmt.Errorf("simulated LLM hatası")
 }
 
+func (errChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	return "", fmt.Errorf("simulated LLM hatası")
+}
+
 // cardErrChat, mercekleri hep "pass" geçirir ama kart üretim çağrısında
 // hata döner (kart-üretimi aşamasındaki geçici hatayı simüle eder).
 type cardErrChat struct{}
 
 func (cardErrChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return cardErrChat{}.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (cardErrChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
 	if strings.Contains(system, `"market_derived"`) {
 		return "", fmt.Errorf("simulated kart üretimi hatası")
 	}
@@ -384,9 +421,21 @@ type advisorySeedChat struct {
 	distinctVerdict   string // pass/fail/unsure; boşsa "pass"
 	distinctCriterion string // boşsa "none"
 	distinctErr       bool   // true ise lensDistinctivenessSystem hata döner
+
+	// lastTemp, sıcaklık politikasını (#106) doğrulayan testler için son
+	// çağrının sıcaklığını sistem prompt'una göre kaydeder.
+	lastTemp map[string]float64
 }
 
 func (f *advisorySeedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *advisorySeedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.lastTemp == nil {
+		f.lastTemp = map[string]float64{}
+	}
+	f.lastTemp[system] = temp
 	switch {
 	case system == dupJudgeSystem:
 		return `{"same": false}`, nil
@@ -458,6 +507,9 @@ func TestProcessSeedsDistinctivenessFailStillWritesCard(t *testing.T) {
 	}
 	if reason == nil || *reason == "" {
 		t.Error("distinctiveness_reason boş olmamalı")
+	}
+	if got := chat.lastTemp[lensDistinctivenessSystem]; got != 0 {
+		t.Errorf("özgünlük merceği (#106) sıcaklık 0 ile çağrılmalı, geldi: %v", got)
 	}
 }
 
