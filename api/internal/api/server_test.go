@@ -169,9 +169,15 @@ func newFakeStore() *fakeStore {
 type fakeLLM struct {
 	response string
 	err      error
+	lastTemp float64 // son çağrının sıcaklığı (#106 doğrulaması için)
 }
 
 func (f *fakeLLM) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *fakeLLM) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	f.lastTemp = temp
 	if f.err != nil {
 		return "", f.err
 	}

@@ -40,6 +40,32 @@ func TestFuseJudgeEmptyResult(t *testing.T) {
 	}
 }
 
+// TestFuseJudgeUsesTemperatureZero, talep hakeminin (#106) sıcaklık 0 ile
+// çağrıldığını doğrular.
+func TestFuseJudgeUsesTemperatureZero(t *testing.T) {
+	chat := &indicesChat{response: `{"indices":[]}`}
+	if _, err := fuseJudge(context.Background(), chat, store.Idea{Title: "X"},
+		[]store.RawPost{{Title: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if chat.lastTemp != 0 {
+		t.Errorf("fuseJudge sıcaklık 0 ile çağırmalı, geldi: %v", chat.lastTemp)
+	}
+}
+
+// TestFuseMomentumJudgeUsesTemperatureZero, ivme hakeminin (#106) sıcaklık
+// 0 ile çağrıldığını doğrular.
+func TestFuseMomentumJudgeUsesTemperatureZero(t *testing.T) {
+	chat := &scriptedChat{momentumResponse: `{"indices":[]}`}
+	if _, err := fuseMomentumJudge(context.Background(), chat, store.Idea{Title: "X"},
+		[]store.RawPost{{Title: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := chat.lastTemp[fuseMomentumSystem]; got != 0 {
+		t.Errorf("fuseMomentumJudge sıcaklık 0 ile çağırmalı, geldi: %v", got)
+	}
+}
+
 func TestFuseJudgePromptContainsIdeaAndPosts(t *testing.T) {
 	rec := &recordingChat{response: `{"indices":[]}`}
 	idea := store.Idea{Title: "Başlık A", ProblemStatement: "Problem B"}
@@ -54,14 +80,20 @@ func TestFuseJudgePromptContainsIdeaAndPosts(t *testing.T) {
 	}
 }
 
-// recordingChat, gönderilen user prompt'unu kaydeder.
+// recordingChat, gönderilen user prompt'unu ve sıcaklığı kaydeder.
 type recordingChat struct {
 	response string
 	lastUser string
+	lastTemp float64
 }
 
 func (c *recordingChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *recordingChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
 	c.lastUser = user
+	c.lastTemp = temp
 	return c.response, nil
 }
 
@@ -74,9 +106,21 @@ type scriptedChat struct {
 	demandErr        error
 	momentumResponse string
 	momentumErr      error
+
+	// lastTemp, sıcaklık politikasını (#106) doğrulayan testler için son
+	// çağrının sıcaklığını sistem prompt'una göre kaydeder.
+	lastTemp map[string]float64
 }
 
 func (c *scriptedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *scriptedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if c.lastTemp == nil {
+		c.lastTemp = map[string]float64{}
+	}
+	c.lastTemp[system] = temp
 	if system == fuseMomentumSystem {
 		if c.momentumErr != nil {
 			return "", c.momentumErr

@@ -110,7 +110,8 @@ func classifyChunk(ctx context.Context, cfg *config.Config, chat llm.Chat, chunk
 	}
 
 	system := fmt.Sprintf(classifySystemTmpl, langName(cfg.OutputLang))
-	raw, err := chat.ChatJSON(ctx, system, sb.String())
+	// Yargı çağrısı (sınıflandırma): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, system, sb.String(), 0)
 	if err != nil {
 		return nil, err
 	}

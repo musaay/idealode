@@ -173,9 +173,21 @@ func TestFetchTrendingRepoMetaVarNotNilByDefault(t *testing.T) {
 type fakeMomentumChat struct {
 	lensVerdict  string
 	cardResponse string
+
+	// lastTemp, sıcaklık politikasını (#106) doğrulayan testler için son
+	// çağrının sıcaklığını sistem prompt'una göre kaydeder.
+	lastTemp map[string]float64
 }
 
 func (f *fakeMomentumChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *fakeMomentumChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.lastTemp == nil {
+		f.lastTemp = map[string]float64{}
+	}
+	f.lastTemp[system] = temp
 	if strings.Contains(system, `"momentum_derived"`) {
 		return f.cardResponse, nil
 	}
@@ -307,6 +319,23 @@ func TestProcessSeedsTrendingPassCreatesMomentumCard(t *testing.T) {
 	}
 	if len(quotes) != 1 || !strings.Contains(quotes[0], "★800 toplam") || !strings.Contains(quotes[0], "gelir kanıtı yok") {
 		t.Errorf("example_quotes koddan hesaplanmış ivme kanıtı olmalı, geldi: %v", quotes)
+	}
+
+	// Sıcaklık politikası (#106): bloklayıcı mercekler yargı=0, kart üretimi
+	// (LLM sistem prompt'unda "momentum_derived" geçer) üretim=0.3.
+	if len(chat.lastTemp) < 2 {
+		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (mercek(ler) + kart üretimi): %d", len(chat.lastTemp))
+	}
+	for sys, temp := range chat.lastTemp {
+		if strings.Contains(sys, `"momentum_derived"`) {
+			if temp != 0.3 {
+				t.Errorf("kart üretimi sıcaklık 0.3 olmalı, geldi: %v", temp)
+			}
+			continue
+		}
+		if temp != 0 {
+			t.Errorf("mercek çağrısı sıcaklık 0 olmalı, geldi: %v", temp)
+		}
 	}
 }
 

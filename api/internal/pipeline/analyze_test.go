@@ -1,11 +1,42 @@
 package pipeline
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	"github.com/musaay/idealode/api/internal/config"
 	"github.com/musaay/idealode/api/internal/store"
 )
+
+// tempRecordingChat, yalnız son çağrının sıcaklığını kaydeden minimal
+// sahte Chat (#106 doğrulaması için).
+type tempRecordingChat struct {
+	response string
+	lastTemp float64
+}
+
+func (c *tempRecordingChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *tempRecordingChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.lastTemp = temp
+	return c.response, nil
+}
+
+// TestClassifyChunkUsesTemperatureZero, sınıflandırma yargı çağrısının
+// (#106) sıcaklık 0 ile gittiğini doğrular.
+func TestClassifyChunkUsesTemperatureZero(t *testing.T) {
+	chat := &tempRecordingChat{response: `{"results":[{"id":1,"classification":"noise"}]}`}
+	cfg := &config.Config{OutputLang: "tr"}
+	if _, err := classifyChunk(context.Background(), cfg, chat, []store.RawPost{{ID: 1}}); err != nil {
+		t.Fatalf("classifyChunk: %v", err)
+	}
+	if chat.lastTemp != 0 {
+		t.Errorf("classifyChunk sıcaklık 0 ile çağırmalı, geldi: %v", chat.lastTemp)
+	}
+}
 
 func TestNormalizeTags(t *testing.T) {
 	in := []string{"Invoice Automation", "invoice-automation", "AI/ML", "", "a", "b", "c", "d"}

@@ -66,7 +66,10 @@ Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
 gören TEK süreçtir; `serve` dahil hiçbir başka süreç veritabanına doğrudan
 bağlanmaz. LLM'e yalnız bu süreç gider — `LLM_API_KEY` (geriye uyumlu:
 `GROQ_API_KEY`) `api` için de zorunludur; `LLM_BASE_URL`/`LLM_MODEL`
-isteğe bağlıdır (varsayılan sağlayıcı: Groq). Adres: `PORT` ortam değişkeni
+isteğe bağlıdır (varsayılan sağlayıcı: Groq). Sıcaklık politikası (#106):
+yargı çağrıları (sınıflandırma, tutarlılık/dedup/mercek/hakem kararları)
+sıcaklık 0 ile tutarlı karar üretir, kart/sohbet metni üreten çağrılar
+0.3'te çeşitlilik için kalır. Adres: `PORT` ortam değişkeni
 (varsayılan `8080`). Uçlar:
 
 ```

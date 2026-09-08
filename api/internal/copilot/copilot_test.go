@@ -15,11 +15,17 @@ type fakeChat struct {
 	err      error
 	lastSys  string
 	lastUser string
+	lastTemp float64 // son çağrının sıcaklığı (#106 doğrulaması için)
 }
 
 func (f *fakeChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *fakeChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
 	f.lastSys = system
 	f.lastUser = user
+	f.lastTemp = temp
 	if f.err != nil {
 		return "", f.err
 	}
@@ -62,6 +68,10 @@ func TestChat_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(fc.lastUser, "Evidence quotes (DATA") {
 		t.Errorf("alıntı 'data' bölümünde değil: %s", fc.lastUser)
+	}
+	// Üretim çağrısı (#106 — değişmez): sıcaklık 0.3.
+	if fc.lastTemp != 0.3 {
+		t.Errorf("copilot chat sıcaklık 0.3 olmalı, geldi: %v", fc.lastTemp)
 	}
 }
 
@@ -135,6 +145,10 @@ func TestBlend_HappyPath(t *testing.T) {
 	}
 	if draft.UrgencyScore != 4 || draft.MonetizationSignal != 3 {
 		t.Errorf("skorlar: %d/%d", draft.UrgencyScore, draft.MonetizationSignal)
+	}
+	// Üretim çağrısı (#106 — değişmez): sıcaklık 0.3.
+	if fc.lastTemp != 0.3 {
+		t.Errorf("copilot blend sıcaklık 0.3 olmalı, geldi: %v", fc.lastTemp)
 	}
 }
 
