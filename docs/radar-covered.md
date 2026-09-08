@@ -74,3 +74,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - MonAI (Florian, Charlie Alvarez) — konuşarak/yazarak masraf kaydı tutan AI kişisel finans uygulaması, influencer ortaklığıyla 1 yılda $300'den $35K MRR'a (2026-09-07)
 - Career Hound (Roman) — şirketlerin kariyer sayfalarından iş ilanı kazıyan, LinkedIn/Indeed dışı iş bulma platformu, $28K/ay ($12K MRR) (2026-09-07)
 - Pushscroll (Alejandro, Mario) — push-up yapmadan sosyal medya uygulamalarını kilitleyen fitness/ekran-süresi uygulaması, sıfır reklam bütçesiyle $30K/ay (2026-09-07)
+- RankInPublic (Antonio Escudero) — oyunlaştırılmış girişim lansman/dizin gönderim platformu, 1 ayda $300'dan $17K MRR'a (2026-09-08)
+- Stan (Vitalii Dodonov, John Hu) — içerik üreticileri için link-in-bio ürün/kurs satış platformu, $30M ARR (2026-09-08)
+- Photo AI (Pieter Levels) — selfie'den AI profesyonel fotoğraf üretimi, $105K/ay (2026-09-08)
