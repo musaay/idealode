@@ -77,3 +77,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - RankInPublic (Antonio Escudero) — oyunlaştırılmış girişim lansman/dizin gönderim platformu, 1 ayda $300'dan $17K MRR'a (2026-09-08)
 - Stan (Vitalii Dodonov, John Hu) — içerik üreticileri için link-in-bio ürün/kurs satış platformu, $30M ARR (2026-09-08)
 - Photo AI (Pieter Levels) — selfie'den AI profesyonel fotoğraf üretimi, $105K/ay (2026-09-08)
+- Postiz (Nevo David) — açık kaynak agentic sosyal medya paylaşım aracı, 4 ayda $17K'dan $186K MRR'a / ~$2.2M ARR (2026-09-09)
+- Waitly (Joe Rozek) — restoran/salon SMS tabanlı sanal sıra ve rezervasyon uygulaması, ~$40-41K/ay (2026-09-09)
+- Polsia (Ben Cera) — sıfır çalışanlı AI iş işletme/otomasyon platformu, ~30 günde $1M ARR, şimdi ~$10M ARR run-rate ($30M yatırım) (2026-09-09)
+- MediaFa.st (Arthur Yuzbashev) — Reddit'te banlanmadan organik pazarlama aracı, reklamsız ~$6K MRR (2026-09-09)
