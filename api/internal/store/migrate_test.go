@@ -65,6 +65,57 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// TestMigrateDistinctivenessK5CriterionAllowed, 017_distinctiveness_k5.sql'in
+// ideas_distinctiveness_criterion_check kısıtını K5'i kabul edecek şekilde
+// güncellediğini doğrular (#114): K5 kabul edilir, tanınmayan bir kod hâlâ
+// reddedilir, ikinci Migrate çalışması (idempotent) mevcut satırları bozmaz.
+func TestMigrateDistinctivenessK5CriterionAllowed(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ilk Migrate: %v", err)
+	}
+
+	s, err := Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.InsertIdea(ctx, Idea{
+		Title: "test-migrate-k5", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET distinctiveness_verdict = 'fail', distinctiveness_criterion = 'K5' WHERE id = $1", id); err != nil {
+		t.Errorf("K5 criterion kabul edilmeliydi: %v", err)
+	}
+
+	if _, err := s.Pool.Exec(ctx, "UPDATE ideas SET distinctiveness_criterion = 'K9' WHERE id = $1", id); err == nil {
+		t.Error("tanınmayan criterion 'K9' CHECK kısıtı tarafından reddedilmeliydi")
+	}
+
+	// İkinci Migrate (idempotent): K5 satırı hâlâ geçerli kalmalı.
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ikinci Migrate: %v", err)
+	}
+	var criterion *string
+	if err := s.Pool.QueryRow(ctx, "SELECT distinctiveness_criterion FROM ideas WHERE id = $1", id).Scan(&criterion); err != nil {
+		t.Fatal(err)
+	}
+	if criterion == nil || *criterion != "K5" {
+		t.Errorf("ikinci Migrate sonrası distinctiveness_criterion=K5 beklenirdi, geldi: %v", criterion)
+	}
+}
+
 // TestMigratePublishedBackfillOnlyOnce, 015_published.sql'in backfill'inin
 // yalnız kolon İLK eklendiğinde çalıştığını doğrular (reviewer bulgusu):
 // migrate() -> beklemedeki kart insert edilir (published_at NULL) ->

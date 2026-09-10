@@ -91,22 +91,23 @@ FAIL if the idea has no realistic path to revenue (e.g. a tiny hobbyist niche, a
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
-// lensDistinctivenessSystem: özgünlük merceği (#101 v3) — ADVISORY, bloklamaz.
-// K1-K4'ten biri tutuyorsa verdict "fail"; sonuç kart üretimini engellemez,
+// lensDistinctivenessSystem: özgünlük merceği (#101 v3, K5: #114) — ADVISORY,
+// bloklamaz. K1-K5'ten biri tutuyorsa verdict "fail"; sonuç kart üretimini engellemez,
 // yalnız store.Idea'nın distinctiveness_* alanlarına yazılır (bkz.
 // distinctivenessAdvise). Kart üretildikten SONRA, hem synthesize.go'nun
 // pain_point yolunda hem seeds.go'nun ProcessSeeds'inde (revenue+trending)
 // aynı biçimde çağrılır.
-const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria. This is an ADVISORY assessment — it does not block the idea, it only flags it. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
+const lensDistinctivenessSystem = `You evaluate a proposed software product idea against five DISTINCTIVENESS criteria. This is an ADVISORY assessment — it does not block the idea, it only flags it. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
 
 K1 Saturation: 10+ well-known (not obscure) products already do the same core job, AND this idea has no distinguishing angle from them. A few strong competitors alone (e.g. 2-3 established players) do NOT trigger K1 — only real saturation with no angle does.
 K2 Natively solvable: the underlying pain is already solved at the OS/platform level (screen time, notifications, etc.) and the product only adds a "nice trick" on top of that native solution. Simplicity alone is not the issue — the question is whether the pain it solves is already natively solved.
 K3 Demand reality: no concrete paying segment exists — especially in Turkey: "who in Turkey would pay for this, and why?" Even if a comparable product has real revenue elsewhere, if there's no TR segment, this still fails K3.
 K4 Platform fragility: a single update from an incumbent/OS vendor would make the idea pointless.
+K5 Excitement: the idea is sensible and could plausibly make money, but its mechanism is a known product's mechanism moved to another market, language or niche — nothing about it would make someone say "I hadn't thought of that". A localized/translated version of an existing product, with no new mechanic, distribution model, pricing model or unexpected combination of two domains, fails K5.
 
-The existence of competitors alone is never, by itself, a reason to fail.
+The existence of competitors alone is never, by itself, a reason to fail. A "fail" on K5 does not mean the idea is bad — it means it is unsurprising; it stays advisory and does not block card generation.
 
-Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that triggered a "fail" verdict, or "none" if verdict is "pass"/"unsure".`
+Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|K5|none","reason":"..."} — criterion is the ONE that triggered a "fail" verdict, or "none" if verdict is "pass"/"unsure".`
 
 // lensProductizableSystem: ivme tohumlarına özgü 4. mercek (#89 kapı madde
 // 4) — awesome-list, eğitim/kurs, makale/paper, model ağırlığı, saf
@@ -147,7 +148,7 @@ type lensVerdict struct {
 
 // validDistinctivenessCriteria, lensDistinctivenessSystem'in tanıdığı
 // criterion değerleri — tanınmayan/eksik değer "none"a indirgenir (#101 v3).
-var validDistinctivenessCriteria = map[string]bool{"K1": true, "K2": true, "K3": true, "K4": true, "none": true}
+var validDistinctivenessCriteria = map[string]bool{"K1": true, "K2": true, "K3": true, "K4": true, "K5": true, "none": true}
 
 // parseLensVerdict, mercek cevabını savunmacı ayrıştırır: JSON değilse ya da
 // verdict tanınmıyorsa "unsure" sayılır (pass DEĞİL) — belirsizlikte kart
@@ -203,13 +204,15 @@ func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea)
 	return nil
 }
 
-// distinctivenessCriteriaDesc, K1-K4 özgünlük kriterlerinin TR açıklaması —
-// tek yerde sabit (#108): log satırları ve PendingIdeas özetinde kullanılır.
+// distinctivenessCriteriaDesc, K1-K5 özgünlük kriterlerinin TR açıklaması —
+// tek yerde sabit (#108, K5: #114): log satırları ve PendingIdeas özetinde
+// kullanılır.
 var distinctivenessCriteriaDesc = map[string]string{
 	"K1": "doygunluk (10+ bilinir benzer ürün)",
 	"K2": "yerleşik çözüm (OS/platform zaten yapıyor)",
 	"K3": "talep (TR'de ödeyen yok)",
 	"K4": "kırılganlık (tek güncellemeyle anlamsız)",
+	"K5": "heyecan (bilinen mekaniğin başka pazara taşınmış hali)",
 }
 
 // distinctivenessLogSuffix, kart üretim log satırına eklenen özgünlük özeti
