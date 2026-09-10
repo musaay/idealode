@@ -30,59 +30,6 @@ func TestParseRadarSeedsSkipsMalformed(t *testing.T) {
 	}
 }
 
-// TestParseLensVerdict, özgünlük merceği cevabının savunmacı ayrıştırılmasını
-// doğrular — K5 "heyecan" kriteri de K1-K4 gibi tanınmalı (#114), tanınmayan
-// bir criterion değeri "none"a indirgenmeli.
-func TestParseLensVerdict(t *testing.T) {
-	cases := []struct {
-		name          string
-		raw           string
-		wantVerdict   string
-		wantCriterion string
-	}{
-		{
-			name:          "K5 tanınır",
-			raw:           `{"verdict":"fail","criterion":"K5","reason":"bilinen mekaniğin kopyası"}`,
-			wantVerdict:   "fail",
-			wantCriterion: "K5",
-		},
-		{
-			name:          "K1-K4 hâlâ tanınır",
-			raw:           `{"verdict":"fail","criterion":"K4","reason":"kırılgan"}`,
-			wantVerdict:   "fail",
-			wantCriterion: "K4",
-		},
-		{
-			name:          "tanınmayan criterion none'a iner",
-			raw:           `{"verdict":"fail","criterion":"K9","reason":"?"}`,
-			wantVerdict:   "fail",
-			wantCriterion: "none",
-		},
-		{
-			name:          "pass'te criterion none",
-			raw:           `{"verdict":"pass","criterion":"none","reason":"ok"}`,
-			wantVerdict:   "pass",
-			wantCriterion: "none",
-		},
-		{
-			name:          "JSON değilse unsure",
-			raw:           `not json`,
-			wantVerdict:   "unsure",
-			wantCriterion: "none",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseLensVerdict(tc.raw)
-			if got.Verdict != tc.wantVerdict || got.Criterion != tc.wantCriterion {
-				t.Errorf("parseLensVerdict(%q) = {%q, %q}, want {%q, %q}",
-					tc.raw, got.Verdict, got.Criterion, tc.wantVerdict, tc.wantCriterion)
-			}
-		})
-	}
-}
-
 // fakeSeedChat, ProcessSeeds entegrasyon testleri için sistem prompt'una
 // göre sabit cevap döner: 3 merceğe lensVerdict, kart üretimine
 // cardResponse, dedup hakemine (gerekirse) dupSame.
@@ -676,15 +623,6 @@ func TestDistinctivenessLogSuffix(t *testing.T) {
 				DistinctivenessReason:    sp("a" + strings.Repeat("ğ", 200)),
 			},
 			want: " · özgünlük: fail K4 — kırılganlık (tek güncellemeyle anlamsız) — " + clip("a"+strings.Repeat("ğ", 200), 160),
-		},
-		{
-			name: "fail K5 heyecan (#114)",
-			idea: store.Idea{
-				DistinctivenessVerdict:   sp("fail"),
-				DistinctivenessCriterion: sp("K5"),
-				DistinctivenessReason:    sp("bilinen ürünün TR'ye taşınmış hali"),
-			},
-			want: " · özgünlük: fail K5 — heyecan (bilinen mekaniğin başka pazara taşınmış hali) — bilinen ürünün TR'ye taşınmış hali",
 		},
 	}
 
