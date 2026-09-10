@@ -81,3 +81,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Waitly (Joe Rozek) — restoran/salon SMS tabanlı sanal sıra ve rezervasyon uygulaması, ~$40-41K/ay (2026-09-09)
 - Polsia (Ben Cera) — sıfır çalışanlı AI iş işletme/otomasyon platformu, ~30 günde $1M ARR, şimdi ~$10M ARR run-rate ($30M yatırım) (2026-09-09)
 - MediaFa.st (Arthur Yuzbashev) — Reddit'te banlanmadan organik pazarlama aracı, reklamsız ~$6K MRR (2026-09-09)
+- Sync2Sheets — Notion için Google Sheets senkronizasyon eklentisi, $9K MRR (2026-09-10)
+- OneTake AI (Sébastien) — tek tıkla AI video kurgu aracı, $500K ARR (2026-09-10)
+- Influence Podium (Marti Sanchez) — B2B CEO'lar için podcast yerleştirme/içerik ajansı, $40K MRR (2026-09-10)
+- Referral Rock (Josh Ho) — müşteri referans programı SaaS'ı, $70K/ay (2026-09-10)
