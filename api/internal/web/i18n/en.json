@@ -59,6 +59,7 @@
   "distinct.criterion.K2": "native solution — the platform or OS already solves this",
   "distinct.criterion.K3": "TR demand — no concrete paying segment in Turkey",
   "distinct.criterion.K4": "platform fragility — one vendor update could make it pointless",
+  "distinct.criterion.K5": "excitement: known mechanic, new market",
 
   "platform.radar_seed": "Radar",
   "platform.hackernews": "Hacker News",

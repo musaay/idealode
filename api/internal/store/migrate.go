@@ -56,6 +56,9 @@ var migration015 string
 //go:embed migrate_sql/016_idea_slug.sql
 var migration016 string
 
+//go:embed migrate_sql/017_distinctiveness_k5.sql
+var migration017 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -124,6 +127,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration016); err != nil {
 		return fmt.Errorf("016_idea_slug.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration017); err != nil {
+		return fmt.Errorf("017_distinctiveness_k5.sql: %w", err)
 	}
 	return nil
 }
