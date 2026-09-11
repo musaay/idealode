@@ -234,6 +234,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 	}
 
 	created := 0
+	blockedByLens := 0
 	for i, th := range themes {
 		if ctx.Err() != nil {
 			return created, ctx.Err()
@@ -285,6 +286,19 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
+		// Bloklayıcı mercekler (#123): seeds.go'daki 3 mercek (üçüncü-taraf
+		// inşa edilebilirlik / veri-erişimi / pazar-işlerliği) organik
+		// yolda da SIRAYLA çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI.
+		// İlk "fail"de durur, kalan mercekler çağrılmaz; kart yazılmaz ve
+		// tema bir sonraki temaya geçilir. Mevcut ThemesReadyForSynthesis
+		// davranışı DEĞİŞMEDİĞİNDEN tema bir sonraki koşuda yeniden ele
+		// alınabilir (bilinçli tercih, bkz. issue #123 edge case notu).
+		if lensName, reason, blocked := blockedByIdeaLens(ctx, chat, idea); blocked {
+			blockedByLens++
+			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
+			continue
+		}
+
 		// ADVISORY özgünlük merceği (#101 v3): K1-K4 sonucunu karta yazar,
 		// kart üretimini ASLA bloklamaz (PO kararı: bloklama, işaretle).
 		// Hata verirse alanlar NULL kalır, kart yine de yazılır.
@@ -324,7 +338,35 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			}
 		}
 	}
+	// Koşu sonu özet sayaç (#123): mercekten elenen kart sayısı — ödeme
+	// kapısı (#121) satırıyla aynı üslupta, ölçülebilirlik için.
+	log.Printf("synthesize: mercekten elenen kart: %d", blockedByLens)
 	return created, nil
+}
+
+// blockedByIdeaLens, kart üretildikten SONRA, DB'ye YAZILMADAN önce çalışan
+// 3 bloklayıcı merceği (#123) SIRAYLA dener: seeds.go'daki seedLenses listesi
+// ve parseLensVerdict deseni AYNEN kullanılır — iki kopya mercek/prompt
+// YOK. İlk "fail"de durur (kalan mercekler çağrılmaz, token tasarrufu) ve
+// bloklayan merceğin adı+sebebini döner. "unsure" BLOKLAMAZ — yalnız "fail"
+// bloklar. Mercek çağrısı HATA verirse (ağ/kota) kart DÜŞÜRÜLMEZ: hata
+// loglanır, blok yokmuş gibi (false) dönülür — distinctivenessAdvise ile
+// aynı "bloklama yok" tutumu.
+func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea store.Idea) (lensName, reason string, blocked bool) {
+	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
+	for _, lens := range seedLenses {
+		// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
+		raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, prompt, 0)
+		if err != nil {
+			log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", lens.name, err)
+			return "", "", false
+		}
+		v := parseLensVerdict(raw)
+		if v.Verdict == "fail" {
+			return lens.name, v.Reason, true
+		}
+	}
+	return "", "", false
 }
 
 func synthesizeOne(ctx context.Context, cfg *config.Config, chat llm.Chat, th store.Theme, evidence []store.RawPost) (store.Idea, error) {
