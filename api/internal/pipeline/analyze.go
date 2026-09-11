@@ -18,6 +18,11 @@ import (
 // Koşu başına en fazla bu kadar analiz edilmemiş post işlenir.
 const analyzeBatchLimit = 500
 
+// Sınıflandırma kararı post'un ilk paragrafında belli oluyor; 800 karakter
+// bunu taşır. 1500'den düşürüldü — Groq ücretsiz katman günlük token
+// kotasını zorluyordu (#119).
+const analyzeBodyClip = 800
+
 var validClassifications = map[string]bool{
 	"pain_point":      true,
 	"feature_request": true,
@@ -106,7 +111,7 @@ func classifyChunk(ctx context.Context, cfg *config.Config, chat llm.Chat, chunk
 	var sb strings.Builder
 	for _, p := range chunk {
 		fmt.Fprintf(&sb, "### post id=%d platform=%s community=%q\ntitle: %s\nbody: %s\n\n",
-			p.ID, p.Platform, p.Community, clip(p.Title, 300), clip(p.Body, 1500))
+			p.ID, p.Platform, p.Community, clip(p.Title, 300), clip(p.Body, analyzeBodyClip))
 	}
 
 	system := fmt.Sprintf(classifySystemTmpl, langName(cfg.OutputLang))
