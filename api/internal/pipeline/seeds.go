@@ -66,12 +66,16 @@ func parseRadarSeeds(jsonl string) []radarSeed {
 	return out
 }
 
-// Mercek (lens) sistem prompt'ları — üçü de "pass" değilse tohum elenir,
-// kart üretilmez. Şema synthesize.go'daki savunmacı VERDICT parse desenini
-// izler. Özgünlük merceği (lensDistinctivenessSystem) BURADA DEĞİL —
-// ADVISORY olduğundan bloklayıcı listeye girmez, kart üretildikten sonra
-// ayrıca çağrılır (bkz. distinctivenessAdvise, #101 v3).
-const lensThirdPartySystem = `You evaluate whether a proposed software product idea, based on a validated market seed (an existing successful product or trend), could be BUILT BY AN INDEPENDENT THIRD-PARTY developer — not merely patched by the original vendor.
+// Mercek (lens) sistem prompt'ları — üçü de "pass" değilse tohum/kart elenir,
+// kart üretilmez (ya da yazılmaz). Şema synthesize.go'daki savunmacı VERDICT
+// parse desenini izler; bu üç mercek + seedLenses listesi #123 ile
+// synthesize.go'nun organik yolunda (SynthesizeIdeas) da AYNI sabitlerle
+// bloklayıcı olarak kullanılır — kaynak-bağımsız yazıldıkları için tohum
+// (radarSeed) ya da kart (store.Idea) girdisi fark etmez. Özgünlük merceği
+// (lensDistinctivenessSystem) BURADA DEĞİL — ADVISORY olduğundan bloklayıcı
+// listeye girmez, kart üretildikten sonra ayrıca çağrılır (bkz.
+// distinctivenessAdvise, #101 v3).
+const lensThirdPartySystem = `You evaluate whether a proposed software product idea could be BUILT BY AN INDEPENDENT THIRD-PARTY developer — not merely patched by the original vendor.
 
 FAIL if the underlying opportunity is actually a defect, bug, or feature gap that only the ORIGINAL vendor could reasonably fix (their own onboarding, their own pricing, their own outage). PASS if an independent developer could build a STANDALONE product serving the same or an adjacent need, without needing to be the original vendor.
 
@@ -128,7 +132,8 @@ type seedLens struct {
 // seedLenses, üç merceğin adı+sistem prompt'u (log/rapor için Türkçe ad).
 // kind=="revenue" tohumlarda TEK BAŞINA, kind=="trending" tohumlarda
 // lensProductizableSystem'in ÖNÜNE eklenmiş biçimde kullanılır (bkz.
-// trendingLenses).
+// trendingLenses). #123: synthesize.go'nun organik yolu (SynthesizeIdeas)
+// da bu AYNI listeyi kullanır — iki kopya mercek/prompt YOK.
 var seedLenses = []seedLens{
 	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem},
 	{"veri-erişimi", lensDataAccessSystem},
@@ -174,11 +179,12 @@ func lensUserPrompt(s radarSeed) string {
 		s.Name, s.Summary, s.Evidence, s.TRAngle)
 }
 
-// distinctivenessUserPrompt, lensDistinctivenessSystem'in kullanıcı
-// prompt'u — distinctivenessAdvise'ın tek çağrı noktası üzerinden hem
-// synthesize.go (pain_point) hem ProcessSeeds (market/momentum_derived)
-// yolunda AYNI biçimde kullanılır.
-func distinctivenessUserPrompt(title, problem, solution, targetUser string) string {
+// ideaLensUserPrompt, store.Idea alanlarından (title/problem/solution/
+// target_user) bir mercek kullanıcı prompt'u üretir — TÜM idea-tabanlı
+// mercek çağrılarının (distinctivenessAdvise + #123'ün organik bloklayıcı
+// mercekleri, bkz. synthesize.go) TEK ortak prompt fonksiyonu. İki kopya
+// prompt İSTEMİYORUZ.
+func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
 	return fmt.Sprintf("Idea title: %s\nProblem: %s\nSolution: %s\nTarget user: %s",
 		title, problem, solution, targetUser)
 }
@@ -192,7 +198,7 @@ func distinctivenessUserPrompt(title, problem, solution, targetUser string) stri
 func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
 	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
 	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
-		distinctivenessUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
+		ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
 	if err != nil {
 		return err
 	}

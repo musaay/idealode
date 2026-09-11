@@ -558,3 +558,322 @@ func TestSynthesizeSystemPromptMentionsConstraints(t *testing.T) {
 		t.Error("synthesizeSystemTmpl artık DISTINCTIVENESS RULE içermemeli (#101 v3)")
 	}
 }
+
+// lensSeqChat, blockedByIdeaLens birim testleri için seedLenses sırasına
+// göre SIRAYLA verdict/hata döner (her çağrıda listedeki bir sonraki
+// eleman). errAt: -1 ise hiçbir çağrı hata vermez; aksi halde o sıradaki
+// çağrı hata döner (kalanlar hiç çağrılmaz — erken çıkış doğrulaması).
+type lensSeqChat struct {
+	verdicts []string
+	errAt    int
+
+	calls    int
+	lastTemp []float64
+}
+
+func (c *lensSeqChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *lensSeqChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	idx := c.calls
+	c.calls++
+	c.lastTemp = append(c.lastTemp, temp)
+	if c.errAt >= 0 && idx == c.errAt {
+		return "", fmt.Errorf("simulated mercek hatası")
+	}
+	v := "pass"
+	if idx < len(c.verdicts) {
+		v = c.verdicts[idx]
+	}
+	return fmt.Sprintf(`{"verdict":%q,"reason":"test-reason"}`, v), nil
+}
+
+// TestBlockedByIdeaLensFailBlocksAndStopsEarly, ilk merceğin "fail"
+// dönmesinin kartı bloklayıp kalan mercekleri ÇAĞIRMADIĞINI doğrular (#123).
+func TestBlockedByIdeaLensFailBlocksAndStopsEarly(t *testing.T) {
+	chat := &lensSeqChat{verdicts: []string{"fail", "pass", "pass"}, errAt: -1}
+	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	lensName, reason, blocked := blockedByIdeaLens(context.Background(), chat, idea)
+	if !blocked {
+		t.Fatal("ilk mercek fail dönünce blocked=true olmalı")
+	}
+	if lensName != seedLenses[0].name {
+		t.Errorf("bloklayan mercek adı %q beklenirdi, geldi %q", seedLenses[0].name, lensName)
+	}
+	if reason != "test-reason" {
+		t.Errorf("mercek sebebi iletilmeli, geldi: %q", reason)
+	}
+	if chat.calls != 1 {
+		t.Errorf("ilk fail'de erken çıkış: 1 çağrı beklenirdi, geldi %d", chat.calls)
+	}
+}
+
+// TestBlockedByIdeaLensUnsureDoesNotBlock, "unsure"ın BLOKLAMADIĞINI ve
+// tüm 3 merceğin çağrıldığını doğrular (yalnız "fail" bloklar).
+func TestBlockedByIdeaLensUnsureDoesNotBlock(t *testing.T) {
+	chat := &lensSeqChat{verdicts: []string{"unsure", "unsure", "unsure"}, errAt: -1}
+	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, idea); blocked {
+		t.Error("unsure bloklamamalı")
+	}
+	if chat.calls != 3 {
+		t.Errorf("3 mercek de çağrılmalı, geldi %d", chat.calls)
+	}
+}
+
+// TestBlockedByIdeaLensErrorDoesNotBlock, mercek çağrısı HATA verirse
+// (ağ/kota) kartın DÜŞÜRÜLMEDİĞİNİ doğrular — hata loglanır, blok yokmuş
+// gibi devam edilir (distinctivenessAdvise ile aynı tutum).
+func TestBlockedByIdeaLensErrorDoesNotBlock(t *testing.T) {
+	chat := &lensSeqChat{errAt: 0}
+	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, idea); blocked {
+		t.Error("mercek çağrı hatası bloklamamalı")
+	}
+	if chat.calls != 1 {
+		t.Errorf("hatada durulmalı (kalan mercekler boşa çağrılmamalı), 1 çağrı beklenirdi, geldi %d", chat.calls)
+	}
+}
+
+// TestBlockedByIdeaLensUsesTemperatureZero, bloklayıcı mercek çağrılarının
+// (#106) sıcaklık 0 ile gittiğini doğrular.
+func TestBlockedByIdeaLensUsesTemperatureZero(t *testing.T) {
+	chat := &lensSeqChat{verdicts: []string{"pass", "pass", "pass"}, errAt: -1}
+	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	blockedByIdeaLens(context.Background(), chat, idea)
+	if len(chat.lastTemp) != 3 {
+		t.Fatalf("3 mercek çağrısı beklenirdi, geldi %d", len(chat.lastTemp))
+	}
+	for i, temp := range chat.lastTemp {
+		if temp != 0 {
+			t.Errorf("mercek çağrısı %d sıcaklık 0 olmalı, geldi: %v", i, temp)
+		}
+	}
+}
+
+// synthLensChat: coherence/dedup normal davranır; 3 bloklayıcı mercek
+// (seedLenses sırasına göre) verdicts'teki değeri döner (boş = "pass");
+// errPos'taki mercek çağrısı ise hata döner (-1 = hata yok). distinctCalls
+// ve lensCalls, ADVISORY özgünlük merceğinin ve bloklayıcı 3 merceğin kaç
+// kez çağrıldığını sayar — "mercek bloklarsa distinctivenessAdvise
+// çağrılmaz" ve "ilk fail'de erken çıkış" doğrulamaları için (#123).
+type synthLensChat struct {
+	response string
+	verdicts [3]string
+	errPos   int
+
+	distinctCalls int
+	lensCalls     int
+}
+
+func (f *synthLensChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *synthLensChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if system == coherenceSystem {
+		return `{"indices":[0,1,2]}`, nil
+	}
+	if system == lensDistinctivenessSystem {
+		f.distinctCalls++
+		return `{"verdict":"pass","criterion":"none","reason":"ok"}`, nil
+	}
+	if system == dupJudgeSystem {
+		return `{"same": false}`, nil
+	}
+	for i, l := range seedLenses {
+		if system == l.system {
+			f.lensCalls++
+			if i == f.errPos {
+				return "", fmt.Errorf("simulated mercek hatası")
+			}
+			v := f.verdicts[i]
+			if v == "" {
+				v = "pass"
+			}
+			return fmt.Sprintf(`{"verdict":%q,"reason":"test-blok-sebebi"}`, v), nil
+		}
+	}
+	return f.response, nil
+}
+
+// TestSynthesizeIdeasLensFailNotWritten: 3 bloklayıcı merceğin (#123)
+// ikincisi "fail" dönerse kart DB'ye YAZILMAZ, ADVISORY özgünlük merceği
+// hiç çağrılmaz (boşa token) ve kalan 3. mercek de çağrılmaz (erken çıkış,
+// çağrı sayısı doğrulanır).
+func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Mercek Blok Fikri"
+	platform, tag := "test-syn-lens-fail", "test-syn-lens-fail-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	setupSynthTheme(t, ctx, st, platform, tag, false)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &synthLensChat{
+		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
+		verdicts: [3]string{"pass", "fail", "pass"},
+		errPos:   -1,
+	}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("mercekten elenen kart SAYILMAMALI (dönüş değeri), n=0 beklenirdi, geldi: %d", n)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 0 {
+		t.Error("mercekten elenen kart DB'ye yazılmamalı")
+	}
+	if chat.lensCalls != 2 {
+		t.Errorf("ilk fail'de erken çıkış: 2 mercek çağrısı beklenirdi (3.'sü çağrılmamalı), geldi %d", chat.lensCalls)
+	}
+	if chat.distinctCalls != 0 {
+		t.Errorf("mercek bloklarsa ADVISORY özgünlük merceği ÇAĞRILMAMALI, geldi %d çağrı", chat.distinctCalls)
+	}
+}
+
+// TestSynthesizeIdeasLensUnsureWrites: 3 mercek de "unsure" dönerse kart
+// YAZILIR (yalnız "fail" bloklar) ve ADVISORY özgünlük merceği çağrılır.
+func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Mercek Unsure Fikri"
+	platform, tag := "test-syn-lens-unsure", "test-syn-lens-unsure-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	setupSynthTheme(t, ctx, st, platform, tag, false)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &synthLensChat{
+		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
+		verdicts: [3]string{"unsure", "unsure", "unsure"},
+		errPos:   -1,
+	}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("unsure bloklamamalı, n=1 beklenirdi, geldi: %d", n)
+	}
+	if chat.lensCalls != 3 {
+		t.Errorf("3 mercek de çağrılmalı, geldi %d", chat.lensCalls)
+	}
+	if chat.distinctCalls != 1 {
+		t.Errorf("kart bloklanmadığından ADVISORY özgünlük merceği çağrılmalı, geldi %d çağrı", chat.distinctCalls)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 1 {
+		t.Error("unsure verdict kartı yazmalı")
+	}
+}
+
+// TestSynthesizeIdeasLensErrorStillWrites: bloklayıcı mercek çağrısı HATA
+// verirse (ağ/kota) kart YAZILIR — bloklama YOK ilkesi (429 yüzünden kart
+// kaybı olmayacak).
+func TestSynthesizeIdeasLensErrorStillWrites(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Mercek Hata Sentez Fikri"
+	platform, tag := "test-syn-lens-err", "test-syn-lens-err-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	setupSynthTheme(t, ctx, st, platform, tag, false)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &synthLensChat{
+		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
+		errPos: 0,
+	}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("mercek HATA verse de kart yazılmalı, n=1 beklenirdi, geldi: %d", n)
+	}
+	if chat.lensCalls != 1 {
+		t.Errorf("hatada durulmalı (kalan mercekler çağrılmamalı), 1 çağrı beklenirdi, geldi %d", chat.lensCalls)
+	}
+	if chat.distinctCalls != 1 {
+		t.Errorf("mercek hatası bloklamadığından ADVISORY özgünlük merceği çağrılmalı, geldi %d çağrı", chat.distinctCalls)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 1 {
+		t.Error("mercek hatasında kart yine de yazılmalı")
+	}
+}
