@@ -325,8 +325,9 @@ func (f *synthDistinctErrChat) ChatJSONWithTemperature(ctx context.Context, syst
 }
 
 // setupSynthTheme, DB'de bir tema kurar (post + analiz + tema gruplama) —
-// distinctiveness testlerinin ortak fikstürü.
-func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platform, tag string) {
+// distinctiveness testlerinin ortak fikstürü. willing, üç post_analysis
+// satırının willingness_to_pay değerini belirler (#121 kapı testleri için).
+func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platform, tag string, willing bool) {
 	t.Helper()
 	posts := []store.RawPost{
 		{Platform: platform, SourceRef: "s1", Community: "c", Title: "I wish X", Body: "quote one"},
@@ -343,6 +344,7 @@ func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platfor
 		rows.Scan(&id)
 		analyses = append(analyses, store.PostAnalysis{
 			PostID: id, Classification: "pain_point", DomainTags: []string{tag},
+			WillingnessToPay: willing,
 		})
 	}
 	rows.Close()
@@ -380,7 +382,7 @@ func TestSynthesizeIdeasDistinctivenessFailStillWritesCard(t *testing.T) {
 	cleanup()
 	t.Cleanup(cleanup)
 
-	setupSynthTheme(t, ctx, st, platform, tag)
+	setupSynthTheme(t, ctx, st, platform, tag, false)
 
 	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
 	chat := &fakeChat{
@@ -449,7 +451,7 @@ func TestSynthesizeIdeasDistinctivenessErrorStillWritesCard(t *testing.T) {
 	cleanup()
 	t.Cleanup(cleanup)
 
-	setupSynthTheme(t, ctx, st, platform, tag)
+	setupSynthTheme(t, ctx, st, platform, tag, false)
 
 	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
 	chat := &synthDistinctErrChat{response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
@@ -473,6 +475,74 @@ func TestSynthesizeIdeasDistinctivenessErrorStillWritesCard(t *testing.T) {
 	if verdict != nil || criterion != nil || reason != nil {
 		t.Errorf("mercek hatasında distinctiveness_* alanları NULL kalmalı, geldi: verdict=%v criterion=%v reason=%v", verdict, criterion, reason)
 	}
+}
+
+// TestSynthesizeIdeasPaymentGate, #121: RequirePaymentSignal açıkken
+// willingness_to_pay hiç geçmeyen temadan kart YAZILMAZ; aynı tema
+// willingness_to_pay taşıdığında (veya kapı kapalıyken) yazılır.
+func TestSynthesizeIdeasPaymentGate(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	chatFor := func(title, tag string) *fakeChat {
+		return &fakeChat{response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag)}
+	}
+
+	t.Run("kapı açık + ödeme sinyali yok -> kart yazılmaz", func(t *testing.T) {
+		title := "Test Kapi Sinyalsiz Fikri"
+		platform, tag := "test-paygate-off-syn", "test-paygate-off-syn-tag"
+		cleanup := func() {
+			st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+			st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+			st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+		}
+		cleanup()
+		t.Cleanup(cleanup)
+
+		setupSynthTheme(t, ctx, st, platform, tag, false)
+
+		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", RequirePaymentSignal: true}
+		n, err := SynthesizeIdeas(ctx, cfg, st, chatFor(title, tag))
+		if err != nil {
+			t.Fatalf("SynthesizeIdeas: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("ödeme sinyali olmayan temadan kart yazılmamalı, geldi n=%d", n)
+		}
+	})
+
+	t.Run("kapı açık + ödeme sinyali var -> kart yazılır", func(t *testing.T) {
+		title := "Test Kapi Sinyalli Fikri"
+		platform, tag := "test-paygate-on-syn", "test-paygate-on-syn-tag"
+		cleanup := func() {
+			st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+			st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+			st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+		}
+		cleanup()
+		t.Cleanup(cleanup)
+
+		setupSynthTheme(t, ctx, st, platform, tag, true)
+
+		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", RequirePaymentSignal: true}
+		n, err := SynthesizeIdeas(ctx, cfg, st, chatFor(title, tag))
+		if err != nil {
+			t.Fatalf("SynthesizeIdeas: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("ödeme sinyalli temadan kart yazılmalı, geldi n=%d", n)
+		}
+	})
 }
 
 func TestSynthesizeSystemPromptMentionsConstraints(t *testing.T) {
