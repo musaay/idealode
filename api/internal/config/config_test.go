@@ -28,6 +28,33 @@ func TestLoadDefaults(t *testing.T) {
 	if c.MinThemeEvidence != 3 || c.LLMChunkSize != 8 || c.LLMSleepMS != 400 {
 		t.Errorf("sayısal default'lar yanlış: %+v", c)
 	}
+	if !c.RequirePaymentSignal {
+		t.Error("RequirePaymentSignal default true olmalı (#121)")
+	}
+}
+
+// TestRequirePaymentSignalEnv, #121 kapısının env ile kapatılabildiğini ve
+// geçersiz değerde net hata döndüğünü doğrular.
+func TestRequirePaymentSignalEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	t.Run("REQUIRE_PAYMENT_SIGNAL=false -> kapı kapalı", func(t *testing.T) {
+		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "false")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.RequirePaymentSignal {
+			t.Error("RequirePaymentSignal false olmalı")
+		}
+	})
+
+	t.Run("geçersiz değer -> hata", func(t *testing.T) {
+		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "evet")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "REQUIRE_PAYMENT_SIGNAL") {
+			t.Errorf("geçersiz REQUIRE_PAYMENT_SIGNAL adıyla raporlanmalı, geldi: %v", err)
+		}
+	})
 }
 
 func TestLoadWithoutDatabaseURL(t *testing.T) {

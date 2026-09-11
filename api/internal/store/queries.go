@@ -441,17 +441,30 @@ func (s *Store) RefreshThemeStats(ctx context.Context) error {
 }
 
 // ThemesReadyForSynthesis, frekans eşiğini geçmiş ve henüz idea üretilmemiş
-// temaları döner (en yüksek frekans önce).
-func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int) ([]Theme, error) {
-	rows, err := s.Pool.Query(ctx, `
+// temaları döner (en yüksek frekans önce). requirePayment açıkken (#121)
+// temanın postlarından en az biri willingness_to_pay=true olmalı — ödeme
+// niyeti hiç geçmeyen temalardan organik kart yazılmasını engeller.
+func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int, requirePayment bool) ([]Theme, error) {
+	query := `
 		SELECT t.id, t.theme_name, t.frequency
 		FROM themes t
 		WHERE t.frequency >= $1
 		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
 		  AND t.merged_into_idea_id IS NULL
-		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
+		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)`
+	if requirePayment {
+		query += `
+		  AND EXISTS (
+		      SELECT 1 FROM theme_posts tp
+		      JOIN post_analysis pa ON pa.post_id = tp.post_id
+		      WHERE tp.theme_id = t.id AND pa.willingness_to_pay
+		  )`
+	}
+	query += `
 		ORDER BY t.frequency DESC, t.id
-		LIMIT $2`, minEvidence, limit)
+		LIMIT $2`
+
+	rows, err := s.Pool.Query(ctx, query, minEvidence, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +479,27 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// CountThemesWithoutPaymentSignal, frekans eşiğini geçmiş, henüz idea
+// üretilmemiş ama HİÇBİR postunda willingness_to_pay=true olmayan tema
+// sayısını döner — ödeme sinyali kapısının (#121) elediği tema sayısını
+// loglamak için hafif bir COUNT sorgusu.
+func (s *Store) CountThemesWithoutPaymentSignal(ctx context.Context, minEvidence int) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM themes t
+		WHERE t.frequency >= $1
+		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
+		  AND t.merged_into_idea_id IS NULL
+		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM theme_posts tp
+		      JOIN post_analysis pa ON pa.post_id = tp.post_id
+		      WHERE tp.theme_id = t.id AND pa.willingness_to_pay
+		  )`, minEvidence).Scan(&n)
+	return n, err
 }
 
 // ThemeEvidence, temayı destekleyen ham post'ları döner (en yüksek skor önce).

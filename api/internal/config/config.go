@@ -53,6 +53,12 @@ type Config struct {
 	LLMChunkSize     int // LLM_CHUNK_SIZE — classification batch boyutu (default: 8)
 	LLMSleepMS       int // LLM_SLEEP_MS — chunk'lar arası sabit sleep, "sakin ilerleme" (default: 400)
 
+	// RequirePaymentSignal, sentez kapısı (#121): açıkken ThemesReadyForSynthesis
+	// yalnız en az bir postu willingness_to_pay=true olan temaları döner —
+	// willingness_to_pay hiç kullanılmayan ölü veriydi, artık organik kart
+	// yazımını süzüyor. Tohum/radar (market_derived) yolunu etkilemez.
+	RequirePaymentSignal bool // REQUIRE_PAYMENT_SIGNAL (default: true)
+
 	// Faz 2 (auth) — şimdiden tanımlı, Faz 0/1'de boş kalabilir
 	AdminEmails []string // ADMIN_EMAILS — virgülle ayrık admin allowlist'i
 	JWTSecret   string   // JWT_SECRET — app-JWT imza anahtarı (7 gün, refresh yok)
@@ -83,6 +89,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if c.LLMSleepMS, err = getenvInt("LLM_SLEEP_MS", 400); err != nil {
+		return nil, err
+	}
+	if c.RequirePaymentSignal, err = getenvBool("REQUIRE_PAYMENT_SIGNAL", true); err != nil {
 		return nil, err
 	}
 
@@ -151,4 +160,16 @@ func getenvInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s geçerli bir tamsayı değil: %q", key, v)
 	}
 	return n, nil
+}
+
+func getenvBool(key string, def bool) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s geçerli bir bool değil (true/false): %q", key, v)
+	}
+	return b, nil
 }
