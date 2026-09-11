@@ -85,3 +85,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - OneTake AI (Sébastien) — tek tıkla AI video kurgu aracı, $500K ARR (2026-09-10)
 - Influence Podium (Marti Sanchez) — B2B CEO'lar için podcast yerleştirme/içerik ajansı, $40K MRR (2026-09-10)
 - Referral Rock (Josh Ho) — müşteri referans programı SaaS'ı, $70K/ay (2026-09-10)
+- Magier (Maximilian Fleitmann) — Webflow/tasarımı sınırsız-istek abonelik ajansına çeviren holdco markası, $150K MRR (2026-09-11)
+- Rosie (Jordan Gal) — ev hizmetleri esnafı için self-serve AI telefon cevaplama servisi, 8 ayda $1M ARR (2026-09-11)
