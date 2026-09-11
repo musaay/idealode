@@ -3,17 +3,19 @@ package pipeline
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/musaay/idealode/api/internal/config"
 	"github.com/musaay/idealode/api/internal/store"
 )
 
-// tempRecordingChat, yalnız son çağrının sıcaklığını kaydeden minimal
-// sahte Chat (#106 doğrulaması için).
+// tempRecordingChat, son çağrının sıcaklığını ve kullanıcı prompt'unu
+// kaydeden minimal sahte Chat (#106, #119 doğrulaması için).
 type tempRecordingChat struct {
 	response string
 	lastTemp float64
+	lastUser string
 }
 
 func (c *tempRecordingChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
@@ -22,6 +24,7 @@ func (c *tempRecordingChat) ChatJSON(ctx context.Context, system, user string) (
 
 func (c *tempRecordingChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
 	c.lastTemp = temp
+	c.lastUser = user
 	return c.response, nil
 }
 
@@ -35,6 +38,31 @@ func TestClassifyChunkUsesTemperatureZero(t *testing.T) {
 	}
 	if chat.lastTemp != 0 {
 		t.Errorf("classifyChunk sıcaklık 0 ile çağırmalı, geldi: %v", chat.lastTemp)
+	}
+}
+
+// TestClassifyChunkClipsBodyToAnalyzeBodyClip, prompta giren gövdenin
+// analyzeBodyClip (800) ile kırpıldığını, başlığın ise 300'de sabit
+// kaldığını doğrular (#119 token bütçesi).
+func TestClassifyChunkClipsBodyToAnalyzeBodyClip(t *testing.T) {
+	longBody := strings.Repeat("a", 2000)
+	longTitle := strings.Repeat("b", 400)
+	chat := &tempRecordingChat{response: `{"results":[{"id":1,"classification":"noise"}]}`}
+	cfg := &config.Config{OutputLang: "tr"}
+	posts := []store.RawPost{{ID: 1, Title: longTitle, Body: longBody}}
+
+	if _, err := classifyChunk(context.Background(), cfg, chat, posts); err != nil {
+		t.Fatalf("classifyChunk: %v", err)
+	}
+
+	if strings.Contains(chat.lastUser, longBody) {
+		t.Error("gövde tam haliyle prompta girmemeli, analyzeBodyClip ile kırpılmalı")
+	}
+	if want := clip(longBody, analyzeBodyClip); !strings.Contains(chat.lastUser, want) {
+		t.Errorf("prompt gövdesi clip(body, analyzeBodyClip)=%q içermeli", want)
+	}
+	if want := clip(longTitle, 300); !strings.Contains(chat.lastUser, want) {
+		t.Errorf("başlık kırpma sınırı (300) değişmemiş olmalı, beklenen: %q", want)
 	}
 }
 
