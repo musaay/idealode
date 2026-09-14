@@ -95,6 +95,18 @@ type Idea struct {
 	DistinctivenessCriterion *string `json:"distinctiveness_criterion,omitempty"` // K1 | K2 | K3 | K4 | none | NULL
 	DistinctivenessReason    *string `json:"distinctiveness_reason,omitempty"`
 
+	// Veri-erişimi merceği (#131) — BLOCKING: yalnız "fail" kart üretimini
+	// engeller (bkz. pipeline.blockedByIdeaLens / seeds.ProcessSeeds), bu
+	// yüzden burada "fail" asla görülmez. "unsure" HİÇBİR yolda ENGELLEMEZ
+	// (organik/pain_point VE tohum/market_derived-momentum_derived — ikisi
+	// de aynı ilke, #131 PO düzeltmesi: sıcaklık 0 olduğundan unsure
+	// deterministiktir, "yeniden dene" mantığı burada işlemez), yalnız
+	// işaretler. NULL = mercek hiç çağrılamadı (geçici hata) ya da bu
+	// alanları taşımayan kart türü (yalnız ai_blended — kaynak karttan
+	// kopyalanmaz, hep NULL, distinctiveness_* ile aynı desen).
+	DataAccessVerdict *string `json:"data_access_verdict,omitempty"` // pass | unsure | NULL
+	DataAccessReason  *string `json:"data_access_reason,omitempty"`
+
 	// PublishedAt, moderasyon kuyruğu damgası (#102): NULL = beklemede (PO
 	// onayı yok, herkese açık galeri/detayda görünmez); dolu = yayında.
 	// `dump` (ListIdeas, DB'ye dokunan lead aracı) bekleyenleri de döner —

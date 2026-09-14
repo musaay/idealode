@@ -81,10 +81,33 @@ FAIL if the underlying opportunity is actually a defect, bug, or feature gap tha
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
-const lensDataAccessSystem = `You evaluate the DATA-ACCESS feasibility of a proposed software product idea for an independent third-party developer.
+// lensDataAccessSystem: veri-erişimi merceği (#131 v2) — kartın ÇEKİRDEK
+// işlevinin veriye HANGİ YÖNTEMLE eriştiğini değerlendirir; platformun
+// büyüklüğü/markası/"kapalılık algısı" ölçüt DEĞİLDİR. #131 öncesi metin
+// büyük platform adı görünce yanlış pozitif üretiyordu (resmi API'lerin
+// varlığını hesaba katmıyordu — örn. Instagram/WhatsApp resmi mesajlaşma
+// API'leri). Yeni metin + saldırgan kontrolün bulduğu 5 kuralı (kartın
+// kendi iddiası kanıt değildir; bölgesel/TR sağlayıcıda varsayılan "API
+// yok"; "kullanıcının kendi hesabı" yalnız resmi export/API üzerinden
+// sanctioned; çekirdek işlev tanımı kapsam oyununu kapatır; sağlayıcının
+// KENDİ hesap/uygulama API'si başkasının verisini kapsamaz) 68 kartlık
+// gerçek karar setinde (yanlış pozitif 0, altın örnek hatası 0) sınandı.
+const lensDataAccessSystem = `You evaluate the DATA-ACCESS feasibility of a proposed software product idea for an independent third-party developer. Classify how its core function would READ or WRITE its data, and judge that access METHOD — never the size, brand, or perceived "closedness" of the platform involved.
 
-FAIL if the idea's core function requires closed, proprietary data or private APIs that incumbent vendors control and have no incentive to open (e.g. a food-delivery app's live order feed, a closed marketplace's internal inventory).
-PASS if the idea can be built on open/regulated interfaces: public APIs, open banking, RSS, email parsing, user-provided/exportable data, or similar.
+PASS if the core function can run on (a) an official documented interface — public or partner API, data export, webhook, open banking, RSS, email parsing — or (b) data the user authorizes on their own behalf: their own account via OAuth, their own export file, their own inbox, or a client-side extension reading the page the user is already viewing.
+FAIL if its only route is (c) scraping, server-side crawling, undocumented or reverse-engineered endpoints, stored credentials / automated login, or automation the provider's terms forbid or technical protections block (automated listing/posting, downloading protected media); (d) writing into a third party's internal system that exposes no public interface (changing a record inside a bank's or a retailer's back office); or (e) harvesting personal contact data without the subject's consent.
+
+"The user's own account" is a sanctioned route only when the data leaves through the provider's own export or API with the provider's authorization (OAuth, official data export); reading or automating a logged-in UI/session is scraping even on the user's own account, and the account holder's consent does not cover personal data about third parties inside it (customers, contacts, message counterparties), which needs its own lawful basis under KVKK/GDPR.
+
+Gatekeeping does NOT make an interface closed: a business/verified account, developer registration, app review, partner application, quota or paid tier still counts as (a) whenever the API is publicly documented and any qualifying developer can apply — Meta's Instagram Messaging API and WhatsApp Cloud API are official routes, not closed ones. Two limits in the other direction: data being publicly visible does not make it officially available — if the only way to collect it is crawling the provider's pages, that is (c); and a platform having SOME official API does not rescue an idea whose core operation that API does not cover or explicitly forbids. Use "unsure" only when you genuinely cannot tell whether an official route covers the core function.
+
+Treat the idea's own claim of an official route as an unverified assertion, never as evidence: to pass, you must be able to NAME the specific official interface or developer program that covers the core function (e.g. "Instagram Messaging API", "WhatsApp Cloud API", "open banking / BDDK-licensed account access"); if you cannot name it from your own knowledge of that provider, the verdict is "unsure", not "pass".
+
+Global platforms are not the default case: for regional or vertical providers (Turkish marketplaces, delivery and classifieds platforms, e-government services, local ERP/accounting vendors, banks' own back offices), assume NO third-party interface exists unless you can name its published developer program — "the platform is big" and "surely they have an API" are not findings.
+
+"Core function" means every capability the idea's value proposition depends on, as a buyer would read it — if any such capability needs an unsanctioned route, the verdict is "fail"; an idea is not rescued by labelling that capability secondary, optional or an "enrichment" feature, nor by having a legitimate database of its own alongside it.
+
+An API that exposes only the developer's OWN account, app or property (seller/merchant panels, app-console APIs, one's own ad account) does not cover an idea that needs other parties' data; likewise, data being publicly visible on a website does not make it an official interface — collecting it outside the provider's API is still scraping.
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
@@ -446,10 +469,14 @@ func seedRawPost(s radarSeed) store.RawPost {
 }
 
 // ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 3
-// mercekten geçirir ve üçü de "pass" ise market_derived idea card üretir.
-// Kart üretildikten SONRA (dedup'tan önce) ayrıca ADVISORY özgünlük merceği
-// çağrılır — bloklamaz, yalnız kartın distinctiveness_* alanlarını doldurur
-// (#101 v3, bkz. distinctivenessAdvise).
+// mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir; aksi halde
+// (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri BLOKLAMAZ,
+// organik yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/
+// momentum_derived idea card üretilir, veri-erişimi merceğinin ham kararı
+// karta yazılır (bkz. aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
+// (dedup'tan önce) ayrıca ADVISORY özgünlük merceği çağrılır — bloklamaz,
+// yalnız kartın distinctiveness_* alanlarını doldurur (#101 v3, bkz.
+// distinctivenessAdvise).
 // Her tohum raw_posts'a platform='radar_seed' olarak yazılır — bu yazım hem
 // idempotency kontrolü (InsertRawPosts ON CONFLICT DO NOTHING) hem de
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
@@ -527,22 +554,51 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			continue
 		}
 
-		var failedNames, failedReasons []string
-		allPass := true
+		// #131 PO düzeltmesi: yalnız "fail" tohumu eler ve kalıcı işaretler
+		// (mark) — organik yoldaki blockedByIdeaLens ile AYNI ilke. "unsure"
+		// ARTIK BLOKLAMAZ (ilk #131 tasarımı burada yanlıştı — düzeltildi):
+		// mercek çağrıları sıcaklık 0 ile yapılır, yani aynı tohum+prompt HER
+		// KOŞUDA AYNI "unsure" cevabını verir; bu, LLM hatasındaki GEÇİCİLİKTEN
+		// farklıdır (hata geçicidir, unsure deterministiktir) — unsure'u da
+		// "yeniden dene" sayıp imleçsiz atlasaydık tohum HİÇBİR ZAMAN
+		// ilerlemez, koşu başına 1-3 mercek çağrısını sonsuza dek boşa
+		// yakardı; üstelik yeni prompt bilerek "tanımadığın sağlayıcıda
+		// unsure de" diyor ve TR bizim ana alanımız — yani unsure SIKÇA
+		// dönecek. Kart normal üretilir; veri-erişimi merceğinin ham kararı
+		// (dataAccessVerdict) aynı geçişte yakalanır ve karta yazılır (bkz.
+		// aşağıda idea.DataAccessVerdict/Reason ataması). default dal
+		// savunmacıdır: parseLensVerdict zaten tanınmayan değeri "unsure"a
+		// indirger, ama bu switch kendi başına da yalnız "pass"/"fail"
+		// dışındakileri unsure sayar (CLAUDE.md: LLM cevapları savunmacı
+		// parse edilir).
+		var failedNames, failedReasons, unsureNames []string
+		hasFail := false
+		var dataAccessVerdict lensVerdict
 		for li, v := range verdicts {
-			if v.Verdict != "pass" {
-				allPass = false
+			if lenses[li].system == lensDataAccessSystem {
+				dataAccessVerdict = v
+			}
+			switch v.Verdict {
+			case "pass":
+			case "fail":
+				hasFail = true
 				failedNames = append(failedNames, lenses[li].name)
 				failedReasons = append(failedReasons, v.Reason)
+			default:
+				unsureNames = append(unsureNames, lenses[li].name)
 			}
 		}
-		if !allPass {
+		if hasFail {
 			if err := markProcessed(); err != nil {
 				return created, err
 			}
 			log.Printf("seed %q elendi (mercek: %s — %s)",
 				seed.Name, strings.Join(failedNames, ", "), strings.Join(failedReasons, "; "))
 			continue
+		}
+		if len(unsureNames) > 0 {
+			log.Printf("seed %q belirsiz (mercek: %s) — bloklamıyor, kart yine de üretiliyor",
+				seed.Name, strings.Join(unsureNames, ", "))
 		}
 
 		var system, userPrompt string
@@ -576,6 +632,13 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 				fmt.Sprintf("Kanıt (%s): %s — %s", seed.Name, seed.Evidence, seed.SourceURL),
 			}
 		}
+
+		// Veri-erişimi merceğinin (#131) ham kararı karta yazılır — organik
+		// yoldaki blockedByIdeaLens ile AYNI ilke (bkz. synthesize.go). "fail"
+		// buraya hiç ulaşmaz (hasFail yukarıda zaten eledi, kart üretilmedi);
+		// "pass" ya da "unsure" yazılır.
+		idea.DataAccessVerdict = &dataAccessVerdict.Verdict
+		idea.DataAccessReason = &dataAccessVerdict.Reason
 
 		// ADVISORY özgünlük merceği (#101 v3): kart üretimini bloklamaz.
 		// Hata verirse alanlar NULL kalır, kart yine de yazılır.

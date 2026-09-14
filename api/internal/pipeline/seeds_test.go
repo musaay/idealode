@@ -210,6 +210,172 @@ func TestProcessSeedsFailMarksNoCard(t *testing.T) {
 	}
 }
 
+// TestProcessSeedsUnsureCreatesCardAndMarksOnce: #131 PO düzeltmesi —
+// mercek(ler) "unsure" dönerse (hiç "fail" yoksa) tohum ARTIK BLOKLANMAZ:
+// kart normal üretilir (organik yoldaki blockedByIdeaLens ile AYNI ilke).
+// İlk tasarım (unsure'u da LLM-hatası gibi "yeniden dene, imleçsiz atla"
+// sayan) yanlıştı: mercek çağrıları sıcaklık 0 olduğundan aynı tohum+prompt
+// HER KOŞUDA aynı "unsure" cevabını verir — hata GEÇİCİDİR, unsure
+// DETERMİNİSTİKTİR; tohum hiç ilerlemez, koşu başına mercek bütçesini
+// sonsuza dek boşa yakardı. Bu test: (a) kart üretildiğini, (b) veri-erişimi
+// merceğinin ham "unsure" kararının karta yazıldığını, (c) markProcessed'in
+// kart-yazımının kendi imleç adımıyla (ayrı bir "unsure" dalı OLMADAN, çift
+// yazım yok) TAM BİR KEZ çalıştığını, (d) tohumun bu yüzden bir daha
+// işlenmediğini doğrular.
+func TestProcessSeedsUnsureCreatesCardAndMarksOnce(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-unsure"
+	title := "Test Belirsiz Fikir"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Unsure Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	// 3 mercek de "unsure" -> kart YİNE DE üretilmeli (bloklamıyor).
+	chat := &fakeSeedChat{
+		lensVerdict: "unsure",
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+	}
+	n1, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds (1. koşu): %v", err)
+	}
+	if n1 != 1 {
+		t.Fatalf("unsure bloklamamalı, 1 idea beklenirdi, geldi: %d", n1)
+	}
+
+	var ideaCount int
+	var dataAccessVerdict, dataAccessReason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT data_access_verdict, data_access_reason FROM ideas WHERE title = $1", title).
+		Scan(&dataAccessVerdict, &dataAccessReason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 1 {
+		t.Errorf("unsure tohumdan tam olarak 1 kart üretilmeli, geldi: %d", ideaCount)
+	}
+	if dataAccessVerdict == nil || *dataAccessVerdict != "unsure" {
+		t.Errorf("data_access_verdict=unsure beklenirdi, geldi: %v", dataAccessVerdict)
+	}
+	if dataAccessReason == nil || *dataAccessReason != "test-reason" {
+		t.Errorf("data_access_reason=%q beklenirdi, geldi: %v", "test-reason", dataAccessReason)
+	}
+
+	// markProcessed AYRI bir "unsure" dalından değil, kart yazımının kendi
+	// imleç adımından (InsertIdea sonrası) çalışır — tam bir kez, çift
+	// yazım yok (InsertRawPosts zaten ON CONFLICT DO NOTHING ama burada
+	// asıl doğrulanan: raw_posts satırı var VE tohum bir daha işlenmiyor).
+	var markCount int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM raw_posts WHERE platform = 'radar_seed' AND source_ref = $1", seedURL).
+		Scan(&markCount); err != nil {
+		t.Fatal(err)
+	}
+	if markCount != 1 {
+		t.Errorf("kart üretildiğinde imleç TAM BİR KEZ yazılmalı, geldi: %d", markCount)
+	}
+
+	// 2. koşu: tohum ZATEN işlenmiş (imleç var) -> yeniden denenMEMELİ.
+	n2, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds (2. koşu): %v", err)
+	}
+	if n2 != 0 {
+		t.Errorf("kart üretilmiş tohum ikinci koşuda tekrar işlenmemeli, geldi: %d", n2)
+	}
+}
+
+// perLensSeedChat, MERCEK BAŞINA farklı verdict dönebilen sahte chat —
+// fakeSeedChat'in aksine tüm bloklayıcı mercekleri TEK bir verdict'e
+// zorlamaz, lens.system'e göre haritalar; haritada olmayan sistem prompt'u
+// (kart üretimi dahil) "pass" döner. "fail baskındır" karışık senaryosunu
+// (#131) sınamak için.
+type perLensSeedChat struct {
+	verdicts     map[string]string // lens.system -> verdict
+	cardResponse string
+}
+
+func (f *perLensSeedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *perLensSeedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if strings.Contains(system, `"market_derived"`) {
+		return f.cardResponse, nil
+	}
+	if v, ok := f.verdicts[system]; ok {
+		return fmt.Sprintf(`{"verdict":%q,"reason":"test-reason"}`, v), nil
+	}
+	return `{"verdict":"pass","reason":"test-reason"}`, nil
+}
+
+// TestProcessSeedsFailDominatesOverUnsureMarksProcessed: #131 edge case —
+// 3 mercekten biri "fail" biri "unsure" dönerse fail baskındır: tohum
+// elenmiş SAYILIR ve markProcessed ÇAĞRILIR (unsure'un "kalıcı yakma YOK"
+// istisnası burada geçerli DEĞİL, çünkü aynı tohumda ayrıca bir "fail" var).
+func TestProcessSeedsFailDominatesOverUnsureMarksProcessed(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-fail-dominant"
+	title := "Test Fail Baskin Fikir"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Fail Dominant Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	chat := &perLensSeedChat{
+		verdicts: map[string]string{
+			lensThirdPartySystem: "unsure",
+			lensDataAccessSystem: "fail",
+			// pazar-işlerliği haritada yok -> varsayılan "pass".
+		},
+	}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("0 idea beklenirdi (fail eledi), geldi: %d", n)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 0 {
+		t.Errorf("fail+unsure karışımında kart üretilmemeli, geldi: %d", ideaCount)
+	}
+
+	var markCount int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM raw_posts WHERE platform = 'radar_seed' AND source_ref = $1", seedURL).
+		Scan(&markCount); err != nil {
+		t.Fatal(err)
+	}
+	if markCount != 1 {
+		t.Errorf("fail baskın olduğundan mark YAZILMALI (tohum işlenmiş sayılır), geldi: %d", markCount)
+	}
+}
+
 // errChat, her çağrıda hata döner (ağ/kota kesintisi simülasyonu).
 type errChat struct{}
 

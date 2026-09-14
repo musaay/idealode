@@ -295,7 +295,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// tema bir sonraki temaya geçilir. Mevcut ThemesReadyForSynthesis
 		// davranışı DEĞİŞMEDİĞİNDEN tema bir sonraki koşuda yeniden ele
 		// alınabilir (bilinçli tercih, bkz. issue #123 edge case notu).
-		if lensName, reason, blocked := blockedByIdeaLens(ctx, chat, idea); blocked {
+		if lensName, reason, blocked := blockedByIdeaLens(ctx, chat, &idea); blocked {
 			blockedByLens++
 			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
 			continue
@@ -354,8 +354,17 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 // bloklar. Mercek çağrısı HATA verirse (ağ/kota) kart DÜŞÜRÜLMEZ: hata
 // loglanır, blok yokmuş gibi (false) dönülür — distinctivenessAdvise ile
 // aynı "bloklama yok" tutumu.
-func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea store.Idea) (lensName, reason string, blocked bool) {
+//
+// Veri-erişimi merceğinin (#131) HAM kararı idea.DataAccessVerdict/Reason'a
+// yazılır (idea pointer bu yüzden alınır) — ama YALNIZ üç mercek de hatasız
+// tamamlanıp sonuç bloklamadıysa (fonksiyonun SON satırı): kart zaten yalnız
+// bu durumda DB'ye yazılır. Erken dönüşte (bir mercek hata verdi ya da
+// "fail" bloklandı) idea'ya HİÇ DOKUNULMAZ — alanlar nil (dolayısıyla DB'de
+// NULL) kalır, distinctivenessAdvise'ın "mercek hata verirse alanlar NULL
+// kalır" tutumuyla aynı ilke.
+func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensName, reason string, blocked bool) {
 	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
+	var dataAccess lensVerdict
 	for _, lens := range seedLenses {
 		// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
 		raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, prompt, 0)
@@ -364,10 +373,15 @@ func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea store.Idea) (len
 			return "", "", false
 		}
 		v := parseLensVerdict(raw)
+		if lens.system == lensDataAccessSystem {
+			dataAccess = v
+		}
 		if v.Verdict == "fail" {
 			return lens.name, v.Reason, true
 		}
 	}
+	idea.DataAccessVerdict = &dataAccess.Verdict
+	idea.DataAccessReason = &dataAccess.Reason
 	return "", "", false
 }
 
