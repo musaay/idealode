@@ -247,6 +247,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 
 	created := 0
 	blockedByLens := 0
+	blockedBySaturation := 0
 	for i, th := range themes {
 		if ctx.Err() != nil {
 			return created, ctx.Err()
@@ -280,6 +281,12 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			}
 			log.Printf("synthesize: tema %q tutarsız (%d/%d aynı dert) — yeni kanıta kadar beklemede",
 				th.Name, len(subset), len(evidence))
+			// detail: kart yok, tohum yok — temanın en güçlü kanıtının
+			// başlığı (evidence ThemeEvidence'tan geldi, skora göre sıralı;
+			// bu satıra ulaşıldığında evidence boş DEĞİL, döngü başında
+			// kontrol edildi, #138).
+			recordElimination(ctx, st, "incoherent_theme", th.Name, "fail", "",
+				fmt.Sprintf("%d/%d aynı dert", len(subset), len(evidence)), evidence[0].Title)
 			continue
 		}
 
@@ -291,6 +298,11 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 				return created, err
 			}
 			log.Printf("synthesize: tema %q vendor-internal — kart üretilmedi", th.Name)
+			// Skip cevabında kart hiç üretilmedi (parseIdeaResponse boş
+			// Idea{} döner) — incoherent_theme ile AYNI konumda: detail
+			// temanın en güçlü kanıtının başlığı (#138).
+			recordElimination(ctx, st, "vendor_internal", th.Name, "fail", "",
+				"vendor-internal", evidence[0].Title)
 			continue
 		}
 		if err != nil {
@@ -308,14 +320,37 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		if lensName, reason, blocked := blockedByIdeaLens(ctx, chat, &idea); blocked {
 			blockedByLens++
 			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
+			// Kart burada zaten ÜRETİLDİ (synthesizeOne yukarıda) — detail
+			// kartın problem_statement'ı (#138).
+			recordElimination(ctx, st, "blocking_lens", idea.Title, "fail", "", reason, idea.ProblemStatement)
 			continue
 		}
 
-		// ADVISORY özgünlük merceği (#101 v3): K1-K4 sonucunu karta yazar,
-		// kart üretimini ASLA bloklamaz (PO kararı: bloklama, işaretle).
-		// Hata verirse alanlar NULL kalır, kart yine de yazılır.
-		if err := distinctivenessAdvise(ctx, chat, &idea); err != nil {
+		// Özgünlük merceği (#101 v3, #138): K1 (doygunluk) fail'i kartı
+		// YAZDIRMAZ (eliminations'a kaydedilip tema damgalanmadan atlanır —
+		// blockedByIdeaLens ile AYNI ilke: ThemesReadyForSynthesis mevcut
+		// davranışı değişmediğinden tema sonraki koşuda yeniden ele alınabilir,
+		// #123 edge case notuyla aynı bilinçli tercih). K2-K4 fail yalnız
+		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
+		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
+		// durumunda da geçerli).
+		if err := distinctivenessCheck(ctx, chat, &idea); err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, err)
+		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
+			criterion := "none"
+			if idea.DistinctivenessCriterion != nil {
+				criterion = *idea.DistinctivenessCriterion
+			}
+			reason := ""
+			if idea.DistinctivenessReason != nil {
+				reason = *idea.DistinctivenessReason
+			}
+			recordElimination(ctx, st, "distinctiveness", idea.Title, "fail", criterion, reason, idea.ProblemStatement)
+			if criterion == "K1" {
+				blockedBySaturation++
+				log.Printf("synthesize: tema %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", th.Name, reason)
+				continue
+			}
 		}
 
 		// Dedup (#14): pg_trgm benzerliği + gri bölgede LLM hakemi. Mükerrer
@@ -353,6 +388,8 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 	// Koşu sonu özet sayaç (#123): mercekten elenen kart sayısı — ödeme
 	// kapısı (#121) satırıyla aynı üslupta, ölçülebilirlik için.
 	log.Printf("synthesize: mercekten elenen kart: %d", blockedByLens)
+	// #138: doygunluktan (K1) bloklanan kart sayısı — aynı üslupta.
+	log.Printf("synthesize: doygunluktan (K1) bloklanan kart: %d", blockedBySaturation)
 	return created, nil
 }
 
@@ -362,7 +399,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 // YOK. İlk "fail"de durur (kalan mercekler çağrılmaz, token tasarrufu) ve
 // bloklayan merceğin adı+sebebini döner. "unsure" BLOKLAMAZ — yalnız "fail"
 // bloklar. Mercek çağrısı HATA verirse (ağ/kota) kart DÜŞÜRÜLMEZ: hata
-// loglanır, blok yokmuş gibi (false) dönülür — distinctivenessAdvise ile
+// loglanır, blok yokmuş gibi (false) dönülür — distinctivenessCheck ile
 // aynı "bloklama yok" tutumu.
 //
 // Veri-erişimi merceğinin (#131) HAM kararı idea.DataAccessVerdict/Reason'a
@@ -370,8 +407,11 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 // tamamlanıp sonuç bloklamadıysa (fonksiyonun SON satırı): kart zaten yalnız
 // bu durumda DB'ye yazılır. Erken dönüşte (bir mercek hata verdi ya da
 // "fail" bloklandı) idea'ya HİÇ DOKUNULMAZ — alanlar nil (dolayısıyla DB'de
-// NULL) kalır, distinctivenessAdvise'ın "mercek hata verirse alanlar NULL
-// kalır" tutumuyla aynı ilke.
+// NULL) kalır, distinctivenessCheck'in "mercek hata verirse alanlar NULL
+// kalır" tutumuyla aynı ilke. Bloklayan "fail" burada AYRICA eliminations'a
+// kaydedilmez — kayıt çağıran (SynthesizeIdeas) tarafında yapılır, çünkü
+// idea.Title/ProblemStatement (detail için) ve tema adı (subject için)
+// oradaki kapsamda bir arada bulunur.
 func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensName, reason string, blocked bool) {
 	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
 	var dataAccess lensVerdict

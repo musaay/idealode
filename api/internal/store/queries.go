@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -1044,4 +1045,73 @@ func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft Blend
 		}
 	}
 	return nil, fmt.Errorf("ai_blended ideas insert: slug %d denemede benzersiz üretilemedi: %w", maxSlugAttempts, err)
+}
+
+// ---------------------------------------------------------------- eliminations (#138)
+
+// InsertElimination, eliminations tablosuna tek satır yazar ve id döner.
+// Çağıran (pipeline paketi) bunu BEST-EFFORT sarar: yazım hatası pipeline'ı
+// durdurmaz — bu metot kendisi olağan hatayı döner, best-effort ilkesi
+// burada UYGULANMAZ (çağıranın sorumluluğu).
+func (s *Store) InsertElimination(ctx context.Context, e Elimination) (int64, error) {
+	var id int64
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO eliminations (stage, subject, verdict, criterion, reason, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id`,
+		e.Stage, e.Subject, e.Verdict, e.Criterion, e.Reason, e.Detail).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("eliminations insert: %w", err)
+	}
+	return id, nil
+}
+
+// EliminationsSince, since'den (dahil) sonra oluşmuş eleme kayıtlarını en
+// yeniden eskiye döner — raporlama için (#138, örn. "gün boyunca elenenler").
+func (s *Store) EliminationsSince(ctx context.Context, since time.Time) ([]Elimination, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, occurred_at, stage, subject, verdict, criterion, reason, detail
+		FROM eliminations
+		WHERE occurred_at >= $1
+		ORDER BY occurred_at DESC, id DESC`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Elimination
+	for rows.Next() {
+		var e Elimination
+		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Stage, &e.Subject, &e.Verdict,
+			&e.Criterion, &e.Reason, &e.Detail); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// EliminationCountsSince, since'den sonraki eleme sayısını stage bazında
+// döner (#138: `idealode run` koşu sonu özet log satırı). Hiç kaydı olmayan
+// stage haritada hiç görünmez (çağıran sıfır varsayar).
+func (s *Store) EliminationCountsSince(ctx context.Context, since time.Time) (map[string]int, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT stage, count(*) FROM eliminations
+		WHERE occurred_at >= $1
+		GROUP BY stage`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var stage string
+		var n int
+		if err := rows.Scan(&stage, &n); err != nil {
+			return nil, err
+		}
+		out[stage] = n
+	}
+	return out, rows.Err()
 }

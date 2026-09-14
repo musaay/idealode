@@ -188,3 +188,32 @@ func (s IdeaSource) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(v)
 }
+
+// Elimination, eliminations tablosu satırı (#138): bir tema/tohum/kartın
+// pipeline'dan neden düştüğünün kalıcı denetim izi. Doygunluk merceğinin
+// (K1) artık BLOKLAYICI olmasının tek riski "görülmeyen şey denetlenemez"
+// idi — bu tablo o riski kapatır.
+type Elimination struct {
+	ID         int64
+	OccurredAt time.Time
+	// Stage: incoherent_theme | blocking_lens | distinctiveness |
+	// vendor_internal | payment_gate (son değer şemada var ama şu an
+	// yazılmıyor — ileride kullanılabilir diye önden izin verir).
+	Stage string
+	// Subject: tema adı, tohum adı ya da üretilmiş kart başlığı — hangisi
+	// o an elde varsa.
+	Subject string
+	// Verdict: şimdilik hep "fail" — satır yalnız elemede yazılır.
+	Verdict string
+	// Criterion: yalnız stage=distinctiveness satırlarında dolu (K1-K4);
+	// diğer stage'lerde NULL (sütun o stage'lerde anlamsız).
+	Criterion *string
+	// Reason: LLM'in tek cümlelik gerekçesi ya da (incoherent_theme için)
+	// tutarlılık oran metni; NULL olabilir.
+	Reason *string
+	// Detail: subject tek başına yetersiz kaldığında (özellikle tema/kova
+	// adları) PO'ya "ne elendi" bağlamını taşır — kart varsa problem
+	// cümlesi, tohumdan geldiyse özeti, ikisi de yoksa en güçlü kanıtın
+	// başlığı; hiçbiri yoksa NULL.
+	Detail *string
+}

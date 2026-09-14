@@ -76,3 +76,60 @@ func TestPendingIdeaSummary(t *testing.T) {
 		})
 	}
 }
+
+// TestEliminationSummaryLine, `run` sonu eleme özeti log satırının biçimini
+// doğrular (#138): sayı sıfırken (boş/nil harita) satır basılmaz (""), dolu
+// harita bilinen stage'leri eliminationStageOrder sırasına göre TR
+// açıklamasıyla basar, bilinmeyen stage ham adıyla (alfabetik sırada, bilinen
+// stage'lerden sonra) geçer.
+func TestEliminationSummaryLine(t *testing.T) {
+	cases := []struct {
+		name   string
+		counts map[string]int
+		want   string
+	}{
+		{
+			name:   "harita nil ise satır basılmaz",
+			counts: nil,
+			want:   "",
+		},
+		{
+			name:   "harita boş ise satır basılmaz",
+			counts: map[string]int{},
+			want:   "",
+		},
+		{
+			name: "bilinen stage'ler sabit sırada TR açıklamayla",
+			counts: map[string]int{
+				"vendor_internal":  1,
+				"distinctiveness":  3,
+				"incoherent_theme": 2,
+				"blocking_lens":    1,
+			},
+			want: "run: bu koşuda 7 elendi (tutarsız tema: 2, mercek: 1, doygunluk: 3, vendor: 1)",
+		},
+		{
+			name: "bilinmeyen stage ham adıyla, bilinenlerden sonra alfabetik",
+			counts: map[string]int{
+				"distinctiveness": 1,
+				"zzz_yeni":        2,
+				"aaa_yeni":        1,
+			},
+			want: "run: bu koşuda 4 elendi (doygunluk: 1, aaa_yeni: 1, zzz_yeni: 2)",
+		},
+		{
+			name:   "yalnız bilinmeyen stage'ler alfabetik sırada",
+			counts: map[string]int{"zzz_yeni": 1, "aaa_yeni": 1},
+			want:   "run: bu koşuda 2 elendi (aaa_yeni: 1, zzz_yeni: 1)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := eliminationSummaryLine(tc.counts)
+			if got != tc.want {
+				t.Errorf("eliminationSummaryLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
