@@ -326,7 +326,8 @@ func (f *synthDistinctErrChat) ChatJSONWithTemperature(ctx context.Context, syst
 
 // setupSynthTheme, DB'de bir tema kurar (post + analiz + tema gruplama) —
 // distinctiveness testlerinin ortak fikstürü. willing, üç post_analysis
-// satırının willingness_to_pay değerini belirler (#121 kapı testleri için).
+// satırının willingness_to_pay değerini belirler (#121/#125 ödeme sinyali
+// testleri için).
 func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platform, tag string, willing bool) {
 	t.Helper()
 	posts := []store.RawPost{
@@ -477,9 +478,11 @@ func TestSynthesizeIdeasDistinctivenessErrorStillWritesCard(t *testing.T) {
 	}
 }
 
-// TestSynthesizeIdeasPaymentGate, #121: RequirePaymentSignal açıkken
-// willingness_to_pay hiç geçmeyen temadan kart YAZILMAZ; aynı tema
-// willingness_to_pay taşıdığında (veya kapı kapalıyken) yazılır.
+// TestSynthesizeIdeasPaymentGate, #125: PreferPaymentSignal artık SERT
+// ELEMİYOR, yalnız sıralama sinyali — willingness_to_pay hiç geçmeyen
+// temadan da kart YAZILIR (önceki #121 davranışı: yazılmazdı). Sıralamanın
+// (sinyalli tema önce) kendisi store paketinde
+// (queries_payment_gate_test.go) doğrulanır.
 func TestSynthesizeIdeasPaymentGate(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -498,7 +501,7 @@ func TestSynthesizeIdeasPaymentGate(t *testing.T) {
 			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag)}
 	}
 
-	t.Run("kapı açık + ödeme sinyali yok -> kart yazılmaz", func(t *testing.T) {
+	t.Run("ödeme sinyali yok -> kart yine de yazılır (artık elenmiyor)", func(t *testing.T) {
 		title := "Test Kapi Sinyalsiz Fikri"
 		platform, tag := "test-paygate-off-syn", "test-paygate-off-syn-tag"
 		cleanup := func() {
@@ -511,17 +514,17 @@ func TestSynthesizeIdeasPaymentGate(t *testing.T) {
 
 		setupSynthTheme(t, ctx, st, platform, tag, false)
 
-		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", RequirePaymentSignal: true}
+		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", PreferPaymentSignal: true}
 		n, err := SynthesizeIdeas(ctx, cfg, st, chatFor(title, tag))
 		if err != nil {
 			t.Fatalf("SynthesizeIdeas: %v", err)
 		}
-		if n != 0 {
-			t.Errorf("ödeme sinyali olmayan temadan kart yazılmamalı, geldi n=%d", n)
+		if n != 1 {
+			t.Errorf("ödeme sinyali olmayan temadan da kart yazılmalı (#125), geldi n=%d", n)
 		}
 	})
 
-	t.Run("kapı açık + ödeme sinyali var -> kart yazılır", func(t *testing.T) {
+	t.Run("ödeme sinyali var -> kart yazılır", func(t *testing.T) {
 		title := "Test Kapi Sinyalli Fikri"
 		platform, tag := "test-paygate-on-syn", "test-paygate-on-syn-tag"
 		cleanup := func() {
@@ -534,7 +537,7 @@ func TestSynthesizeIdeasPaymentGate(t *testing.T) {
 
 		setupSynthTheme(t, ctx, st, platform, tag, true)
 
-		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", RequirePaymentSignal: true}
+		cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr", PreferPaymentSignal: true}
 		n, err := SynthesizeIdeas(ctx, cfg, st, chatFor(title, tag))
 		if err != nil {
 			t.Fatalf("SynthesizeIdeas: %v", err)

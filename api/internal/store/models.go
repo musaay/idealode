@@ -47,6 +47,10 @@ type Theme struct {
 	ID        int64
 	Name      string
 	Frequency int
+	// HasPaymentSignal, ThemesReadyForSynthesis'in doldurduğu bilgi alanı:
+	// temanın postlarından en az biri willingness_to_pay=true mu (#125).
+	// Sert eleme değil, sıralama/loglama için kullanılır.
+	HasPaymentSignal bool
 }
 
 // Idea, paylaşılan idea card "tohumu".

@@ -441,27 +441,31 @@ func (s *Store) RefreshThemeStats(ctx context.Context) error {
 }
 
 // ThemesReadyForSynthesis, frekans eşiğini geçmiş ve henüz idea üretilmemiş
-// temaları döner (en yüksek frekans önce). requirePayment açıkken (#121)
-// temanın postlarından en az biri willingness_to_pay=true olmalı — ödeme
-// niyeti hiç geçmeyen temalardan organik kart yazılmasını engeller.
-func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int, requirePayment bool) ([]Theme, error) {
+// temaları döner. preferPayment açıkken (#125 — önceki sert eleme #121'de
+// eklenmişti, üretimde kart akışını sıfıra düşürdüğü için kaldırıldı)
+// ödeme sinyali taşıyan temalar (en az bir postu willingness_to_pay=true)
+// öne alınır: ORDER BY has_payment_signal DESC, t.frequency DESC, t.id.
+// EXISTS tek geçişte SELECT'te boolean kolon olarak hesaplanır, ORDER BY
+// bu kolonu (alias) referanslar — tekrar hesaplanmaz. preferPayment
+// kapalıyken sıralama eski haliyle birebir aynıdır (ek anahtar eklenmez).
+func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int, preferPayment bool) ([]Theme, error) {
 	query := `
-		SELECT t.id, t.theme_name, t.frequency
+		SELECT t.id, t.theme_name, t.frequency,
+		       EXISTS (
+		           SELECT 1 FROM theme_posts tp
+		           JOIN post_analysis pa ON pa.post_id = tp.post_id
+		           WHERE tp.theme_id = t.id AND pa.willingness_to_pay
+		       ) AS has_payment_signal
 		FROM themes t
 		WHERE t.frequency >= $1
 		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
 		  AND t.merged_into_idea_id IS NULL
-		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)`
-	if requirePayment {
-		query += `
-		  AND EXISTS (
-		      SELECT 1 FROM theme_posts tp
-		      JOIN post_analysis pa ON pa.post_id = tp.post_id
-		      WHERE tp.theme_id = t.id AND pa.willingness_to_pay
-		  )`
+		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
+		ORDER BY `
+	if preferPayment {
+		query += `has_payment_signal DESC, `
 	}
-	query += `
-		ORDER BY t.frequency DESC, t.id
+	query += `t.frequency DESC, t.id
 		LIMIT $2`
 
 	rows, err := s.Pool.Query(ctx, query, minEvidence, limit)
@@ -473,33 +477,12 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 	var out []Theme
 	for rows.Next() {
 		var t Theme
-		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency, &t.HasPaymentSignal); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
-}
-
-// CountThemesWithoutPaymentSignal, frekans eşiğini geçmiş, henüz idea
-// üretilmemiş ama HİÇBİR postunda willingness_to_pay=true olmayan tema
-// sayısını döner — ödeme sinyali kapısının (#121) elediği tema sayısını
-// loglamak için hafif bir COUNT sorgusu.
-func (s *Store) CountThemesWithoutPaymentSignal(ctx context.Context, minEvidence int) (int, error) {
-	var n int
-	err := s.Pool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM themes t
-		WHERE t.frequency >= $1
-		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
-		  AND t.merged_into_idea_id IS NULL
-		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
-		  AND NOT EXISTS (
-		      SELECT 1 FROM theme_posts tp
-		      JOIN post_analysis pa ON pa.post_id = tp.post_id
-		      WHERE tp.theme_id = t.id AND pa.willingness_to_pay
-		  )`, minEvidence).Scan(&n)
-	return n, err
 }
 
 // ThemeEvidence, temayı destekleyen ham post'ları döner (en yüksek skor önce).
