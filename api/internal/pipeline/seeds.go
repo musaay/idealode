@@ -469,10 +469,14 @@ func seedRawPost(s radarSeed) store.RawPost {
 }
 
 // ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 3
-// mercekten geçirir ve üçü de "pass" ise market_derived idea card üretir.
-// Kart üretildikten SONRA (dedup'tan önce) ayrıca ADVISORY özgünlük merceği
-// çağrılır — bloklamaz, yalnız kartın distinctiveness_* alanlarını doldurur
-// (#101 v3, bkz. distinctivenessAdvise).
+// mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir; aksi halde
+// (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri BLOKLAMAZ,
+// organik yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/
+// momentum_derived idea card üretilir, veri-erişimi merceğinin ham kararı
+// karta yazılır (bkz. aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
+// (dedup'tan önce) ayrıca ADVISORY özgünlük merceği çağrılır — bloklamaz,
+// yalnız kartın distinctiveness_* alanlarını doldurur (#101 v3, bkz.
+// distinctivenessAdvise).
 // Her tohum raw_posts'a platform='radar_seed' olarak yazılır — bu yazım hem
 // idempotency kontrolü (InsertRawPosts ON CONFLICT DO NOTHING) hem de
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
@@ -550,18 +554,30 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			continue
 		}
 
-		// #131: "fail" ve "unsure" artık FARKLI davranır. "fail" tohumu KESİN
-		// eler ve kalıcı işaretler (mark) — bir başka mercek aynı anda
-		// "unsure" dese bile fail baskındır. "unsure" TEK BAŞINA (hiç fail
-		// yoksa) tohumu kalıcı YAKMAZ: imleç yazılmadan atlanır, sonraki
-		// koşuda mercekler yeniden denenir (LLM hatasıyla AYNI "mark yazma"
-		// ilkesi — bkz. yukarıdaki lensErr yorumu). default dal savunmacıdır:
-		// parseLensVerdict zaten tanınmayan değeri "unsure"a indirger, ama bu
-		// switch kendi başına da yalnız "pass"/"fail" dışındakileri unsure
-		// sayar (CLAUDE.md: LLM cevapları savunmacı parse edilir).
+		// #131 PO düzeltmesi: yalnız "fail" tohumu eler ve kalıcı işaretler
+		// (mark) — organik yoldaki blockedByIdeaLens ile AYNI ilke. "unsure"
+		// ARTIK BLOKLAMAZ (ilk #131 tasarımı burada yanlıştı — düzeltildi):
+		// mercek çağrıları sıcaklık 0 ile yapılır, yani aynı tohum+prompt HER
+		// KOŞUDA AYNI "unsure" cevabını verir; bu, LLM hatasındaki GEÇİCİLİKTEN
+		// farklıdır (hata geçicidir, unsure deterministiktir) — unsure'u da
+		// "yeniden dene" sayıp imleçsiz atlasaydık tohum HİÇBİR ZAMAN
+		// ilerlemez, koşu başına 1-3 mercek çağrısını sonsuza dek boşa
+		// yakardı; üstelik yeni prompt bilerek "tanımadığın sağlayıcıda
+		// unsure de" diyor ve TR bizim ana alanımız — yani unsure SIKÇA
+		// dönecek. Kart normal üretilir; veri-erişimi merceğinin ham kararı
+		// (dataAccessVerdict) aynı geçişte yakalanır ve karta yazılır (bkz.
+		// aşağıda idea.DataAccessVerdict/Reason ataması). default dal
+		// savunmacıdır: parseLensVerdict zaten tanınmayan değeri "unsure"a
+		// indirger, ama bu switch kendi başına da yalnız "pass"/"fail"
+		// dışındakileri unsure sayar (CLAUDE.md: LLM cevapları savunmacı
+		// parse edilir).
 		var failedNames, failedReasons, unsureNames []string
 		hasFail := false
+		var dataAccessVerdict lensVerdict
 		for li, v := range verdicts {
+			if lenses[li].system == lensDataAccessSystem {
+				dataAccessVerdict = v
+			}
 			switch v.Verdict {
 			case "pass":
 			case "fail":
@@ -581,9 +597,8 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			continue
 		}
 		if len(unsureNames) > 0 {
-			log.Printf("seed %q belirsiz (mercek: %s) — işaretlenmedi, sonraki koşuda yeniden denenecek",
+			log.Printf("seed %q belirsiz (mercek: %s) — bloklamıyor, kart yine de üretiliyor",
 				seed.Name, strings.Join(unsureNames, ", "))
-			continue
 		}
 
 		var system, userPrompt string
@@ -617,6 +632,13 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 				fmt.Sprintf("Kanıt (%s): %s — %s", seed.Name, seed.Evidence, seed.SourceURL),
 			}
 		}
+
+		// Veri-erişimi merceğinin (#131) ham kararı karta yazılır — organik
+		// yoldaki blockedByIdeaLens ile AYNI ilke (bkz. synthesize.go). "fail"
+		// buraya hiç ulaşmaz (hasFail yukarıda zaten eledi, kart üretilmedi);
+		// "pass" ya da "unsure" yazılır.
+		idea.DataAccessVerdict = &dataAccessVerdict.Verdict
+		idea.DataAccessReason = &dataAccessVerdict.Reason
 
 		// ADVISORY özgünlük merceği (#101 v3): kart üretimini bloklamaz.
 		// Hata verirse alanlar NULL kalır, kart yine de yazılır.

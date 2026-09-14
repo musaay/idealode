@@ -3,13 +3,17 @@
 -- distinctiveness_* deseninin (014) BİREBİR aynısı — TEK farkla: bu mercek
 -- BLOCKING'tir (distinctiveness ADVISORY'dir), bu yüzden data_access_verdict
 -- kartta ASLA "fail" görülmez (fail verdict kartın üretilmesini zaten
--- engeller, bkz. pipeline.blockedByIdeaLens) — yine de constraint diğer iki
+-- engeller, hem organik yolda pipeline.blockedByIdeaLens hem tohum yolunda
+-- seeds.ProcessSeeds'in hasFail dalı) — yine de constraint diğer iki
 -- merceğinki gibi üç değeri de kabul eder (savunmacı: ileride biri
 -- BLOCKING/ADVISORY ayrımını değiştirirse şema önden kısıtlamasın).
+-- "unsure" HİÇBİR yolda kartı bloklamaz (#131 PO düzeltmesi: sıcaklık 0
+-- olduğundan unsure deterministiktir — tohum yolunda da organik yoldaki
+-- gibi karta yazılır, tohumu bir daha denenmek üzere beklemede bırakmaz).
 -- data_access_verdict NULL ise mercek hiç çağrılamadı (geçici hata) ya da
--- kart bu alanları taşımayan bir tür (seed-türetilmiş market_derived/
--- momentum_derived + ai_blended — hep NULL, yalnız synthesize.go'nun organik
--- (pain_point) yolu bu alanları doldurur).
+-- kart bu alanları taşımayan bir tür (yalnız ai_blended — kaynak karttan
+-- kopyalanmaz, hep NULL); hem organik (pain_point) hem tohum
+-- (market_derived/momentum_derived) yolu bu alanları doldurur.
 --
 -- Idempotent: kolonlar IF NOT EXISTS ile eklenir, constraint her koşuda
 -- düşürülüp aynı tanımla yeniden eklenir (004/013/014 kalıbı).

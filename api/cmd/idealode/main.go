@@ -175,9 +175,11 @@ func logPendingIdeas(ctx context.Context, st *store.Store) {
 // kriter koduyla birlikte (`[fail K3]`), değilse yalnız karar (`[pass]`),
 // mercek hiç çalışmadıysa (alanlar NULL) `[?]`. Veri-erişimi kararı (#131)
 // AYRI bir `[veri erişimi: ...]` etiketiyle eklenir — yalnız dolu olduğunda
-// (NULL ise hiç eklenmez: seed-türetilmiş kartlarda bu alan hep NULL'dır,
-// her satırda anlamsız `[veri erişimi: ?]` gürültüsü istenmiyor; organik
-// yolda "fail" karta hiç ulaşmadığından burada yalnız pass/unsure görülür).
+// (NULL ise hiç eklenmez: hem organik hem tohum yolu bu alanı artık
+// doldurur, NULL yalnız mercek çağrısı hata verdiğinde ya da kart
+// ai_blended olduğunda kalır — o durumlarda gürültülü bir `[veri erişimi:
+// ?]` eklemek yerine etiket hiç görünmez; "fail" hiçbir yolda karta hiç
+// ulaşmadığından burada yalnız pass/unsure görülür).
 func pendingIdeaSummary(p store.PendingIdea) string {
 	title := truncateRunes(p.Title, 60)
 	tag := "?"

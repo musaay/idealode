@@ -210,12 +210,19 @@ func TestProcessSeedsFailMarksNoCard(t *testing.T) {
 	}
 }
 
-// TestProcessSeedsUnsureLeavesUnprocessed: #131 — mercek(ler) "unsure"
-// dönerse (hiç "fail" yoksa) tohum kart ÜRETMEZ ama markProcessed de
-// ÇAĞIRMAZ: raw_posts'a imleç YAZILMAZ, tohum sonraki koşuda mercekler
-// yeniden çalıştırılarak tekrar denenir — LLM çağrı hatasındaki "geçici,
-// kalıcı yakma YOK" ilkesiyle AYNI (bkz. TestProcessSeedsLensErrorNoMarkThenRetries).
-func TestProcessSeedsUnsureLeavesUnprocessed(t *testing.T) {
+// TestProcessSeedsUnsureCreatesCardAndMarksOnce: #131 PO düzeltmesi —
+// mercek(ler) "unsure" dönerse (hiç "fail" yoksa) tohum ARTIK BLOKLANMAZ:
+// kart normal üretilir (organik yoldaki blockedByIdeaLens ile AYNI ilke).
+// İlk tasarım (unsure'u da LLM-hatası gibi "yeniden dene, imleçsiz atla"
+// sayan) yanlıştı: mercek çağrıları sıcaklık 0 olduğundan aynı tohum+prompt
+// HER KOŞUDA aynı "unsure" cevabını verir — hata GEÇİCİDİR, unsure
+// DETERMİNİSTİKTİR; tohum hiç ilerlemez, koşu başına mercek bütçesini
+// sonsuza dek boşa yakardı. Bu test: (a) kart üretildiğini, (b) veri-erişimi
+// merceğinin ham "unsure" kararının karta yazıldığını, (c) markProcessed'in
+// kart-yazımının kendi imleç adımıyla (ayrı bir "unsure" dalı OLMADAN, çift
+// yazım yok) TAM BİR KEZ çalıştığını, (d) tohumun bu yüzden bir daha
+// işlenmediğini doğrular.
+func TestProcessSeedsUnsureCreatesCardAndMarksOnce(t *testing.T) {
 	st := seedTestStore(t)
 	ctx := context.Background()
 
@@ -231,45 +238,62 @@ func TestProcessSeedsUnsureLeavesUnprocessed(t *testing.T) {
 	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Unsure Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
 	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
 
-	// 1. koşu: 3 mercek de "unsure" -> kart yok, mark da YAZILMAMALI.
-	n1, err := ProcessSeeds(ctx, cfg, st, &fakeSeedChat{lensVerdict: "unsure"}, jsonl)
+	// 3 mercek de "unsure" -> kart YİNE DE üretilmeli (bloklamıyor).
+	chat := &fakeSeedChat{
+		lensVerdict: "unsure",
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+	}
+	n1, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
 	if err != nil {
 		t.Fatalf("ProcessSeeds (1. koşu): %v", err)
 	}
-	if n1 != 0 {
-		t.Fatalf("0 idea beklenirdi, geldi: %d", n1)
+	if n1 != 1 {
+		t.Fatalf("unsure bloklamamalı, 1 idea beklenirdi, geldi: %d", n1)
 	}
+
 	var ideaCount int
+	var dataAccessVerdict, dataAccessReason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT data_access_verdict, data_access_reason FROM ideas WHERE title = $1", title).
+		Scan(&dataAccessVerdict, &dataAccessReason); err != nil {
+		t.Fatalf("idea yazılmamış: %v", err)
+	}
 	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
 		t.Fatal(err)
 	}
-	if ideaCount != 0 {
-		t.Errorf("unsure tohumdan kart üretilmemeli, geldi: %d", ideaCount)
+	if ideaCount != 1 {
+		t.Errorf("unsure tohumdan tam olarak 1 kart üretilmeli, geldi: %d", ideaCount)
 	}
+	if dataAccessVerdict == nil || *dataAccessVerdict != "unsure" {
+		t.Errorf("data_access_verdict=unsure beklenirdi, geldi: %v", dataAccessVerdict)
+	}
+	if dataAccessReason == nil || *dataAccessReason != "test-reason" {
+		t.Errorf("data_access_reason=%q beklenirdi, geldi: %v", "test-reason", dataAccessReason)
+	}
+
+	// markProcessed AYRI bir "unsure" dalından değil, kart yazımının kendi
+	// imleç adımından (InsertIdea sonrası) çalışır — tam bir kez, çift
+	// yazım yok (InsertRawPosts zaten ON CONFLICT DO NOTHING ama burada
+	// asıl doğrulanan: raw_posts satırı var VE tohum bir daha işlenmiyor).
 	var markCount int
 	if err := st.Pool.QueryRow(ctx,
 		"SELECT count(*) FROM raw_posts WHERE platform = 'radar_seed' AND source_ref = $1", seedURL).
 		Scan(&markCount); err != nil {
 		t.Fatal(err)
 	}
-	if markCount != 0 {
-		t.Errorf("unsure'da mark YAZILMAMALI (tohum kalıcı yakılmamalı), geldi: %d", markCount)
+	if markCount != 1 {
+		t.Errorf("kart üretildiğinde imleç TAM BİR KEZ yazılmalı, geldi: %d", markCount)
 	}
 
-	// 2. koşu: mercekler artık pass -> tohum yeniden denenmeli ve kart
-	// üretilmeli (imleç yazılmadığından 1. koşuda "işlenmiş" sayılmadı).
-	chat := &fakeSeedChat{
-		lensVerdict: "pass",
-		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
-			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
-			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
-	}
+	// 2. koşu: tohum ZATEN işlenmiş (imleç var) -> yeniden denenMEMELİ.
 	n2, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
 	if err != nil {
 		t.Fatalf("ProcessSeeds (2. koşu): %v", err)
 	}
-	if n2 != 1 {
-		t.Fatalf("yeniden denemede 1 idea beklenirdi, geldi: %d", n2)
+	if n2 != 0 {
+		t.Errorf("kart üretilmiş tohum ikinci koşuda tekrar işlenmemeli, geldi: %d", n2)
 	}
 }
 
