@@ -124,7 +124,7 @@ func setupThemeWithPayment(t *testing.T, ctx context.Context, s *Store, platform
 		t.Fatal(err)
 	}
 
-	themeID, err := s.UpsertTheme(ctx, tag)
+	themeID, err := s.UpsertTheme(ctx, tag, tag)
 	if err != nil {
 		t.Fatal(err)
 	}

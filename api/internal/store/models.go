@@ -40,6 +40,13 @@ type PostAnalysis struct {
 	DomainTags       []string // kanonik EN slug'lar
 	WillingnessToPay bool
 	Prefiltered      bool // TRUE ise LLM'e gitmeden keyword filtresi eledi
+
+	// Title/Body: yalnız UnthemedAnalyses'in JOIN'i doldurur (#127) — kova
+	// içi LLM kümeleme prompt'u gönderi içeriğine ihtiyaç duyar.
+	// post_analysis tablosunda YOK; InsertPostAnalyses bu alanları
+	// yazmaz/okumaz.
+	Title string
+	Body  string
 }
 
 // Theme, tag bazlı gruplamanın ürünü (themes satırı).
@@ -51,6 +58,9 @@ type Theme struct {
 	// temanın postlarından en az biri willingness_to_pay=true mu (#125).
 	// Sert eleme değil, sıralama/loglama için kullanılır.
 	HasPaymentSignal bool
+	// DomainTag, temanın doğduğu kaba kova (#127) — ThemesByDomainTag'in
+	// doldurduğu alan; kova içi LLM kümelemesine bağlam olarak verilir.
+	DomainTag string
 }
 
 // Idea, paylaşılan idea card "tohumu".

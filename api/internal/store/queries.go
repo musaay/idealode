@@ -143,10 +143,13 @@ func (s *Store) InsertPostAnalyses(ctx context.Context, analyses []PostAnalysis)
 
 // UnthemedAnalyses, henüz hiçbir temaya bağlanmamış sinyal analizlerini
 // döner (yalnız pain_point / feature_request; noise/complaint tema kurmaz).
+// Title/Body de döner (#127): kova içi LLM kümeleme prompt'u gönderi
+// içeriğine ihtiyaç duyar (raw_posts JOIN'i).
 func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT pa.post_id, pa.classification, pa.domain_tags
+		SELECT pa.post_id, pa.classification, pa.domain_tags, rp.title, rp.body
 		FROM post_analysis pa
+		JOIN raw_posts rp ON rp.id = pa.post_id
 		WHERE pa.classification IN ('pain_point', 'feature_request')
 		  AND COALESCE(array_length(pa.domain_tags, 1), 0) > 0
 		  AND NOT EXISTS (SELECT 1 FROM theme_posts tp WHERE tp.post_id = pa.post_id)
@@ -160,7 +163,7 @@ func (s *Store) UnthemedAnalyses(ctx context.Context, limit int) ([]PostAnalysis
 	var out []PostAnalysis
 	for rows.Next() {
 		var a PostAnalysis
-		if err := rows.Scan(&a.PostID, &a.Classification, &a.DomainTags); err != nil {
+		if err := rows.Scan(&a.PostID, &a.Classification, &a.DomainTags, &a.Title, &a.Body); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -413,12 +416,16 @@ func (s *Store) MarkThemeIncoherent(ctx context.Context, themeID int64) error {
 }
 
 // UpsertTheme, tag için temayı bulur/oluşturur ve last_seen'i tazeler.
-func (s *Store) UpsertTheme(ctx context.Context, name string) (int64, error) {
+// domainTag, temanın doğduğu kaba kova (#127) — yalnız İLK insert'te
+// yazılır; çakışmada (tema zaten varsa) domain_tag DOKUNULMADAN kalır
+// (aynı tema adı iki farklı kovadan gelirse ilk yazan kovanınki geçerli
+// kalır — çakışmada UPDATE yok).
+func (s *Store) UpsertTheme(ctx context.Context, name, domainTag string) (int64, error) {
 	var id int64
 	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO themes (theme_name) VALUES ($1)
+		INSERT INTO themes (theme_name, domain_tag) VALUES ($1, $2)
 		ON CONFLICT (theme_name) DO UPDATE SET last_seen = now()
-		RETURNING id`, name).Scan(&id)
+		RETURNING id`, name, domainTag).Scan(&id)
 	return id, err
 }
 
@@ -438,6 +445,33 @@ func (s *Store) RefreshThemeStats(ctx context.Context) error {
 		FROM (SELECT theme_id, count(*) AS cnt FROM theme_posts GROUP BY theme_id) c
 		WHERE c.theme_id = t.id`)
 	return err
+}
+
+// ThemesByDomainTag, verilen kovada (domain_tag) daha önce oluşturulmuş
+// temaları döner — kova içi LLM kümelemesine "mevcut tema adları" bağlamı
+// olarak verilir (#127). domain_tag DB'de nullable (eski satırlar migration
+// backfill'i ile dolar); COALESCE savunma amaçlı (ActiveSources'taki
+// category deseniyle aynı).
+func (s *Store) ThemesByDomainTag(ctx context.Context, domainTag string) ([]Theme, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, theme_name, frequency, COALESCE(domain_tag, '')
+		FROM themes
+		WHERE domain_tag = $1
+		ORDER BY id`, domainTag)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Theme
+	for rows.Next() {
+		var t Theme
+		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency, &t.DomainTag); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ThemesReadyForSynthesis, frekans eşiğini geçmiş ve henüz idea üretilmemiş
