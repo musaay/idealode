@@ -135,7 +135,8 @@ func TestArchivedIdeaHidden(t *testing.T) {
 	active, err := s.InsertIdea(ctx, Idea{
 		Title:            "test-archive-active",
 		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
-		SourceType: "pain_point",
+		SourceType:   "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("active insert: %v", err)
@@ -143,7 +144,8 @@ func TestArchivedIdeaHidden(t *testing.T) {
 	archived, err := s.InsertIdea(ctx, Idea{
 		Title:            "test-archive-archived",
 		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
-		SourceType: "pain_point",
+		SourceType:   "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("archived insert: %v", err)
@@ -204,7 +206,8 @@ func TestPendingIdeaHiddenUntilPublished(t *testing.T) {
 	id, err := s.InsertIdea(ctx, Idea{
 		Title:            "test-pending-idea",
 		ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u",
-		SourceType: "pain_point",
+		SourceType:   "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
@@ -260,6 +263,7 @@ func TestPendingIdeasQuery(t *testing.T) {
 	pendingID, err := s.InsertIdea(ctx, Idea{
 		Title: "test-pendinglist-pending", ProblemStatement: "p", ProposedSolution: "s",
 		TargetUser: "u", SourceType: "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("insert pending: %v", err)
@@ -267,6 +271,7 @@ func TestPendingIdeasQuery(t *testing.T) {
 	publishedID, err := s.InsertIdea(ctx, Idea{
 		Title: "test-pendinglist-published", ProblemStatement: "p", ProposedSolution: "s",
 		TargetUser: "u", SourceType: "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("insert published: %v", err)
@@ -311,6 +316,7 @@ func TestInsertBlendedIdeaPublishedImmediately(t *testing.T) {
 	parentID, err := s.InsertIdea(ctx, Idea{
 		Title: "test-blend-parent", ProblemStatement: "p", ProposedSolution: "s",
 		TargetUser: "u", SourceType: "pain_point", DomainTags: []string{"x"},
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("parent insert: %v", err)
