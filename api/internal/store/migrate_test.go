@@ -90,6 +90,7 @@ func TestMigratePublishedBackfillOnlyOnce(t *testing.T) {
 	id, err := s.InsertIdea(ctx, Idea{
 		Title: "test-migrate-backfill-pending", ProblemStatement: "p", ProposedSolution: "s",
 		TargetUser: "u", SourceType: "pain_point",
+		UrgencyScore: 3,
 	})
 	if err != nil {
 		t.Fatalf("insert: %v", err)

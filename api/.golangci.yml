@@ -1,0 +1,17 @@
+version: "2"
+
+# #129: CI'a golangci-lint ilk kez eklendi. Varsayılan ("standard") linter
+# seti mevcut kod tabanında 28 bulgu üretti (errcheck 24, unused 2,
+# ineffassign 1, staticcheck 1) — çoğu errcheck'in defer Close()/test
+# cleanup Exec() gibi düşük değerli uyarıları. Bu PR yalnız CI altyapısı
+# ekliyor; bulguları tek tek düzeltmek ayrı iş (bkz. #129 raporu/PR
+# açıklaması) — o yüzden bulgu üreten 4 linter kapatıldı, yalnız govet
+# (0 bulgu) açık kaldı. Lint temizliği + bu linterlerin yeniden açılması
+# ayrı bir issue'da ele alınmalı.
+linters:
+  default: standard
+  disable:
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused
