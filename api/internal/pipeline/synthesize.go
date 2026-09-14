@@ -223,6 +223,16 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		log.Printf("synthesize: eşiği (%d) geçen yeni tema yok", cfg.MinThemeEvidence)
 		return 0, nil
 	}
+	// #135: kümelenmiş (gerçek dert) temalar artık her zaman eski etiket
+	// temalarının önüne alınıyor — kaç temanın kümelemeden doğduğunu
+	// ölçülebilirlik için logla (preferPayment'tan bağımsız, koşulsuz).
+	clustered := 0
+	for _, th := range themes {
+		if th.Clustered {
+			clustered++
+		}
+	}
+	log.Printf("synthesize: yeni dert teması öne alındı: %d/%d", clustered, len(themes))
 	// #125: ödeme sinyali artık ELEMİYOR, yalnız öne alıyor — kaç temanın
 	// sinyalli olduğunu ölçülebilirlik için logla (atlanan tema yok).
 	if cfg.PreferPaymentSignal {
