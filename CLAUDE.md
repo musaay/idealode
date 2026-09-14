@@ -6,6 +6,9 @@ kartları üretir. Ayrıntı: README.md.
 
 ## Komutlar
 - Build/test: `cd api && go build ./... && go vet ./... && go test ./...`
+  (DB testleri `TEST_DATABASE_URL` yoksa atlanır. Gerçek DB'ye karşı koşarken
+  `go test -p 1 ./...` kullan: store ve pipeline aynı DB'yi paylaşıyor, paket
+  paralelliği kilit kuyruğu yaratıyor. CI bunu zaten böyle koşuyor.)
 - Migration uygulama: `idealode migrate` (elle tetiklenir, otomatik çalışmaz)
 - Pipeline: `idealode run` (= ingest + analyze + synthesize + fuse; advisory lock'lu)
 
