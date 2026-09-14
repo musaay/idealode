@@ -118,3 +118,60 @@ func TestMigratePublishedBackfillOnlyOnce(t *testing.T) {
 		t.Errorf("ikinci Migrate beklemedeki kartı sessizce yayınlamamalı (published_at hâlâ NULL olmalı), geldi: %v", *publishedAt)
 	}
 }
+
+// TestMigrateIdempotentWithAllSourceTypes, #131 hotfix regresyon testi:
+// 004_market_derived.sql eskiden ideas_source_type_check kısıtını DAR bir
+// listeyle (013_momentum_derived.sql'in GENİŞ listesini ezerek) yeniden
+// tanımlıyordu. Tüm migration dosyaları her koşuda yeniden çalıştığından,
+// üretimde bir momentum_derived satır oluştuğu an 004'ün DAR listesi o
+// satırı ihlal ediyor ve zincir 013'e hiç ulaşmadan 004'te kırılıyordu —
+// temiz bir test DB'sinde (satır yok) bu regresyon hiç ortaya çıkmazdı, bu
+// yüzden mevcut testler yakalayamamıştı. Bu test her source_type
+// değerinden (özellikle momentum_derived + ai_blended) birer satır VARKEN
+// ikinci Migrate çağrısının hatasız geçtiğini doğrular.
+func TestMigrateIdempotentWithAllSourceTypes(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ilk Migrate: %v", err)
+	}
+
+	s, err := Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer s.Close()
+
+	// ideas_source_type_check'in (013_momentum_derived.sql, TEK sahip —
+	// bkz. migrations/README.md) kabul ettiği TÜM değerler; biri eksik
+	// kalırsa insert burada patlar (kısıt zaten çalışıyor mu kontrolü).
+	sourceTypes := []string{"pain_point", "ai_generated", "ai_blended", "market_derived", "user_created", "momentum_derived"}
+	var ids []int64
+	for _, st := range sourceTypes {
+		id, err := s.InsertIdea(ctx, Idea{
+			Title: "test-migrate-source-type-" + st, ProblemStatement: "p", ProposedSolution: "s",
+			TargetUser: "u", SourceType: st, UrgencyScore: 3,
+		})
+		if err != nil {
+			t.Fatalf("insert (source_type=%s): %v", st, err)
+		}
+		ids = append(ids, id)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id)
+		}
+	})
+
+	// İKİNCİ Migrate: 004 artık ideas_source_type_check'e DOKUNMUYOR (013
+	// tek sahip) — momentum_derived dahil her source_type'tan satır varken
+	// bile hatasız geçmeli. Hotfix öncesi bu adım "check constraint
+	// ideas_source_type_check ... violated by some row" ile patlardı.
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ikinci Migrate (her source_type'tan satır varken idempotent olmalı): %v", err)
+	}
+}

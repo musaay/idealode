@@ -6,14 +6,23 @@
 -- taşır ("Kanıt (Ürün): $X MRR ... — <url>"); kanıt tahrif edilmez ilkesi
 -- burada da geçerli — rakam ve link birincil kaynağa gider.
 --
--- Idempotent: constraint her koşuda düşürülüp aynı tanımla yeniden eklenir.
+-- NOT (#131 hotfix — kırık migration zinciri): bu dosya eskiden burada
+-- ideas_source_type_check kısıtını DROP edip 'market_derived' eklenmiş DAR
+-- bir listeyle yeniden tanımlıyordu. 013_momentum_derived.sql AYNI kısıtı
+-- DAHA GENİŞ bir listeyle (+ 'momentum_derived') yeniden tanımlıyor; tüm
+-- migration dosyaları HER KOŞUDA yeniden çalıştığından, üretimde bir
+-- momentum_derived satır oluştuğu an bu dosyanın DAR listesi o satırı ihlal
+-- ediyor ve zincir 013'e hiç ulaşmadan burada (004'te) patlıyordu — prod'da
+-- ilk momentum_derived kart (#123) üretilince tam olarak bu oldu. KURAL:
+-- bir kısıtı yalnız EN SON tanımlayan migration tutar, daha eski dosyalar
+-- aynı kısıtı yeniden EKLEMEZ (bkz. migrations/README.md). Bu dosya artık
+-- ideas_source_type_check'e DOKUNMAZ — tek sahibi 013'tür.
+--
+-- Idempotent: bu dosyada artık şema değişikliği yok, BEGIN/COMMIT zararsız
+-- no-op olarak kalır (numaralı zincirin bir sonraki dosyaya geçişini bozmaz).
 
 BEGIN;
 
 SET search_path TO idealode, public;
-
-ALTER TABLE ideas DROP CONSTRAINT IF EXISTS ideas_source_type_check;
-ALTER TABLE ideas ADD CONSTRAINT ideas_source_type_check CHECK (source_type IN
-    ('pain_point', 'ai_generated', 'ai_blended', 'market_derived', 'user_created'));
 
 COMMIT;
