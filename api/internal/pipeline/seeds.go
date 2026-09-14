@@ -72,9 +72,10 @@ func parseRadarSeeds(jsonl string) []radarSeed {
 // synthesize.go'nun organik yolunda (SynthesizeIdeas) da AYNI sabitlerle
 // bloklayıcı olarak kullanılır — kaynak-bağımsız yazıldıkları için tohum
 // (radarSeed) ya da kart (store.Idea) girdisi fark etmez. Özgünlük merceği
-// (lensDistinctivenessSystem) BURADA DEĞİL — ADVISORY olduğundan bloklayıcı
-// listeye girmez, kart üretildikten sonra ayrıca çağrılır (bkz.
-// distinctivenessAdvise, #101 v3).
+// (lensDistinctivenessSystem) BURADA DEĞİL — bu listeye hâlâ girmez, kart
+// üretildikten sonra ayrıca çağrılır (bkz. distinctivenessCheck) — ama artık
+// "advisory" değil: K1 (doygunluk) fail'i kart yazımını bloklar, K2-K4 fail
+// yalnız eliminations'a kaydedilir (henüz bloklamaz, #138).
 const lensThirdPartySystem = `You evaluate whether a proposed software product idea could be BUILT BY AN INDEPENDENT THIRD-PARTY developer — not merely patched by the original vendor.
 
 FAIL if the underlying opportunity is actually a defect, bug, or feature gap that only the ORIGINAL vendor could reasonably fix (their own onboarding, their own pricing, their own outage). PASS if an independent developer could build a STANDALONE product serving the same or an adjacent need, without needing to be the original vendor.
@@ -118,13 +119,14 @@ FAIL if the idea has no realistic path to revenue (e.g. a tiny hobbyist niche, a
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
-// lensDistinctivenessSystem: özgünlük merceği (#101 v3) — ADVISORY, bloklamaz.
-// K1-K4'ten biri tutuyorsa verdict "fail"; sonuç kart üretimini engellemez,
-// yalnız store.Idea'nın distinctiveness_* alanlarına yazılır (bkz.
-// distinctivenessAdvise). Kart üretildikten SONRA, hem synthesize.go'nun
-// pain_point yolunda hem seeds.go'nun ProcessSeeds'inde (revenue+trending)
-// aynı biçimde çağrılır.
-const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria. This is an ADVISORY assessment — it does not block the idea, it only flags it. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
+// lensDistinctivenessSystem: özgünlük merceği (#101 v3, #138) — K1
+// (doygunluk) artık BLOKLAYICI: kart DB'ye yazılmaz. K2-K4 hâlâ yalnız
+// store.Idea'nın distinctiveness_* alanlarına yazılır, kart yazımını
+// engellemez (veri az — bilinçli sınır, #138). Hangi kriterde olursa olsun
+// "fail" eliminations'a da kaydedilir (bkz. distinctivenessCheck). Kart
+// üretildikten SONRA, hem synthesize.go'nun pain_point yolunda hem
+// seeds.go'nun ProcessSeeds'inde (revenue+trending) aynı biçimde çağrılır.
+const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
 
 K1 Saturation: 10+ well-known (not obscure) products already do the same core job, AND this idea has no distinguishing angle from them. A few strong competitors alone (e.g. 2-3 established players) do NOT trigger K1 — only real saturation with no angle does.
 K2 Natively solvable: the underlying pain is already solved at the OS/platform level (screen time, notifications, etc.) and the product only adds a "nice trick" on top of that native solution. Simplicity alone is not the issue — the question is whether the pain it solves is already natively solved.
@@ -204,7 +206,7 @@ func lensUserPrompt(s radarSeed) string {
 
 // ideaLensUserPrompt, store.Idea alanlarından (title/problem/solution/
 // target_user) bir mercek kullanıcı prompt'u üretir — TÜM idea-tabanlı
-// mercek çağrılarının (distinctivenessAdvise + #123'ün organik bloklayıcı
+// mercek çağrılarının (distinctivenessCheck + #123'ün organik bloklayıcı
 // mercekleri, bkz. synthesize.go) TEK ortak prompt fonksiyonu. İki kopya
 // prompt İSTEMİYORUZ.
 func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
@@ -212,13 +214,17 @@ func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
 		title, problem, solution, targetUser)
 }
 
-// distinctivenessAdvise, kart üretildikten SONRA çağrılan ADVISORY özgünlük
-// merceğidir (#101 v3): kart üretimini ASLA bloklamaz, yalnız
-// store.Idea'nın distinctiveness_verdict/criterion/reason alanlarını
-// doldurur. Mercek çağrısı hata verirse (ağ/kota) alanlar dokunulmadan
-// (dolayısıyla DB'de NULL) kalır ve hata döner — çağıran loglar, kartı yine
-// de yazar (bloklama YOK ilkesi buraya da uygulanır).
-func distinctivenessAdvise(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
+// distinctivenessCheck, kart üretildikten SONRA çağrılan özgünlük
+// merceğidir (#101 v3; adı #138 ile "advise"den değişti — artık K1 için
+// bloklayıcı): store.Idea'nın distinctiveness_verdict/criterion/reason
+// alanlarını doldurur. BLOKLAMA KARARINI KENDİSİ VERMEZ — yalnız alanları
+// doldurur; çağıran (synthesize.go/seeds.go) verdict=="fail" &&
+// criterion=="K1" ise kartı yazmaz ve eliminations'a kaydeder (K2-K4 fail
+// yalnız kaydedilir, kart yine yazılır). Mercek çağrısı hata verirse
+// (ağ/kota) alanlar dokunulmadan (dolayısıyla DB'de NULL) kalır ve hata
+// döner — çağıran loglar, kartı yine de yazar (bloklama YOK ilkesi hata
+// durumunda da geçerli).
+func distinctivenessCheck(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
 	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
 	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
 		ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
@@ -242,7 +248,7 @@ var distinctivenessCriteriaDesc = map[string]string{
 }
 
 // distinctivenessLogSuffix, kart üretim log satırına eklenen özgünlük özeti
-// (#108): distinctivenessAdvise alanları NULL bıraktıysa (mercek hata verdi)
+// (#108): distinctivenessCheck alanları NULL bıraktıysa (mercek hata verdi)
 // boş string döner; "fail" ise kriter kodu + TR açıklaması + sebebin ilk 160
 // karakteri eklenir, "pass"/"unsure" ise yalnız karar eklenir.
 func distinctivenessLogSuffix(idea store.Idea) string {
@@ -469,14 +475,16 @@ func seedRawPost(s radarSeed) store.RawPost {
 }
 
 // ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 3
-// mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir; aksi halde
-// (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri BLOKLAMAZ,
-// organik yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/
+// mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir (eliminations'a
+// stage=blocking_lens kaydedilir, subject=seed.Name, detail=seed.Summary);
+// aksi halde (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri
+// BLOKLAMAZ, organik yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/
 // momentum_derived idea card üretilir, veri-erişimi merceğinin ham kararı
 // karta yazılır (bkz. aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
-// (dedup'tan önce) ayrıca ADVISORY özgünlük merceği çağrılır — bloklamaz,
-// yalnız kartın distinctiveness_* alanlarını doldurur (#101 v3, bkz.
-// distinctivenessAdvise).
+// (dedup'tan önce) ayrıca özgünlük merceği çağrılır (bkz.
+// distinctivenessCheck, #101 v3): K1 (doygunluk) fail'i kartı YAZDIRMAZ
+// (eliminations'a stage=distinctiveness kaydedilir, tohum mark'lanır — bir
+// daha denenmez), K2-K4 fail yalnız kaydedilir, kart yine yazılır (#138).
 // Her tohum raw_posts'a platform='radar_seed' olarak yazılır — bu yazım hem
 // idempotency kontrolü (InsertRawPosts ON CONFLICT DO NOTHING) hem de
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
@@ -594,6 +602,12 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			}
 			log.Printf("seed %q elendi (mercek: %s — %s)",
 				seed.Name, strings.Join(failedNames, ", "), strings.Join(failedReasons, "; "))
+			// Kart henüz üretilmedi (mercekler tohum üzerinde çalıştı) —
+			// detail için problem_statement yok, tohumun özeti kullanılır
+			// (#138: subject tek başına — "systeme.io" gibi bir ürün adı —
+			// neyin elendiğini anlatmaz).
+			recordElimination(ctx, st, "blocking_lens", seed.Name, "fail", "",
+				strings.Join(failedReasons, "; "), seed.Summary)
 			continue
 		}
 		if len(unsureNames) > 0 {
@@ -640,10 +654,31 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		idea.DataAccessVerdict = &dataAccessVerdict.Verdict
 		idea.DataAccessReason = &dataAccessVerdict.Reason
 
-		// ADVISORY özgünlük merceği (#101 v3): kart üretimini bloklamaz.
-		// Hata verirse alanlar NULL kalır, kart yine de yazılır.
-		if err := distinctivenessAdvise(ctx, chat, &idea); err != nil {
+		// Özgünlük merceği (#101 v3, #138): K1 (doygunluk) fail'i kartı
+		// YAZDIRMAZ (eliminations'a kaydedilip tohum mark'lanır — bir daha
+		// denenmez, #131'deki hasFail ile AYNI ilke: deterministik sonuç bir
+		// daha üretilmez). K2-K4 fail yalnız kaydedilir, kart yine yazılır.
+		// Mercek çağrısı hata verirse alanlar NULL kalır, kart yine de
+		// yazılır (bloklama YOK ilkesi hata durumunda da geçerli).
+		if err := distinctivenessCheck(ctx, chat, &idea); err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, err)
+		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
+			criterion := "none"
+			if idea.DistinctivenessCriterion != nil {
+				criterion = *idea.DistinctivenessCriterion
+			}
+			reason := ""
+			if idea.DistinctivenessReason != nil {
+				reason = *idea.DistinctivenessReason
+			}
+			recordElimination(ctx, st, "distinctiveness", idea.Title, "fail", criterion, reason, idea.ProblemStatement)
+			if criterion == "K1" {
+				if err := markProcessed(); err != nil {
+					return created, err
+				}
+				log.Printf("seeds: %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", idea.Title, reason)
+				continue
+			}
 		}
 
 		dup, existing, err := findDuplicate(ctx, st, chat, idea)

@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -99,6 +100,7 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 	case "generate":
 		return cmdGenerate(ctx, cfg)
 	case "run":
+		runStart := time.Now() // eleme özeti (#138) bu koşunun kayıtlarını buradan filtreler
 		if err := cfg.RequireDatabaseURL(); err != nil {
 			return err
 		}
@@ -139,6 +141,7 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 			return fmt.Errorf("seeds: %w", err)
 		}
 		logPendingIdeas(ctx, lockSt)
+		logEliminationSummary(ctx, lockSt, runStart)
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
@@ -204,6 +207,81 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// eliminationStageOrder, eleme özeti log satırındaki stage sırası — pipeline
+// akışındaki doğal sıraya uyar (tema grupla → mercek → doygunluk → vendor →
+// ödeme kapısı, #138). Haritada olmayan (bilinmeyen) stage'ler bu sıranın
+// dışında, alfabetik olarak sona eklenir (savunmacı, bkz. eliminationSummaryLine).
+var eliminationStageOrder = []string{
+	"incoherent_theme",
+	"blocking_lens",
+	"distinctiveness",
+	"vendor_internal",
+	"payment_gate",
+}
+
+// eliminationStageDesc, eliminations.stage değerlerinin TR açıklaması — tek
+// yerde sabit (#138, distinctivenessCriteriaDesc'teki [seeds.go] desenle
+// aynı). Haritada olmayan stage ham adıyla loglanır (savunmacı).
+var eliminationStageDesc = map[string]string{
+	"incoherent_theme": "tutarsız tema",
+	"blocking_lens":    "mercek",
+	"distinctiveness":  "doygunluk",
+	"vendor_internal":  "vendor",
+	"payment_gate":     "ödeme kapısı",
+}
+
+// eliminationSummaryLine, stage->sayı haritasından `run` sonu özet log
+// satırını üretir (#138): bilinen stage'ler eliminationStageOrder sırasına
+// göre TR açıklamasıyla, bilinmeyenler ham adıyla alfabetik sırada sona
+// eklenir. Toplam sıfırsa "" döner — çağıran bu durumda hiçbir şey basmaz
+// (gürültü olmasın).
+func eliminationSummaryLine(counts map[string]int) string {
+	total := 0
+	for _, n := range counts {
+		total += n
+	}
+	if total == 0 {
+		return ""
+	}
+
+	seen := make(map[string]bool, len(counts))
+	parts := make([]string, 0, len(counts))
+	for _, stage := range eliminationStageOrder {
+		if n, ok := counts[stage]; ok {
+			parts = append(parts, fmt.Sprintf("%s: %d", eliminationStageDesc[stage], n))
+			seen[stage] = true
+		}
+	}
+	extra := make([]string, 0, len(counts)-len(seen))
+	for stage := range counts {
+		if !seen[stage] {
+			extra = append(extra, stage)
+		}
+	}
+	sort.Strings(extra)
+	for _, stage := range extra {
+		parts = append(parts, fmt.Sprintf("%s: %d", stage, counts[stage]))
+	}
+
+	return fmt.Sprintf("run: bu koşuda %d elendi (%s)", total, strings.Join(parts, ", "))
+}
+
+// logEliminationSummary, `run` sonunda bu koşuda (since'den itibaren) yazılan
+// eleme kayıtlarının stage bazlı özetini tek satır TR log olarak yazar
+// (#138). Sayı sıfırsa hiçbir şey basmaz. Sorgu hata verirse koşu DURMAZ,
+// tek satır TR hata logu düşer (özet bilgi, kritik değil — logPendingIdeas
+// deseniyle aynı).
+func logEliminationSummary(ctx context.Context, st *store.Store, since time.Time) {
+	counts, err := st.EliminationCountsSince(ctx, since)
+	if err != nil {
+		log.Printf("run: eleme özeti sorgusu HATA: %v", err)
+		return
+	}
+	if line := eliminationSummaryLine(counts); line != "" {
+		log.Print(line)
+	}
 }
 
 // newChat, cfg'deki LLM ayarlarından (env ile seçilir, #96) canlı istemci
