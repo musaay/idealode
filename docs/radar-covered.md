@@ -87,3 +87,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Referral Rock (Josh Ho) — müşteri referans programı SaaS'ı, $70K/ay (2026-09-10)
 - Magier (Maximilian Fleitmann) — Webflow/tasarımı sınırsız-istek abonelik ajansına çeviren holdco markası, $150K MRR (2026-09-11)
 - Rosie (Jordan Gal) — ev hizmetleri esnafı için self-serve AI telefon cevaplama servisi, 8 ayda $1M ARR (2026-09-11)
+- HiFace — yüz şekli tarayıp saç/sakal/gözlük/makyaj önerisi sunan güzellik uygulaması, $455K/yıl, %100 organik (2026-09-14)
+- gods-eye-view (bilawalsidhu) — tarayıcıda gerçek uçak/gemi/uydu verisiyle 3D küre üzerinde canlı açık-istihbarat simülatörü, ★32K, ivme (2026-09-14)
+- VoiceStudio (debpalash) — tamamen yerelde çalışan açık kaynak ElevenLabs alternatifi (ses klonlama/dublaj), ★27K, ivme (2026-09-14)
