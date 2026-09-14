@@ -475,16 +475,31 @@ func (s *Store) ThemesByDomainTag(ctx context.Context, domainTag string) ([]Them
 }
 
 // ThemesReadyForSynthesis, frekans eşiğini geçmiş ve henüz idea üretilmemiş
-// temaları döner. preferPayment açıkken (#125 — önceki sert eleme #121'de
-// eklenmişti, üretimde kart akışını sıfıra düşürdüğü için kaldırıldı)
-// ödeme sinyali taşıyan temalar (en az bir postu willingness_to_pay=true)
-// öne alınır: ORDER BY has_payment_signal DESC, t.frequency DESC, t.id.
-// EXISTS tek geçişte SELECT'te boolean kolon olarak hesaplanır, ORDER BY
-// bu kolonu (alias) referanslar — tekrar hesaplanmaz. preferPayment
-// kapalıyken sıralama eski haliyle birebir aynıdır (ek anahtar eklenmez).
+// temaları döner. Kümelenmiş temalar (#135 — gerçek dert kümelemesinden
+// doğan, #127) HER ZAMAN öne alınır: eski etiket temaları (theme_name ==
+// domain_tag) yıllarca birikmiş post taşıdığı için frekansta doğal olarak
+// üstün çıkıyor ve yeni dert temalarını sentez sırasına hiç sokmuyordu.
+// preferPayment açıkken (#125 — önceki sert eleme #121'de eklenmişti,
+// üretimde kart akışını sıfıra düşürdüğü için kaldırıldı) ödeme sinyali
+// taşıyan temalar (en az bir postu willingness_to_pay=true) ikincil anahtar
+// olarak öne alınır: ORDER BY clustered DESC, has_payment_signal DESC,
+// t.frequency DESC, t.id. Her iki boolean da tek geçişte SELECT'te
+// hesaplanır, ORDER BY bu kolonları (alias) referanslar — tekrar
+// hesaplanmaz. preferPayment kapalıyken ödeme anahtarı eklenmez ama
+// kümelenmiş anahtarı yine eklenir — bu bir tercih değil, doğruluk meselesi.
+//
+// Edge case: domain_tag NULL ise (017 backfill'inden önce/dışında kalmış
+// bir satır varsa) düz "theme_name IS DISTINCT FROM domain_tag" NULL'ı
+// yanlış ele alır (NULL'dan farklı her şey true döner, tema hatalı biçimde
+// "yeni tip" sayılır) — bu yüzden "domain_tag IS NOT NULL" guard'ı şart;
+// NULL açıkça "eski tip" sayılır.
+// Edge case: LLM bir kümeyi tesadüfen kovanın adıyla adlandırırsa
+// (theme_name == domain_tag) o tema da "eski tip" sayılır ve öncelik almaz
+// — zararsız, kendini düzeltir (temanın ismi sonraki kümelemede değişebilir).
 func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit int, preferPayment bool) ([]Theme, error) {
 	query := `
 		SELECT t.id, t.theme_name, t.frequency,
+		       (t.domain_tag IS NOT NULL AND t.theme_name IS DISTINCT FROM t.domain_tag) AS clustered,
 		       EXISTS (
 		           SELECT 1 FROM theme_posts tp
 		           JOIN post_analysis pa ON pa.post_id = tp.post_id
@@ -495,7 +510,7 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 		  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)
 		  AND t.merged_into_idea_id IS NULL
 		  AND (t.incoherent_at IS NULL OR t.last_seen > t.incoherent_at)
-		ORDER BY `
+		ORDER BY clustered DESC, `
 	if preferPayment {
 		query += `has_payment_signal DESC, `
 	}
@@ -511,7 +526,7 @@ func (s *Store) ThemesReadyForSynthesis(ctx context.Context, minEvidence, limit 
 	var out []Theme
 	for rows.Next() {
 		var t Theme
-		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency, &t.HasPaymentSignal); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Frequency, &t.Clustered, &t.HasPaymentSignal); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

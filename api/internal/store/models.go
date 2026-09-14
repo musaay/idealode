@@ -61,6 +61,11 @@ type Theme struct {
 	// DomainTag, temanın doğduğu kaba kova (#127) — ThemesByDomainTag'in
 	// doldurduğu alan; kova içi LLM kümelemesine bağlam olarak verilir.
 	DomainTag string
+	// Clustered, ThemesReadyForSynthesis'in doldurduğu bilgi alanı: tema
+	// gerçek dert kümelemesinden mi doğdu (theme_name != domain_tag) yoksa
+	// eski etiket teması mı (theme_name == domain_tag, veya domain_tag NULL)
+	// (#135). Sıralama/loglama için kullanılır.
+	Clustered bool
 }
 
 // Idea, paylaşılan idea card "tohumu".
