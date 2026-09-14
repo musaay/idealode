@@ -53,11 +53,13 @@ type Config struct {
 	LLMChunkSize     int // LLM_CHUNK_SIZE — classification batch boyutu (default: 8)
 	LLMSleepMS       int // LLM_SLEEP_MS — chunk'lar arası sabit sleep, "sakin ilerleme" (default: 400)
 
-	// RequirePaymentSignal, sentez kapısı (#121): açıkken ThemesReadyForSynthesis
-	// yalnız en az bir postu willingness_to_pay=true olan temaları döner —
-	// willingness_to_pay hiç kullanılmayan ölü veriydi, artık organik kart
-	// yazımını süzüyor. Tohum/radar (market_derived) yolunu etkilemez.
-	RequirePaymentSignal bool // REQUIRE_PAYMENT_SIGNAL (default: true)
+	// PreferPaymentSignal, sentez sıralama sinyali (#125): açıkken
+	// ThemesReadyForSynthesis ödeme sinyali taşıyan (en az bir postu
+	// willingness_to_pay=true) temaları öne alır — ELEMEZ, yalnız sıralar.
+	// #121'de sert eleme olarak eklenmişti; ödeme sinyali nadir olduğu için
+	// (%0,3) üretimde kart akışını sıfıra düşürdü, bu yüzden #125 ile
+	// sıralamaya çevrildi. Tohum/radar (market_derived) yolunu etkilemez.
+	PreferPaymentSignal bool // PREFER_PAYMENT_SIGNAL (default: true); eski REQUIRE_PAYMENT_SIGNAL hâlâ okunur (geriye dönük uyum)
 
 	// Faz 2 (auth) — şimdiden tanımlı, Faz 0/1'de boş kalabilir
 	AdminEmails []string // ADMIN_EMAILS — virgülle ayrık admin allowlist'i
@@ -91,7 +93,7 @@ func Load() (*Config, error) {
 	if c.LLMSleepMS, err = getenvInt("LLM_SLEEP_MS", 400); err != nil {
 		return nil, err
 	}
-	if c.RequirePaymentSignal, err = getenvBool("REQUIRE_PAYMENT_SIGNAL", true); err != nil {
+	if c.PreferPaymentSignal, err = loadPreferPaymentSignal(); err != nil {
 		return nil, err
 	}
 
@@ -122,6 +124,18 @@ func loadLLMEnv() (baseURL, model, apiKey string) {
 
 	baseURL = strings.TrimSuffix(getenvDefault("LLM_BASE_URL", defaultLLMBaseURL), "/")
 	return
+}
+
+// loadPreferPaymentSignal, PREFER_PAYMENT_SIGNAL'i okur; tanımlı değilse
+// eski REQUIRE_PAYMENT_SIGNAL'a düşer (#125 — kapı #121'de sert eleme
+// olarak eklenmişti, adı artık yanıltıcı olduğu için değişti; Railway'deki
+// eski env adıyla çalışan üretim servisi bozulmasın). İkisi de tanımsızsa
+// varsayılan true.
+func loadPreferPaymentSignal() (bool, error) {
+	if os.Getenv("PREFER_PAYMENT_SIGNAL") != "" {
+		return getenvBool("PREFER_PAYMENT_SIGNAL", true)
+	}
+	return getenvBool("REQUIRE_PAYMENT_SIGNAL", true)
 }
 
 // RequireLLM, LLM gerektiren subcommand'ların başında çağrılır.

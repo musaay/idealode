@@ -5,11 +5,12 @@ import (
 	"testing"
 )
 
-// TestThemesReadyForSynthesisPaymentGate, #121'in konusu: requirePayment
-// açıkken yalnız en az bir postu willingness_to_pay=true olan temaların
-// döndüğünü, kapalıyken eski davranışın (ikisi de döner) korunduğunu
-// doğrular.
-func TestThemesReadyForSynthesisPaymentGate(t *testing.T) {
+// TestThemesReadyForSynthesisPreferPayment, #125'in konusu: preferPayment
+// artık SERT ELEMEZ — sinyalsiz tema da döner — yalnız sıralamayı etkiler:
+// aynı frekansta ödeme sinyalli tema, sinyalsizden ÖNCE gelir. preferPayment
+// kapalıyken sıralama salt frekans/id'ye göre kalır (önceki #121 davranışı
+// sert eleme yapıyordu, bu artık geçerli değil).
+func TestThemesReadyForSynthesisPreferPayment(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -27,39 +28,60 @@ func TestThemesReadyForSynthesisPaymentGate(t *testing.T) {
 
 	// tema A: 3 post, hepsi willingness_to_pay=true
 	setupThemeWithPayment(t, ctx, s, platformYes, tagYes, true)
-	// tema B: 3 post, hepsi willingness_to_pay=false
+	// tema B: 3 post, hepsi willingness_to_pay=false — aynı frekans (3)
 	setupThemeWithPayment(t, ctx, s, platformNo, tagNo, false)
 
-	// Kapı açık: yalnız tema A dönmeli
+	// preferPayment açık: ikisi de döner (artık ELENMEZ), ama aynı frekansta
+	// sinyalli tema A, sinyalsiz tema B'den ÖNCE gelmeli.
 	themesOn, err := s.ThemesReadyForSynthesis(ctx, 3, 50, true)
 	if err != nil {
-		t.Fatalf("ThemesReadyForSynthesis (kapı açık): %v", err)
+		t.Fatalf("ThemesReadyForSynthesis (preferPayment açık): %v", err)
 	}
 	if !containsThemeName(themesOn, tagYes) {
-		t.Errorf("kapı açıkken ödeme sinyalli tema (%s) dönmeli, geldi: %+v", tagYes, themesOn)
+		t.Errorf("preferPayment açıkken ödeme sinyalli tema (%s) dönmeli, geldi: %+v", tagYes, themesOn)
 	}
-	if containsThemeName(themesOn, tagNo) {
-		t.Errorf("kapı açıkken ödeme sinyalsiz tema (%s) DÖNMEMELİ, geldi: %+v", tagNo, themesOn)
+	if !containsThemeName(themesOn, tagNo) {
+		t.Errorf("preferPayment açıkken ödeme sinyalsiz tema (%s) de dönmeli (artık elenmiyor), geldi: %+v", tagNo, themesOn)
+	}
+	idxYes, idxNo := themeIndex(themesOn, tagYes), themeIndex(themesOn, tagNo)
+	if idxYes < 0 || idxNo < 0 || idxYes >= idxNo {
+		t.Errorf("preferPayment açıkken aynı frekansta sinyalli tema (%d) sinyalsizden (%d) ÖNCE gelmeli", idxYes, idxNo)
+	}
+	for _, th := range themesOn {
+		switch th.Name {
+		case tagYes:
+			if !th.HasPaymentSignal {
+				t.Errorf("tema %s HasPaymentSignal=true taşımalı", tagYes)
+			}
+		case tagNo:
+			if th.HasPaymentSignal {
+				t.Errorf("tema %s HasPaymentSignal=false taşımalı", tagNo)
+			}
+		}
 	}
 
-	// Kapı kapalı: eski davranış — ikisi de döner
+	// preferPayment kapalı: eski sıralama — yalnız frekans DESC, id ASC.
+	// Aynı frekansta olduklarından sıra id'ye (kayıt sırasına) göre belirlenir.
 	themesOff, err := s.ThemesReadyForSynthesis(ctx, 3, 50, false)
 	if err != nil {
-		t.Fatalf("ThemesReadyForSynthesis (kapı kapalı): %v", err)
+		t.Fatalf("ThemesReadyForSynthesis (preferPayment kapalı): %v", err)
 	}
 	if !containsThemeName(themesOff, tagYes) || !containsThemeName(themesOff, tagNo) {
-		t.Errorf("kapı kapalıyken her iki tema da dönmeli, geldi: %+v", themesOff)
+		t.Errorf("preferPayment kapalıyken her iki tema da dönmeli, geldi: %+v", themesOff)
 	}
+}
 
-	// CountThemesWithoutPaymentSignal: en az tema B'yi saymalı (mutlak sayı
-	// yerine alt sınır kontrol edilir — DB'de başka artık veri olabilir).
-	after, err := s.CountThemesWithoutPaymentSignal(ctx, 3)
-	if err != nil {
-		t.Fatalf("CountThemesWithoutPaymentSignal: %v", err)
+func containsThemeName(themes []Theme, name string) bool {
+	return themeIndex(themes, name) >= 0
+}
+
+func themeIndex(themes []Theme, name string) int {
+	for i, th := range themes {
+		if th.Name == name {
+			return i
+		}
 	}
-	if after < 1 {
-		t.Errorf("ödeme sinyalsiz en az 1 tema (tema B) sayılmalı, geldi: %d", after)
-	}
+	return -1
 }
 
 // setupThemeWithPayment, DB'de willingness_to_pay değeri sabit 3 post +
@@ -114,13 +136,4 @@ func setupThemeWithPayment(t *testing.T, ctx context.Context, s *Store, platform
 	if err := s.RefreshThemeStats(ctx); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func containsThemeName(themes []Theme, name string) bool {
-	for _, th := range themes {
-		if th.Name == name {
-			return true
-		}
-	}
-	return false
 }

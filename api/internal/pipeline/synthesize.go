@@ -215,22 +215,24 @@ func findDuplicate(ctx context.Context, st *store.Store, chat llm.Chat, idea sto
 // (source_type=pain_point). Tema bazlı tekrar üretimi ThemesReadyForSynthesis
 // engeller; fikir bazlı mükerrerlik findDuplicate ile yakalanır (#14).
 func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat) (int, error) {
-	themes, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, synthesizeThemeLimit, cfg.RequirePaymentSignal)
+	themes, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, synthesizeThemeLimit, cfg.PreferPaymentSignal)
 	if err != nil {
 		return 0, err
-	}
-	// Kapı (#121) açıkken elenen tema sayısını logla — ölçülebilirlik için;
-	// bu sorgu başarısız olsa da pipeline'ı durdurmaz.
-	if cfg.RequirePaymentSignal {
-		if skipped, cerr := st.CountThemesWithoutPaymentSignal(ctx, cfg.MinThemeEvidence); cerr != nil {
-			log.Printf("synthesize: elenen tema sayısı hesaplanamadı: %v", cerr)
-		} else if skipped > 0 {
-			log.Printf("synthesize: ödeme sinyali olmayan %d tema atlandı", skipped)
-		}
 	}
 	if len(themes) == 0 {
 		log.Printf("synthesize: eşiği (%d) geçen yeni tema yok", cfg.MinThemeEvidence)
 		return 0, nil
+	}
+	// #125: ödeme sinyali artık ELEMİYOR, yalnız öne alıyor — kaç temanın
+	// sinyalli olduğunu ölçülebilirlik için logla (atlanan tema yok).
+	if cfg.PreferPaymentSignal {
+		signaled := 0
+		for _, th := range themes {
+			if th.HasPaymentSignal {
+				signaled++
+			}
+		}
+		log.Printf("synthesize: ödeme sinyalli tema öne alındı: %d/%d", signaled, len(themes))
 	}
 
 	created := 0

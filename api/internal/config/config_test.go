@@ -28,28 +28,63 @@ func TestLoadDefaults(t *testing.T) {
 	if c.MinThemeEvidence != 3 || c.LLMChunkSize != 8 || c.LLMSleepMS != 400 {
 		t.Errorf("sayısal default'lar yanlış: %+v", c)
 	}
-	if !c.RequirePaymentSignal {
-		t.Error("RequirePaymentSignal default true olmalı (#121)")
+	if !c.PreferPaymentSignal {
+		t.Error("PreferPaymentSignal default true olmalı (#125)")
 	}
 }
 
-// TestRequirePaymentSignalEnv, #121 kapısının env ile kapatılabildiğini ve
-// geçersiz değerde net hata döndüğünü doğrular.
-func TestRequirePaymentSignalEnv(t *testing.T) {
+// TestPreferPaymentSignalEnv, #125 sıralama sinyalinin env ile
+// kapatılabildiğini, eski REQUIRE_PAYMENT_SIGNAL adının geriye dönük
+// çalıştığını, yeni PREFER_PAYMENT_SIGNAL tanımlıyken onu geçersiz
+// kıldığını ve geçersiz değerde net hata döndüğünü doğrular.
+func TestPreferPaymentSignalEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 
-	t.Run("REQUIRE_PAYMENT_SIGNAL=false -> kapı kapalı", func(t *testing.T) {
+	t.Run("PREFER_PAYMENT_SIGNAL=false -> sıralama sinyali kapalı", func(t *testing.T) {
+		t.Setenv("PREFER_PAYMENT_SIGNAL", "false")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.PreferPaymentSignal {
+			t.Error("PreferPaymentSignal false olmalı")
+		}
+	})
+
+	t.Run("yalnız eski REQUIRE_PAYMENT_SIGNAL=false -> geriye dönük uyum", func(t *testing.T) {
+		t.Setenv("PREFER_PAYMENT_SIGNAL", "")
 		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "false")
 		c, err := Load()
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if c.RequirePaymentSignal {
-			t.Error("RequirePaymentSignal false olmalı")
+		if c.PreferPaymentSignal {
+			t.Error("eski REQUIRE_PAYMENT_SIGNAL=false hâlâ okunmalı, PreferPaymentSignal false olmalı")
 		}
 	})
 
-	t.Run("geçersiz değer -> hata", func(t *testing.T) {
+	t.Run("ikisi de tanımlı -> PREFER_PAYMENT_SIGNAL kazanır", func(t *testing.T) {
+		t.Setenv("PREFER_PAYMENT_SIGNAL", "true")
+		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "false")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !c.PreferPaymentSignal {
+			t.Error("PREFER_PAYMENT_SIGNAL tanımlıyken önceliği o almalı")
+		}
+	})
+
+	t.Run("geçersiz PREFER_PAYMENT_SIGNAL -> hata", func(t *testing.T) {
+		t.Setenv("PREFER_PAYMENT_SIGNAL", "evet")
+		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PREFER_PAYMENT_SIGNAL") {
+			t.Errorf("geçersiz PREFER_PAYMENT_SIGNAL adıyla raporlanmalı, geldi: %v", err)
+		}
+	})
+
+	t.Run("geçersiz eski REQUIRE_PAYMENT_SIGNAL -> hata", func(t *testing.T) {
+		t.Setenv("PREFER_PAYMENT_SIGNAL", "")
 		t.Setenv("REQUIRE_PAYMENT_SIGNAL", "evet")
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "REQUIRE_PAYMENT_SIGNAL") {
 			t.Errorf("geçersiz REQUIRE_PAYMENT_SIGNAL adıyla raporlanmalı, geldi: %v", err)
