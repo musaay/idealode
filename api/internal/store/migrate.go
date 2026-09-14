@@ -59,6 +59,9 @@ var migration016 string
 //go:embed migrate_sql/017_theme_domain_tag.sql
 var migration017 string
 
+//go:embed migrate_sql/018_idea_data_access.sql
+var migration018 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -130,6 +133,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration017); err != nil {
 		return fmt.Errorf("017_theme_domain_tag.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration018); err != nil {
+		return fmt.Errorf("018_idea_data_access.sql: %w", err)
 	}
 	return nil
 }

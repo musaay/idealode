@@ -598,7 +598,7 @@ func TestBlockedByIdeaLensFailBlocksAndStopsEarly(t *testing.T) {
 	chat := &lensSeqChat{verdicts: []string{"fail", "pass", "pass"}, errAt: -1}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	lensName, reason, blocked := blockedByIdeaLens(context.Background(), chat, idea)
+	lensName, reason, blocked := blockedByIdeaLens(context.Background(), chat, &idea)
 	if !blocked {
 		t.Fatal("ilk mercek fail dönünce blocked=true olmalı")
 	}
@@ -611,34 +611,51 @@ func TestBlockedByIdeaLensFailBlocksAndStopsEarly(t *testing.T) {
 	if chat.calls != 1 {
 		t.Errorf("ilk fail'de erken çıkış: 1 çağrı beklenirdi, geldi %d", chat.calls)
 	}
+	// #131: erken çıkışta (blok) idea'ya DOKUNULMAZ — veri-erişimi merceği
+	// bu senaryoda hiç çağrılmadı (ilk mercek zaten üçüncü-taraf, fail'de durdu).
+	if idea.DataAccessVerdict != nil || idea.DataAccessReason != nil {
+		t.Errorf("bloklanan kartta data_access_* NULL kalmalı, geldi: verdict=%v reason=%v", idea.DataAccessVerdict, idea.DataAccessReason)
+	}
 }
 
 // TestBlockedByIdeaLensUnsureDoesNotBlock, "unsure"ın BLOKLAMADIĞINI ve
-// tüm 3 merceğin çağrıldığını doğrular (yalnız "fail" bloklar).
+// tüm 3 merceğin çağrıldığını doğrular (yalnız "fail" bloklar). #131: veri-
+// erişimi merceğinin (seedLenses[1]) HAM kararı idea.DataAccessVerdict/
+// Reason'a yazılmalı — kart bloklanmadı, yani DB'ye yazılacak.
 func TestBlockedByIdeaLensUnsureDoesNotBlock(t *testing.T) {
 	chat := &lensSeqChat{verdicts: []string{"unsure", "unsure", "unsure"}, errAt: -1}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, idea); blocked {
+	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, &idea); blocked {
 		t.Error("unsure bloklamamalı")
 	}
 	if chat.calls != 3 {
 		t.Errorf("3 mercek de çağrılmalı, geldi %d", chat.calls)
 	}
+	if idea.DataAccessVerdict == nil || *idea.DataAccessVerdict != "unsure" {
+		t.Errorf("data_access_verdict=unsure beklenirdi, geldi: %v", idea.DataAccessVerdict)
+	}
+	if idea.DataAccessReason == nil || *idea.DataAccessReason != "test-reason" {
+		t.Errorf("data_access_reason=%q beklenirdi, geldi: %v", "test-reason", idea.DataAccessReason)
+	}
 }
 
 // TestBlockedByIdeaLensErrorDoesNotBlock, mercek çağrısı HATA verirse
 // (ağ/kota) kartın DÜŞÜRÜLMEDİĞİNİ doğrular — hata loglanır, blok yokmuş
-// gibi devam edilir (distinctivenessAdvise ile aynı tutum).
+// gibi devam edilir (distinctivenessAdvise ile aynı tutum). #131: hata
+// erken dönüşe yol açtığından idea'ya HİÇ DOKUNULMAZ, data_access_* NULL kalır.
 func TestBlockedByIdeaLensErrorDoesNotBlock(t *testing.T) {
 	chat := &lensSeqChat{errAt: 0}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, idea); blocked {
+	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, &idea); blocked {
 		t.Error("mercek çağrı hatası bloklamamalı")
 	}
 	if chat.calls != 1 {
 		t.Errorf("hatada durulmalı (kalan mercekler boşa çağrılmamalı), 1 çağrı beklenirdi, geldi %d", chat.calls)
+	}
+	if idea.DataAccessVerdict != nil || idea.DataAccessReason != nil {
+		t.Errorf("mercek hatasında data_access_* NULL kalmalı, geldi: verdict=%v reason=%v", idea.DataAccessVerdict, idea.DataAccessReason)
 	}
 }
 
@@ -648,7 +665,7 @@ func TestBlockedByIdeaLensUsesTemperatureZero(t *testing.T) {
 	chat := &lensSeqChat{verdicts: []string{"pass", "pass", "pass"}, errAt: -1}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	blockedByIdeaLens(context.Background(), chat, idea)
+	blockedByIdeaLens(context.Background(), chat, &idea)
 	if len(chat.lastTemp) != 3 {
 		t.Fatalf("3 mercek çağrısı beklenirdi, geldi %d", len(chat.lastTemp))
 	}
@@ -821,6 +838,21 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 	if ideaCount != 1 {
 		t.Error("unsure verdict kartı yazmalı")
 	}
+
+	// #131: veri-erişimi merceğinin "unsure" HAM kararı karta yazılmalı —
+	// organik yolda unsure bloklamaz ama görünür olmalı.
+	var dataAccessVerdict, dataAccessReason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT data_access_verdict, data_access_reason FROM ideas WHERE title = $1", title).
+		Scan(&dataAccessVerdict, &dataAccessReason); err != nil {
+		t.Fatal(err)
+	}
+	if dataAccessVerdict == nil || *dataAccessVerdict != "unsure" {
+		t.Errorf("data_access_verdict=unsure beklenirdi, geldi: %v", dataAccessVerdict)
+	}
+	if dataAccessReason == nil || *dataAccessReason != "test-blok-sebebi" {
+		t.Errorf("data_access_reason=%q beklenirdi, geldi: %v", "test-blok-sebebi", dataAccessReason)
+	}
 }
 
 // TestSynthesizeIdeasLensErrorStillWrites: bloklayıcı mercek çağrısı HATA
@@ -878,5 +910,17 @@ func TestSynthesizeIdeasLensErrorStillWrites(t *testing.T) {
 	}
 	if ideaCount != 1 {
 		t.Error("mercek hatasında kart yine de yazılmalı")
+	}
+
+	// #131: mercek hatasında (ilk lens'te durulduğundan veri-erişimi merceği
+	// hiç çağrılmadı) data_access_* NULL kalmalı.
+	var dataAccessVerdict, dataAccessReason *string
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT data_access_verdict, data_access_reason FROM ideas WHERE title = $1", title).
+		Scan(&dataAccessVerdict, &dataAccessReason); err != nil {
+		t.Fatal(err)
+	}
+	if dataAccessVerdict != nil || dataAccessReason != nil {
+		t.Errorf("mercek hatasında data_access_* NULL kalmalı, geldi: verdict=%v reason=%v", dataAccessVerdict, dataAccessReason)
 	}
 }

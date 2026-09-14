@@ -173,7 +173,11 @@ func logPendingIdeas(ctx context.Context, st *store.Store) {
 // pendingIdeaSummary, `run: beklemede …` özetindeki tek kart satırını üretir
 // (#108): id + başlık (60 karaktere kırpılır) + özgünlük kararı — fail ise
 // kriter koduyla birlikte (`[fail K3]`), değilse yalnız karar (`[pass]`),
-// mercek hiç çalışmadıysa (alanlar NULL) `[?]`.
+// mercek hiç çalışmadıysa (alanlar NULL) `[?]`. Veri-erişimi kararı (#131)
+// AYRI bir `[veri erişimi: ...]` etiketiyle eklenir — yalnız dolu olduğunda
+// (NULL ise hiç eklenmez: seed-türetilmiş kartlarda bu alan hep NULL'dır,
+// her satırda anlamsız `[veri erişimi: ?]` gürültüsü istenmiyor; organik
+// yolda "fail" karta hiç ulaşmadığından burada yalnız pass/unsure görülür).
 func pendingIdeaSummary(p store.PendingIdea) string {
 	title := truncateRunes(p.Title, 60)
 	tag := "?"
@@ -183,7 +187,11 @@ func pendingIdeaSummary(p store.PendingIdea) string {
 			tag = fmt.Sprintf("fail %s", *p.DistinctivenessCriterion)
 		}
 	}
-	return fmt.Sprintf("%d %q [%s]", p.ID, title, tag)
+	summary := fmt.Sprintf("%d %q [%s]", p.ID, title, tag)
+	if p.DataAccessVerdict != nil {
+		summary += fmt.Sprintf(" [veri erişimi: %s]", *p.DataAccessVerdict)
+	}
+	return summary
 }
 
 // truncateRunes, s'yi en fazla n RUNE'a kırpar (Türkçe çok baytlı karakterler

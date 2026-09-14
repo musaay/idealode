@@ -582,13 +582,15 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 				(title, slug, problem_statement, proposed_solution, target_user, evidence_count,
 				 example_quotes, source_type, source_theme_id, created_by_user_id,
 				 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags,
-				 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17)
+				 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason,
+				 data_access_verdict, data_access_reason)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17, $18, $19)
 			RETURNING id`,
 			i.Title, slug, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
 			i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
 			i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags,
-			i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason).Scan(&id)
+			i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason,
+			i.DataAccessVerdict, i.DataAccessReason).Scan(&id)
 		if err == nil {
 			return id, nil
 		}
@@ -622,12 +624,15 @@ func (s *Store) ListIdeas(ctx context.Context, limit int) ([]Idea, error) {
 }
 
 // PendingIdea, PendingIdeas'ın döndürdüğü hafif özet satırı — `idealode run`
-// log özeti için id+title+özgünlük kararı (#102, #108).
+// log özeti için id+title+özgünlük kararı (#102, #108) + veri-erişimi kararı
+// (#131 — reason taşınmaz, distinctiveness_criterion'un aksine gösterimde
+// yalnız verdict kelimesi kullanılır, bkz. pendingIdeaSummary).
 type PendingIdea struct {
 	ID                       int64
 	Title                    string
 	DistinctivenessVerdict   *string
 	DistinctivenessCriterion *string
+	DataAccessVerdict        *string
 }
 
 // PendingIdeas, henüz PO onayı almamış (published_at IS NULL) ve arşivde
@@ -637,7 +642,7 @@ type PendingIdea struct {
 // açar.
 func (s *Store) PendingIdeas(ctx context.Context) ([]PendingIdea, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, title, distinctiveness_verdict, distinctiveness_criterion FROM ideas
+		SELECT id, title, distinctiveness_verdict, distinctiveness_criterion, data_access_verdict FROM ideas
 		WHERE published_at IS NULL AND archived_at IS NULL
 		ORDER BY created_at, id`)
 	if err != nil {
@@ -648,7 +653,7 @@ func (s *Store) PendingIdeas(ctx context.Context) ([]PendingIdea, error) {
 	var out []PendingIdea
 	for rows.Next() {
 		var p PendingIdea
-		if err := rows.Scan(&p.ID, &p.Title, &p.DistinctivenessVerdict, &p.DistinctivenessCriterion); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.DistinctivenessVerdict, &p.DistinctivenessCriterion, &p.DataAccessVerdict); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -700,6 +705,7 @@ const ideaSelect = `
 	       i.local_evidence, i.parent_idea_id, COALESCE(pi.slug, ''), COALESCE(i.created_by_session_id, ''),
 	       COALESCE(t.theme_name, ''), i.created_at,
 	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason,
+	       i.data_access_verdict, i.data_access_reason,
 	       i.published_at
 	FROM ideas i
 	LEFT JOIN themes t ON t.id = i.source_theme_id
@@ -716,6 +722,7 @@ func scanIdea(row pgx.Row, i *Idea) error {
 		&i.ParentIdeaID, &i.ParentSlug, &i.CreatedBySessionID,
 		&i.SourceTheme, &i.CreatedAt,
 		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason,
+		&i.DataAccessVerdict, &i.DataAccessReason,
 		&i.PublishedAt); err != nil {
 		return err
 	}

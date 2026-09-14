@@ -12,7 +12,8 @@ func sp(s string) *string { return &s }
 
 // TestPendingIdeaSummary, `run: beklemede …` özetindeki tek kart satırının
 // biçimini doğrular (#108): başlık 60 rune'a kırpılır, fail kriter koduyla
-// birlikte gösterilir, karar yoksa "[?]".
+// birlikte gösterilir, karar yoksa "[?]". Veri-erişimi kararı (#131) varsa
+// AYRI bir `[veri erişimi: ...]` etiketi eklenir, yoksa (NULL) hiç eklenmez.
 func TestPendingIdeaSummary(t *testing.T) {
 	longTitle := strings.Repeat("ü", 80) // çok baytlı karakter — rune bazlı kırpma sınanır
 
@@ -46,6 +47,23 @@ func TestPendingIdeaSummary(t *testing.T) {
 			name: "başlık 60 rune'a kırpılır",
 			p:    store.PendingIdea{ID: 7, Title: longTitle, DistinctivenessVerdict: sp("pass")},
 			want: `7 "` + strings.Repeat("ü", 60) + `…" [pass]`,
+		},
+		{
+			name: "veri erişimi unsure ayrı etiket olarak eklenir",
+			p: store.PendingIdea{
+				ID: 23, Title: "Esnaf/KOBİ için Instagram-WhatsApp Lead Takip Otomasyonu",
+				DistinctivenessVerdict: sp("pass"), DistinctivenessCriterion: sp("none"),
+				DataAccessVerdict: sp("unsure"),
+			},
+			want: `23 "Esnaf/KOBİ için Instagram-WhatsApp Lead Takip Otomasyonu" [pass] [veri erişimi: unsure]`,
+		},
+		{
+			name: "veri erişimi NULL ise etiket hiç eklenmez",
+			p: store.PendingIdea{
+				ID: 24, Title: "Veri Erişimi Merceği Hiç Çalışmadı",
+				DistinctivenessVerdict: sp("pass"), DistinctivenessCriterion: sp("none"),
+			},
+			want: `24 "Veri Erişimi Merceği Hiç Çalışmadı" [pass]`,
 		},
 	}
 
