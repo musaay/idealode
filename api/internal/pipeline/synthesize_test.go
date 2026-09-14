@@ -263,7 +263,7 @@ func TestSynthesizeIdeasIntegration(t *testing.T) {
 	if err := st.InsertPostAnalyses(ctx, analyses); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := GroupThemes(ctx, st); err != nil {
+	if _, err := GroupThemes(ctx, st, themeFallbackChat{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -352,7 +352,7 @@ func setupSynthTheme(t *testing.T, ctx context.Context, st *store.Store, platfor
 	if err := st.InsertPostAnalyses(ctx, analyses); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := GroupThemes(ctx, st); err != nil {
+	if _, err := GroupThemes(ctx, st, themeFallbackChat{}); err != nil {
 		t.Fatal(err)
 	}
 }

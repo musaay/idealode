@@ -288,10 +288,10 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	}
 	defer st.Close()
 
-	if _, err := pipeline.GroupThemes(ctx, st); err != nil {
+	chat := newChat(cfg)
+	if _, err := pipeline.GroupThemes(ctx, st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
-	chat := newChat(cfg)
 	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)
 	log.Printf("synthesize tamam: %d yeni idea", n)
 	return err
