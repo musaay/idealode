@@ -80,6 +80,8 @@ const lensThirdPartySystem = `You evaluate whether a proposed software product i
 
 FAIL if the underlying opportunity is actually a defect, bug, or feature gap that only the ORIGINAL vendor could reasonably fix (their own onboarding, their own pricing, their own outage). PASS if an independent developer could build a STANDALONE product serving the same or an adjacent need, without needing to be the original vendor.
 
+Watch for a reframing escape: the pain originates from a provider's own behavior or process, and the proposed product is that same process repackaged as a paid tool sold back to that provider — e.g. a phased-rollout console sold to the app developers whose own frequent forced updates created the user complaints in the first place. This is still FAIL: the buyer is the same party whose own behavior causes the pain, and the product only manages THEIR OWN internal process. PASS instead when the product is general-purpose infrastructure solving the same underlying need across MANY independent providers or users, not one party's own process — e.g. a localization platform serving many open-source maintainers whose projects each happen to be single-language, or a dependency-metadata assistant helping whoever installs a package, not the package's own author. Selling to businesses is not itself disqualifying — most legitimate third-party tools are B2B; what matters is whether the buyer is merely administering their own behavior, or gaining a capability that serves parties independent of the one causing the pain.
+
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
 // lensDataAccessSystem: veri-erişimi merceği (#131 v2) — kartın ÇEKİRDEK
