@@ -90,3 +90,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - HiFace — yüz şekli tarayıp saç/sakal/gözlük/makyaj önerisi sunan güzellik uygulaması, $455K/yıl, %100 organik (2026-09-14)
 - gods-eye-view (bilawalsidhu) — tarayıcıda gerçek uçak/gemi/uydu verisiyle 3D küre üzerinde canlı açık-istihbarat simülatörü, ★32K, ivme (2026-09-14)
 - VoiceStudio (debpalash) — tamamen yerelde çalışan açık kaynak ElevenLabs alternatifi (ses klonlama/dublaj), ★27K, ivme (2026-09-14)
+- Neural Frames (Nicolai Klemke) — şarkıyı 8 ses katmanına ayırıp her birinin görselleri farklı tetiklediği ses-reaktif AI müzik videosu üretici, $5M ARR (2026-09-15)
+- Minimalist Phone (Martin Morávek) — telefonu bilinçli sürtünmeyle "aptal telefona" çeviren, ekstra erişim için ödenen tersine-özellik uygulaması, $20K/ay (2026-09-15)
