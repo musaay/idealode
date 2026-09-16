@@ -46,6 +46,24 @@ func TestParseIdeaResponseSkip(t *testing.T) {
 	if _, err := parseIdeaResponse(`{"skip": false, "title": "X", "problem_statement": "p"}`); errors.Is(err, errVendorInternal) {
 		t.Error("skip:false vendor-internal sayılmamalı")
 	}
+	// reason belirsiz/boşsa güvenli varsayılan: vendor-internal (mevcut davranış korunur)
+	if _, err := parseIdeaResponse(`{"skip": true}`); !errors.Is(err, errVendorInternal) {
+		t.Errorf("reason'sız skip errVendorInternal'a düşmeli, geldi: %v", err)
+	}
+}
+
+// TestParseIdeaResponseDataLockedIsSeparateFromVendorInternal (#134):
+// reason="data-locked" artık AYRI bir hataya (errDataLocked) düşer —
+// errVendorInternal ile aynı kovaya girmemeli, çünkü SynthesizeIdeas ikisini
+// farklı işler (data-locked temayı kalıcı gömmez).
+func TestParseIdeaResponseDataLockedIsSeparateFromVendorInternal(t *testing.T) {
+	_, err := parseIdeaResponse(`{"skip": true, "reason": "data-locked"}`)
+	if !errors.Is(err, errDataLocked) {
+		t.Errorf("reason=data-locked errDataLocked dönmeli, geldi: %v", err)
+	}
+	if errors.Is(err, errVendorInternal) {
+		t.Error("data-locked errVendorInternal ile AYNI hata olmamalı (#134)")
+	}
 }
 
 func TestParseIdeaResponseRejectsEmpty(t *testing.T) {
@@ -664,6 +682,14 @@ func TestSynthesizeSystemPromptMentionsConstraints(t *testing.T) {
 	if strings.Contains(synthesizeSystemTmpl, "DISTINCTIVENESS RULE") {
 		t.Error("synthesizeSystemTmpl artık DISTINCTIVENESS RULE içermemeli (#101 v3)")
 	}
+	// #134: DATA-ACCESS kararı artık TEK karar noktası ilkesiyle yalnız
+	// lensDataAccessSystem'de veriliyor — üretim prompt'u bu kuralı taşımamalı.
+	if strings.Contains(synthesizeSystemTmpl, "DATA-ACCESS RULE") {
+		t.Error("synthesizeSystemTmpl artık DATA-ACCESS RULE içermemeli (#134)")
+	}
+	if strings.Contains(synthesizeSystemTmpl, "data-locked") {
+		t.Error("synthesizeSystemTmpl artık data-locked reason'ını üretmeyi talimatlamamalı (#134)")
+	}
 }
 
 // lensSeqChat, blockedByIdeaLens birim testleri için seedLenses sırasına
@@ -1198,6 +1224,91 @@ func TestSynthesizeIdeasVendorInternalRecordsElimination(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("vendor-internal eliminations'a stage=vendor_internal kaydı düşürmeli")
+	}
+	if found.Detail == nil || *found.Detail == "" {
+		t.Error("eliminations.detail (kart yok, en güçlü kanıtın başlığı) boş olmamalı")
+	}
+}
+
+// dataLockedChat: tutarlılık denetimi normal geçer (3/3), ama kart üretim
+// çağrısı LLM'in eski/kendiliğinden "data-locked" skip cevabını taklit eder
+// — errDataLocked dalını (#134: stage=blocking_lens) tetiklemek için.
+type dataLockedChat struct{}
+
+func (dataLockedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return dataLockedChat{}.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (dataLockedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if system == coherenceSystem {
+		return `{"indices":[0,1,2]}`, nil
+	}
+	return `{"skip": true, "reason": "data-locked"}`, nil
+}
+
+// TestSynthesizeIdeasDataLockedDoesNotEmbedTheme (#134): kart üretim
+// prompt'undan kaldırılan eski DATA-ACCESS kuralı hâlâ (eski model davranışı
+// ya da modelin kendiliğinden) "data-locked" skip döndürürse, tema
+// vendor-internal'ın AKSİNE kalıcı gömülmez (incoherent_at NULL kalır) —
+// bir sonraki koşuda organik yoldan (lensDataAccessSystem dahil) yeniden
+// değerlendirilebilir. Yine de eliminations'a stage=blocking_lens bir kayıt
+// düşer (best-effort görünürlük).
+func TestSynthesizeIdeasDataLockedDoesNotEmbedTheme(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	platform, tag := "test-syn-data-locked", "test-syn-data-locked-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+		st.Pool.Exec(ctx, "DELETE FROM eliminations WHERE subject = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	since := time.Now().Add(-time.Minute)
+	setupSynthTheme(t, ctx, st, platform, tag, false)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	n, err := SynthesizeIdeas(ctx, cfg, st, dataLockedChat{})
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("data-locked temadan kart üretilmemeli, n=0 beklenirdi, geldi: %d", n)
+	}
+
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT incoherent_at FROM themes WHERE theme_name = $1", tag).Scan(&incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt != nil {
+		t.Error("data-locked skip temayı KALICI GÖMMEMELİ (vendor-internal'ın aksine, #134)")
+	}
+
+	elims, err := st.EliminationsSince(ctx, since)
+	if err != nil {
+		t.Fatalf("EliminationsSince: %v", err)
+	}
+	var found *store.Elimination
+	for i := range elims {
+		if elims[i].Stage == "blocking_lens" && elims[i].Subject == tag {
+			found = &elims[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("data-locked skip eliminations'a stage=blocking_lens kaydı düşürmeli")
+	}
+	if found.Reason == nil || *found.Reason != "data-locked" {
+		t.Errorf("eliminations.reason=data-locked beklenirdi, geldi: %v", found.Reason)
 	}
 	if found.Detail == nil || *found.Detail == "" {
 		t.Error("eliminations.detail (kart yok, en güçlü kanıtın başlığı) boş olmamalı")
