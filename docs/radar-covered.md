@@ -92,3 +92,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - VoiceStudio (debpalash) — tamamen yerelde çalışan açık kaynak ElevenLabs alternatifi (ses klonlama/dublaj), ★27K, ivme (2026-09-14)
 - Neural Frames (Nicolai Klemke) — şarkıyı 8 ses katmanına ayırıp her birinin görselleri farklı tetiklediği ses-reaktif AI müzik videosu üretici, $5M ARR (2026-09-15)
 - Minimalist Phone (Martin Morávek) — telefonu bilinçli sürtünmeyle "aptal telefona" çeviren, ekstra erişim için ödenen tersine-özellik uygulaması, $20K/ay (2026-09-15)
+- Hero Analytics (Zac Cherin) — marka yerine ajanslara satılan e-posta/SMS pazarlama raporlama SaaS'ı, 19 ayda $1M ARR (2026-09-16)
+- HabitKit (Sebastian Röhl) — GitHub-grid görseliyle alışkanlık takibi, $1-2/ay aşırı düşük fiyatla kitlesel abonelik, ~$28K MRR / $600K+/yıl (2026-09-16)
