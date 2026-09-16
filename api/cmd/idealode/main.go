@@ -8,6 +8,7 @@
 //	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
 //	run         ingest -> analyze -> synthesize sırayla
+//	retheme     eski tip temalardaki kartsız gönderileri temalarından çözer (elle, #136)
 //	api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç, #18)
 //	serve       web arayüzünü sunar (galeri + kart detayı, salt okunur)
 //	dump        idea card'ları JSON olarak stdout'a dök
@@ -16,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -46,6 +48,8 @@ Komutlar:
   seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
   run         ingest -> analyze -> synthesize -> fuse -> seeds sırayla çalıştırır
+  retheme     eski tip temalardaki kartsız gönderileri temalarından çözer (elle tetiklenir, #136)
+                --limit N zorunlu, --dry-run isteğe bağlı
   api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç); PORT, varsayılan 8080
   serve       web arayüzünü sunar (galeri + kart detayı); PORT, varsayılan 8080
   dump        idea card'ları JSON olarak stdout'a döker
@@ -68,7 +72,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "api", "serve", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "retheme", "api", "serve", "dump", "migrate":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -152,6 +156,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
+	case "retheme":
+		return cmdRetheme(ctx, cfg)
 	case "api":
 		return cmdAPI(ctx, cfg)
 	case "serve":
@@ -431,6 +437,43 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	log.Printf("fuse tamam: %d kart işlendi", n)
+	return nil
+}
+
+// cmdRetheme, eski tip temalardaki (theme_name == domain_tag) kartsız
+// gönderileri temalarından çözer (#136) — elle tetiklenir, cron/run akışına
+// eklenmez. LLM kullanmaz, yeniden kümeleme yapmaz: çözülen gönderiler bir
+// sonraki `synthesize`/`run` çağrısında GroupThemes tarafından yeniden
+// kümelenir.
+func cmdRetheme(ctx context.Context, cfg *config.Config) error {
+	fs := flag.NewFlagSet("retheme", flag.ExitOnError)
+	limit := fs.Int("limit", 0, "en fazla çözülecek gönderi sayısı (zorunlu, > 0)")
+	dryRun := fs.Bool("dry-run", false, "hiçbir şey yazma, yalnız hedef kümeyi raporla")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	if *limit <= 0 {
+		return fmt.Errorf("--limit zorunlu ve > 0 olmalı")
+	}
+
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	if *dryRun {
+		return pipeline.RethemeDryRun(ctx, st, cfg.MinThemeEvidence, *limit)
+	}
+
+	result, err := pipeline.Retheme(ctx, st, cfg.MinThemeEvidence, *limit)
+	if err != nil {
+		return err
+	}
+	log.Printf("retheme: %d gönderi %d eski temadan çözüldü, kalan %d", result.Resolved, result.Themes, result.Remaining)
 	return nil
 }
 
