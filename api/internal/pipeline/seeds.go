@@ -552,7 +552,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		lensErr := false
 		for li, lens := range lenses {
 			// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
-			raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, lensUserPrompt(seed), 0)
+			raw, err := chat.ChatJSONWithTemperature(llm.WithStage(ctx, "mercek"), lens.system, lensUserPrompt(seed), 0)
 			if err != nil {
 				log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lens.name, err)
 				lensErr = true
@@ -625,7 +625,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			system = fmt.Sprintf(seedCardSystemTmpl, langName(cfg.OutputLang))
 			userPrompt = seedCardUserPrompt(seed)
 		}
-		raw, err := chat.ChatJSON(ctx, system, userPrompt)
+		raw, err := chat.ChatJSON(llm.WithStage(ctx, "tohum"), system, userPrompt)
 		if err != nil {
 			log.Printf("seeds: %q kart üretimi HATA: %v — atlandı (yeniden denenecek)", seed.Name, err)
 			continue
@@ -662,7 +662,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// daha üretilmez). K2-K4 fail yalnız kaydedilir, kart yine yazılır.
 		// Mercek çağrısı hata verirse alanlar NULL kalır, kart yine de
 		// yazılır (bloklama YOK ilkesi hata durumunda da geçerli).
-		if err := distinctivenessCheck(ctx, chat, &idea); err != nil {
+		if err := distinctivenessCheck(llm.WithStage(ctx, "özgünlük"), chat, &idea); err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, err)
 		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
 			criterion := "none"
@@ -683,7 +683,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			}
 		}
 
-		dup, existing, err := findDuplicate(ctx, st, chat, idea)
+		dup, existing, err := findDuplicate(llm.WithStage(ctx, "dedup"), st, chat, idea)
 		if err != nil {
 			return created, err
 		}

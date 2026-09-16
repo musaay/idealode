@@ -78,6 +78,7 @@ type chatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage Usage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -115,8 +116,13 @@ func (c *OpenAICompatClient) ChatJSONWithTemperature(ctx context.Context, system
 			}
 		}
 
-		content, retryable, err := c.doRequest(ctx, payload)
+		content, usage, retryable, err := c.doRequest(ctx, payload)
 		if err == nil {
+			// Aynı mantıksal çağrı birkaç denemede başarılı olsa da yalnız
+			// BAŞARILI cevabın usage'ı sayılır (#144) — retry'lerin harcadığı
+			// token'lar bu çağrının usage'ında zaten yer almaz (sağlayıcı
+			// başarısız denemeler için usage döndürmez).
+			recordUsage(ctx, usage)
 			return content, nil
 		}
 		lastErr = err
@@ -146,24 +152,24 @@ func retryDelay(err error, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second // 2s, 4s, 8s
 }
 
-func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (content string, retryable bool, err error) {
+func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (content string, usage Usage, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return "", false, err
+		return "", Usage{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", true, err // ağ hatası — denemeye değer
+		return "", Usage{}, true, err // ağ hatası — denemeye değer
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", true, err
+		return "", Usage{}, true, err
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
@@ -173,23 +179,23 @@ func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (con
 				after = time.Duration(secs * float64(time.Second))
 			}
 		}
-		return "", true, &rateLimitError{host: c.host(), status: resp.StatusCode, retryAfter: after, body: truncate(string(body), 200)}
+		return "", Usage{}, true, &rateLimitError{host: c.host(), status: resp.StatusCode, retryAfter: after, body: truncate(string(body), 200)}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("%s HTTP %d: %s", c.host(), resp.StatusCode, truncate(string(body), 400))
+		return "", Usage{}, false, fmt.Errorf("%s HTTP %d: %s", c.host(), resp.StatusCode, truncate(string(body), 400))
 	}
 
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", false, fmt.Errorf("%s yanıtı parse edilemedi: %w", c.host(), err)
+		return "", Usage{}, false, fmt.Errorf("%s yanıtı parse edilemedi: %w", c.host(), err)
 	}
 	if parsed.Error != nil {
-		return "", false, fmt.Errorf("%s: %s", c.host(), parsed.Error.Message)
+		return "", Usage{}, false, fmt.Errorf("%s: %s", c.host(), parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", false, fmt.Errorf("%s: boş yanıt", c.host())
+		return "", Usage{}, false, fmt.Errorf("%s: boş yanıt", c.host())
 	}
-	return parsed.Choices[0].Message.Content, false, nil
+	return parsed.Choices[0].Message.Content, parsed.Usage, false, nil
 }
 
 // host, hata metinlerinde sağlayıcı adı yerine kullanılan base URL host'unu
