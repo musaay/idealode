@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -101,6 +102,11 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return cmdGenerate(ctx, cfg)
 	case "run":
 		runStart := time.Now() // eleme özeti (#138) bu koşunun kayıtlarını buradan filtreler
+		// Token ölçümü (#144): koşu başında meter oluşturulur, ctx'e eklenir —
+		// tüm alt cmd'ler bu ctx'i kullandığından aşama etiketleriyle
+		// (llm.WithStage, çağrı noktalarında) eşleşen usage buraya birikir.
+		usageMeter := llm.NewUsageMeter()
+		ctx = llm.WithMeter(ctx, usageMeter)
 		if err := cfg.RequireDatabaseURL(); err != nil {
 			return err
 		}
@@ -142,6 +148,7 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		}
 		logPendingIdeas(ctx, lockSt)
 		logEliminationSummary(ctx, lockSt, runStart)
+		logUsageSummary(usageMeter)
 		return nil
 	case "fuse":
 		return cmdFuse(ctx, cfg)
@@ -284,6 +291,70 @@ func logEliminationSummary(ctx context.Context, st *store.Store, since time.Time
 	}
 }
 
+// usageSummaryLine, meter'ın anlık görüntüsünden `run` sonu token özet
+// satırını üretir (#144): aşamalar token'a göre büyükten küçüğe sıralanır
+// (eşitlikte aşama adı alfabetik — belirli/tekrarlanabilir sıra), sayılar
+// binlik ayraçlı (nokta) yazılır. Toplam token 0 ise (tüm çağrılar hatayla
+// bitti ya da hiç çağrı yapılmadı) "" döner — çağıran bu durumda hiçbir şey
+// basmaz (logEliminationSummary'nin "gürültü olmasın" ilkesiyle aynı).
+func usageSummaryLine(snapshot map[string]llm.StageUsage) string {
+	total := 0
+	for _, u := range snapshot {
+		total += u.TotalTokens
+	}
+	if total == 0 {
+		return ""
+	}
+
+	stages := make([]string, 0, len(snapshot))
+	for stage := range snapshot {
+		stages = append(stages, stage)
+	}
+	sort.Slice(stages, func(i, j int) bool {
+		a, b := snapshot[stages[i]], snapshot[stages[j]]
+		if a.TotalTokens != b.TotalTokens {
+			return a.TotalTokens > b.TotalTokens
+		}
+		return stages[i] < stages[j]
+	})
+
+	parts := make([]string, len(stages))
+	for i, stage := range stages {
+		u := snapshot[stage]
+		parts[i] = fmt.Sprintf("%s %s (%d çağrı)", stage, formatThousands(u.TotalTokens), u.Calls)
+	}
+	return fmt.Sprintf("run: token kullanımı — toplam %s · %s", formatThousands(total), strings.Join(parts, " · "))
+}
+
+// logUsageSummary, `run` sonunda meter'daki aşama bazlı token kullanımını
+// tek satır TR log olarak yazar (#144).
+func logUsageSummary(m *llm.UsageMeter) {
+	if line := usageSummaryLine(m.Snapshot()); line != "" {
+		log.Print(line)
+	}
+}
+
+// formatThousands, tam sayıyı TR biçiminde binlik ayraçlı (nokta) string'e
+// çevirir (örn. 142310 -> "142.310").
+func formatThousands(n int) string {
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
 // newChat, cfg'deki LLM ayarlarından (env ile seçilir, #96) canlı istemci
 // kurar. Tüm LLM kullanan subcommand'lar bu tek yardımcıyı paylaşır.
 func newChat(cfg *config.Config) llm.Chat {
@@ -335,7 +406,7 @@ func cmdAnalyze(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
-	n, err := pipeline.Analyze(ctx, cfg, st, chat)
+	n, err := pipeline.Analyze(llm.WithStage(ctx, "analiz"), cfg, st, chat)
 	log.Printf("analyze tamam: %d post işlendi", n)
 	return err
 }
@@ -355,7 +426,7 @@ func cmdFuse(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
-	n, err := pipeline.FuseEvidence(ctx, cfg, st, chat)
+	n, err := pipeline.FuseEvidence(llm.WithStage(ctx, "fuse"), cfg, st, chat)
 	if err != nil {
 		return err
 	}
@@ -377,7 +448,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
-	if _, err := pipeline.GroupThemes(ctx, st, chat); err != nil {
+	if _, err := pipeline.GroupThemes(llm.WithStage(ctx, "kümeleme"), st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
 	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)

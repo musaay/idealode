@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/store"
 )
 
@@ -129,6 +130,79 @@ func TestEliminationSummaryLine(t *testing.T) {
 			got := eliminationSummaryLine(tc.counts)
 			if got != tc.want {
 				t.Errorf("eliminationSummaryLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFormatThousands, binlik ayraçlı (nokta) sayı biçimlendirmeyi doğrular
+// (#144) — token log satırındaki tüm sayılar bu yardımcıdan geçer.
+func TestFormatThousands(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{9, "9"},
+		{999, "999"},
+		{1000, "1.000"},
+		{142310, "142.310"},
+		{98400, "98.400"},
+		{1234567, "1.234.567"},
+		{-2500, "-2.500"},
+	}
+	for _, tc := range cases {
+		if got := formatThousands(tc.n); got != tc.want {
+			t.Errorf("formatThousands(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
+
+// TestUsageSummaryLine, `run: token kullanımı …` özet satırının biçimini
+// doğrular (#144): token'a göre büyükten küçüğe sıralanır (eşitlikte aşama
+// adı alfabetik), binlik ayraç nokta, toplam 0 ise satır boş döner.
+func TestUsageSummaryLine(t *testing.T) {
+	cases := []struct {
+		name string
+		snap map[string]llm.StageUsage
+		want string
+	}{
+		{
+			name: "harita nil ise satır basılmaz",
+			snap: nil,
+			want: "",
+		},
+		{
+			name: "toplam token 0 ise satır basılmaz (çağrı olsa bile)",
+			snap: map[string]llm.StageUsage{
+				"analiz": {Calls: 3, TotalTokens: 0},
+			},
+			want: "",
+		},
+		{
+			name: "aşamalar token'a göre büyükten küçüğe sıralanır",
+			snap: map[string]llm.StageUsage{
+				"analiz":     {Calls: 61, TotalTokens: 98400},
+				"kümeleme":   {Calls: 12, TotalTokens: 21050},
+				"tutarlılık": {Calls: 9, TotalTokens: 14200},
+			},
+			want: "run: token kullanımı — toplam 133.650 · analiz 98.400 (61 çağrı) · kümeleme 21.050 (12 çağrı) · tutarlılık 14.200 (9 çağrı)",
+		},
+		{
+			name: "eşit token'da aşama adı alfabetik sıralanır",
+			snap: map[string]llm.StageUsage{
+				"zzz": {Calls: 1, TotalTokens: 100},
+				"aaa": {Calls: 1, TotalTokens: 100},
+			},
+			want: "run: token kullanımı — toplam 200 · aaa 100 (1 çağrı) · zzz 100 (1 çağrı)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := usageSummaryLine(tc.snap)
+			if got != tc.want {
+				t.Errorf("usageSummaryLine() = %q, want %q", got, tc.want)
 			}
 		})
 	}

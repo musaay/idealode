@@ -263,7 +263,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 
 		// Kova içi tutarlılık: eşik, tag frekansını değil aynı derdin
 		// frekansını ölçsün.
-		subset, err := coherentSubset(ctx, chat, evidence)
+		subset, err := coherentSubset(llm.WithStage(ctx, "tutarlılık"), chat, evidence)
 		if err != nil {
 			log.Printf("synthesize: tema %q tutarlılık HATA: %v — atlandı", th.Name, err)
 			continue
@@ -290,7 +290,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		idea, err := synthesizeOne(ctx, cfg, chat, th, subset)
+		idea, err := synthesizeOne(llm.WithStage(ctx, "sentez"), cfg, chat, th, subset)
 		if errors.Is(err, errVendorInternal) {
 			// Belirli bir ürünün kendi kusuru — kart olamaz. Yeni kanıt
 			// gelene dek tema yeniden değerlendirilmez.
@@ -317,7 +317,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// tema bir sonraki temaya geçilir. Mevcut ThemesReadyForSynthesis
 		// davranışı DEĞİŞMEDİĞİNDEN tema bir sonraki koşuda yeniden ele
 		// alınabilir (bilinçli tercih, bkz. issue #123 edge case notu).
-		if lensName, reason, blocked := blockedByIdeaLens(ctx, chat, &idea); blocked {
+		if lensName, reason, blocked := blockedByIdeaLens(llm.WithStage(ctx, "mercek"), chat, &idea); blocked {
 			blockedByLens++
 			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
 			// Kart burada zaten ÜRETİLDİ (synthesizeOne yukarıda) — detail
@@ -334,7 +334,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
 		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
 		// durumunda da geçerli).
-		if err := distinctivenessCheck(ctx, chat, &idea); err != nil {
+		if err := distinctivenessCheck(llm.WithStage(ctx, "özgünlük"), chat, &idea); err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, err)
 		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
 			criterion := "none"
@@ -355,7 +355,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 
 		// Dedup (#14): pg_trgm benzerliği + gri bölgede LLM hakemi. Mükerrer
 		// fikir yeni kart açmaz, mevcut kartın kanıtını güçlendirir.
-		dup, existing, err := findDuplicate(ctx, st, chat, idea)
+		dup, existing, err := findDuplicate(llm.WithStage(ctx, "dedup"), st, chat, idea)
 		if err != nil {
 			return created, err
 		}
