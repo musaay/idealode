@@ -36,8 +36,6 @@ THIRD-PARTY RULE (critical): Evidence about existing products comes in two kinds
 (c) STRUCTURALLY-BOUND wishes: if the "unmet need" can only be solved by changing the vendor's own security policy, regulatory compliance flow, or core structural decision (e.g. a government portal's own login security, a platform's own return/refund enforcement) — even reframed as a wrapper/dashboard/aggregator, an independent builder cannot actually fix the underlying constraint. Treat this the same as (a): return exactly {"skip": true, "reason": "vendor-internal"} and nothing else.
 (d) WORKAROUND/WRAPPER around a vendor's own flaw: if the ONLY way the proposed product delivers value is by retrying, proxying, overlaying, monitoring, or otherwise reaching into a vendor app's UI or behavior AT RUNTIME to compensate for that vendor's own bug or missing feature (e.g. a browser extension that auto-retries a login for one shopping site because that site's login keeps failing, an accessibility-service/screen-filter overlay that forces dark mode into apps that lack it, an extension that patches another app's behavior), it is NOT an independent product — it is a patch glued onto the vendor(s) from outside, no matter how many vendors it targets. Apply the test: if EVERY one of those vendor apps shipped the missing feature or fixed the bug natively tomorrow, would this product still have a reason to exist? If no — return exactly {"skip": true, "reason": "vendor-internal"} and nothing else. A multi-vendor product only escapes this clause when its value comes from ITS OWN data or service — aggregation of public listings, managing translations/content it owns, combining information the vendors themselves never unify — NOT from modifying other apps' UI or behavior at runtime. Concrete skip example: "a dark-mode overlay for apps that lack dark mode" — skip under (d) even if it targets many apps, because the value vanishes the moment those apps add dark mode natively. Concrete valid example: a tool that aggregates listings across many job sites and fixes a location-filter problem none of them solve, or an i18n/translation layer usable across many unrelated open-source projects — these still matter regardless of what any single vendor does, because they serve many vendors/users through their own data/service, not by hijacking the vendors' UI at runtime.
 
-DATA-ACCESS RULE: A standalone idea is only valid if an independent builder can actually reach the data or integration it depends on. If the core of the idea requires closed data or private APIs that incumbent vendors control and have no incentive to open (e.g. a food-delivery app's live order feed), do NOT produce that idea — return {"skip": true, "reason": "data-locked"}. Open/regulated interfaces (public APIs, open banking, RSS, email parsing, user-provided data) are fine.
-
 Return ONLY a JSON object:
 {"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","example_quotes":["..."],"urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
 
@@ -305,6 +303,22 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 				"vendor-internal", evidence[0].Title)
 			continue
 		}
+		if errors.Is(err, errDataLocked) {
+			// #134: eski model davranışı ya da modelin kendiliğinden döndüğü
+			// "data-locked" skip — tema KALICI GÖMÜLMEZ (MarkThemeIncoherent
+			// çağrılmaz). Kart hiç üretilmediğinden blockedByIdeaLens (ve
+			// içindeki lensDataAccessSystem) bu temayı GÖRMEZ; tema yalnız
+			// ThemesReadyForSynthesis tarafından bir sonraki koşuda yeniden
+			// seçilir ve SENTEZ (kart üretimi) baştan denenir. Stage olarak
+			// "blocking_lens" seçildi: bu, semantik olarak
+			// lensDataAccessSystem'in post-üretim "fail"iyle AYNI kategori
+			// (veri erişimi bloğu) — "vendor_internal" stage'i belirli bir
+			// ürünün kendi kusuru için ayrılmış, buraya karışmamalı.
+			log.Printf("synthesize: tema %q data-locked dedi — gömülmedi, sonraki koşuda sentez yeniden denenecek", th.Name)
+			recordElimination(ctx, st, "blocking_lens", th.Name, "fail", "",
+				"data-locked", evidence[0].Title)
+			continue
+		}
 		if err != nil {
 			log.Printf("synthesize: tema %q HATA: %v — atlandı", th.Name, err)
 			continue
@@ -477,15 +491,27 @@ type ideaResponse struct {
 // alıntılar 5 ile sınırlanır.
 // errVendorInternal: kanıt yalnızca belirli bir ürünün kendi kusurlarını
 // anlatıyor — üçüncü tarafça inşa edilebilir bir fikir yok (skip cevabı,
-// THIRD-PARTY/DATA-ACCESS RULE — "vendor-internal" ve "data-locked" dahil
-// her skip:true aynı şekilde ele alınır).
+// THIRD-PARTY RULE — reason "vendor-internal" ya da tanımsız/boş her
+// skip:true bu hataya düşer).
 var errVendorInternal = fmt.Errorf("vendor-internal: üçüncü tarafça inşa edilemez")
+
+// errDataLocked (#134): veri erişimi kararı artık TEK karar noktası ilkesiyle
+// yalnız lensDataAccessSystem'de verilir; synthesizeSystemTmpl'deki eski
+// DATA-ACCESS RULE kaldırıldı. Model yine de eski davranışla (ya da
+// kendiliğinden) {"skip":true,"reason":"data-locked"} dönerse bu AYRI hata
+// ile işaretlenir — errVendorInternal ile aynı kovaya düşmez, tema KALICI
+// gömülmez (bkz. SynthesizeIdeas).
+var errDataLocked = fmt.Errorf("data-locked: veri erişimi kararı yalnız mercekte verilir")
 
 func parseIdeaResponse(raw string) (store.Idea, error) {
 	var skip struct {
-		Skip bool `json:"skip"`
+		Skip   bool   `json:"skip"`
+		Reason string `json:"reason"`
 	}
 	if json.Unmarshal([]byte(raw), &skip) == nil && skip.Skip {
+		if skip.Reason == "data-locked" {
+			return store.Idea{}, errDataLocked
+		}
 		return store.Idea{}, errVendorInternal
 	}
 
