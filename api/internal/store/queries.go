@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ActiveSources, ingest'in işleyeceği aktif kaynakları döner.
@@ -438,14 +439,214 @@ func (s *Store) LinkThemePost(ctx context.Context, themeID, postID int64) error 
 	return err
 }
 
+// dbExecutor, hem *pgxpool.Pool hem pgx.Tx'in ortak üç metodu — retheme'in
+// tek transaction'lı yazan yolu (RethemeResolve) ile salt-okunur yolun
+// (RethemeCandidates/RethemeCandidateCount, dry-run) aynı sorgu
+// yardımcılarını (rethemeTargets, refreshThemeStats) paylaşabilmesi için
+// (#136).
+type dbExecutor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// refreshThemeStats, frequency'yi theme_posts sayısıyla eşitler. LEFT JOIN
+// kasıtlı: theme_posts'ta hiç satırı kalmayan bir tema da 0'a çekilmeli
+// (retheme bağları sildiğinde bu durum oluşur, #136) — eski INNER JOIN
+// deseni (yalnız count subquery'sinde eşleşen satırları güncelleme) bu
+// temaları eski frekansında BIRAKIRDI. GroupThemes yalnız EKLEME yaptığından
+// (post sayısı hiç 0'a düşmez) bu düzeltme onun davranışını değiştirmez.
+func refreshThemeStats(ctx context.Context, db dbExecutor) error {
+	_, err := db.Exec(ctx, `
+		UPDATE themes t
+		SET frequency = COALESCE(c.cnt, 0)
+		FROM themes t2
+		LEFT JOIN (SELECT theme_id, count(*) AS cnt FROM theme_posts GROUP BY theme_id) c
+		  ON c.theme_id = t2.id
+		WHERE t2.id = t.id`)
+	return err
+}
+
 // RefreshThemeStats, frequency'yi theme_posts sayısıyla eşitler.
 func (s *Store) RefreshThemeStats(ctx context.Context) error {
-	_, err := s.Pool.Exec(ctx, `
-		UPDATE themes t
-		SET frequency = c.cnt
-		FROM (SELECT theme_id, count(*) AS cnt FROM theme_posts GROUP BY theme_id) c
-		WHERE c.theme_id = t.id`)
-	return err
+	return refreshThemeStats(ctx, s.Pool)
+}
+
+// ------------------------------------------------------------- retheme (#136)
+//
+// Eski tip temalarda (theme_name == domain_tag ya da domain_tag NULL) —
+// eşiği geçmiş ama hiçbir zaman karta dönüşmemiş — biriken gönderiler her
+// koşuda tutarlılık kontrolünden düşüp kart üretmeden yer kaplıyordu.
+// `idealode retheme` bu gönderileri eski temalarından ÇÖZER (theme_posts
+// bağını siler); yeniden kümelemeyi YAPMAZ — GroupThemes bir sonraki
+// koşuda UnthemedAnalyses ile bu gönderileri temasız bulup LLM
+// kümelemesinden geçirir. Eski tema satırı SİLİNMEZ (frekansı 0'a
+// düşebilir, zararsız, geri izlenebilir).
+
+// RethemeTarget, retheme hedef kümesindeki TEK theme_posts bağı.
+type RethemeTarget struct {
+	ThemeID   int64
+	ThemeName string
+	PostID    int64
+}
+
+// RethemeThemeSummary, dry-run raporundaki "ilk 10 tema" satırı.
+type RethemeThemeSummary struct {
+	Name      string
+	Frequency int
+}
+
+// rethemeTargetsWhere, hedef kümenin ortak WHERE koşulu: eski tip tema
+// (domain_tag NULL ya da theme_name == domain_tag) VE frequency eşiği VE
+// bu temaya bağlı idea YOK (kartlı temalar asla dokunulmaz).
+const rethemeTargetsWhere = `
+	(t.domain_tag IS NULL OR t.theme_name = t.domain_tag)
+	AND t.frequency >= $1
+	AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)`
+
+// rethemeTargets, hedef kümedeki theme_posts bağlarını (tema id, post id)
+// sırasıyla en fazla `limit` GÖNDERİ ile döner (#136) — seçim sırası
+// belirli/tekrarlanabilir. db, hem Pool (salt-okunur: dry-run/sayım) hem Tx
+// (yazan yol: RethemeResolve, atomiklik için) olabilir.
+func rethemeTargets(ctx context.Context, db dbExecutor, minEvidence, limit int) ([]RethemeTarget, error) {
+	rows, err := db.Query(ctx, `
+		SELECT tp.theme_id, t.theme_name, tp.post_id
+		FROM theme_posts tp
+		JOIN themes t ON t.id = tp.theme_id
+		WHERE `+rethemeTargetsWhere+`
+		ORDER BY tp.theme_id, tp.post_id
+		LIMIT $2`, minEvidence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RethemeTarget
+	for rows.Next() {
+		var t RethemeTarget
+		if err := rows.Scan(&t.ThemeID, &t.ThemeName, &t.PostID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RethemeCandidates, hedef kümedeki theme_posts bağlarını (limit uygulanmış,
+// belirli sırada) salt-okunur döner — dry-run önizlemesi için.
+func (s *Store) RethemeCandidates(ctx context.Context, minEvidence, limit int) ([]RethemeTarget, error) {
+	return rethemeTargets(ctx, s.Pool, minEvidence, limit)
+}
+
+// RethemeCandidateCount, hedef kümedeki TOPLAM (limit'siz) theme_posts bağı
+// sayısını döner — "kalan" hesaplaması ve idempotent boş-küme kontrolü için.
+func (s *Store) RethemeCandidateCount(ctx context.Context, minEvidence int) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM theme_posts tp
+		JOIN themes t ON t.id = tp.theme_id
+		WHERE `+rethemeTargetsWhere, minEvidence).Scan(&n)
+	return n, err
+}
+
+// RethemeTopThemes, hedef kümedeki temalardan İLK n tanesini (tema id
+// sırasıyla — rethemeTargets'taki seçim sırasıyla aynı) ad + mevcut
+// frequency ile döner (dry-run raporu).
+func (s *Store) RethemeTopThemes(ctx context.Context, minEvidence, n int) ([]RethemeThemeSummary, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT t.theme_name, t.frequency
+		FROM themes t
+		WHERE `+rethemeTargetsWhere+`
+		ORDER BY t.id
+		LIMIT $2`, minEvidence, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RethemeThemeSummary
+	for rows.Next() {
+		var t RethemeThemeSummary
+		if err := rows.Scan(&t.Name, &t.Frequency); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RethemeWontReclusterCount, verilen post id'lerinden kaçının, temasından
+// çözüldükten SONRA UnthemedAnalyses kriterini (sinyalli sınıflandırma +
+// dolu domain_tags) SAĞLAMAYACAĞINI döner — bunlar bir sonraki GroupThemes
+// çağrısında yeniden kümelenemeyecek, temasız kalacak (dry-run raporu,
+// spec edge case).
+func (s *Store) RethemeWontReclusterCount(ctx context.Context, postIDs []int64) (int, error) {
+	if len(postIDs) == 0 {
+		return 0, nil
+	}
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM unnest($1::bigint[]) AS pid
+		LEFT JOIN post_analysis pa ON pa.post_id = pid
+		WHERE pa.post_id IS NULL
+		   OR pa.classification NOT IN ('pain_point', 'feature_request')
+		   OR COALESCE(array_length(pa.domain_tags, 1), 0) = 0`, postIDs).Scan(&n)
+	return n, err
+}
+
+// RethemeResolve, hedef kümedeki en fazla `limit` GÖNDERİYİ TEK transaction
+// içinde temalarından çözer: seçilen theme_posts satırları silinir, ardından
+// refreshThemeStats aynı transaction'da çağrılır (atomiklik — yarıda
+// kesilirse hiçbir bağ silinmemiş sayılır). Eski tema satırı SİLİNMEZ.
+// resolved: çözülen gönderi sayısı, themes: etkilenen FARKLI tema sayısı.
+func (s *Store) RethemeResolve(ctx context.Context, minEvidence, limit int) (resolved, themes int, err error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	// Rollback'te DIŞARIDAN gelen ctx DEĞİL context.Background() kullanılır:
+	// hata/timeout/iptal zaten bu ctx'ten geldiyse aynı ctx ile ROLLBACK
+	// göndermeye çalışmak da başarısız olabilir — bağlantı sunucuya
+	// ROLLBACK göndermeden kopar, transaction sunucu tarafında açık
+	// kalabilir (pool bağlantıyı sağlıksız sayıp kapatana dek). Commit
+	// sonrası bu çağrı no-op'tur (zaten kapalı tx).
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	targets, err := rethemeTargets(ctx, tx, minEvidence, limit)
+	if err != nil {
+		return 0, 0, fmt.Errorf("retheme hedef kümesi: %w", err)
+	}
+	if len(targets) == 0 {
+		return 0, 0, tx.Commit(ctx)
+	}
+
+	batch := &pgx.Batch{}
+	affected := map[int64]bool{}
+	for _, t := range targets {
+		batch.Queue(`DELETE FROM theme_posts WHERE theme_id = $1 AND post_id = $2`, t.ThemeID, t.PostID)
+		affected[t.ThemeID] = true
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range targets {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return 0, 0, fmt.Errorf("theme_posts silme: %w", err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		return 0, 0, fmt.Errorf("theme_posts silme (batch kapanışı): %w", err)
+	}
+
+	if err := refreshThemeStats(ctx, tx); err != nil {
+		return 0, 0, fmt.Errorf("RefreshThemeStats: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return len(targets), len(affected), nil
 }
 
 // ThemesByDomainTag, verilen kovada (domain_tag) daha önce oluşturulmuş
