@@ -85,7 +85,11 @@ func TestMigratePublishedBackfillOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer s.Close()
+	// t.Cleanup LIFO çalışır: Close burada ÖNCE kaydedildiği için, aşağıda
+	// kaydedilen DELETE cleanup'ı Close'dan ÖNCE (havuz hâlâ açıkken) çalışır.
+	// defer s.Close() kullanılsaydı fonksiyon dönüşünde t.Cleanup'lardan ÖNCE
+	// tetiklenir, DELETE kapalı pool'a karşı denenip hatası sessizce yutulurdu.
+	t.Cleanup(s.Close)
 
 	id, err := s.InsertIdea(ctx, Idea{
 		Title: "test-migrate-backfill-pending", ProblemStatement: "p", ProposedSolution: "s",
@@ -95,7 +99,11 @@ func TestMigratePublishedBackfillOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	t.Cleanup(func() { s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+	t.Cleanup(func() {
+		if _, err := s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id); err != nil {
+			t.Logf("cleanup DELETE (id=%d): %v", id, err)
+		}
+	})
 
 	// Insert sonrası kolon zaten var, kart beklemede (published_at NULL).
 	var publishedAt *string
@@ -144,7 +152,12 @@ func TestMigrateIdempotentWithAllSourceTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer s.Close()
+	// t.Cleanup LIFO çalışır: Close burada ÖNCE kaydedildiği için, aşağıda
+	// kaydedilen DELETE cleanup'ı Close'dan ÖNCE (havuz hâlâ açıkken) çalışır.
+	// defer s.Close() kullanılsaydı fonksiyon dönüşünde t.Cleanup'lardan ÖNCE
+	// tetiklenir, DELETE kapalı pool'a karşı denenip hatası sessizce yutulurdu
+	// (#139: test-migrate-source-type-* satırları DB'de kalıcı kalıyordu).
+	t.Cleanup(s.Close)
 
 	// ideas_source_type_check'in (013_momentum_derived.sql, TEK sahip —
 	// bkz. migrations/README.md) kabul ettiği TÜM değerler; biri eksik
@@ -163,7 +176,9 @@ func TestMigrateIdempotentWithAllSourceTypes(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, id := range ids {
-			s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id)
+			if _, err := s.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id); err != nil {
+				t.Logf("cleanup DELETE (id=%d): %v", id, err)
+			}
 		}
 	})
 
