@@ -324,59 +324,69 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		// Bloklayıcı mercekler (#123): seeds.go'daki 3 mercek (üçüncü-taraf
-		// inşa edilebilirlik / veri-erişimi / pazar-işlerliği) organik
-		// yolda da SIRAYLA çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI.
-		// İlk "fail"de durur, kalan mercekler çağrılmaz; kart yazılmaz ve
-		// tema bir sonraki temaya geçilir. #151: tema burada MarkThemeIncoherent
-		// ile damgalanır — aksi halde ThemesReadyForSynthesis aynı temayı bir
+		// Bloklayıcı mercekler (#123, #153): seeds.go'daki 3 mercek
+		// (üçüncü-taraf inşa edilebilirlik / veri-erişimi / pazar-işlerliği)
+		// organik yolda da SIRAYLA, runBlockingLenses(stopOnFirstFail=true)
+		// ile çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI. İlk "fail"de
+		// durur, kalan mercekler çağrılmaz; kart yazılmaz ve tema bir sonraki
+		// temaya geçilir. #151: tema burada MarkThemeIncoherent ile
+		// damgalanır — aksi halde ThemesReadyForSynthesis aynı temayı bir
 		// sonraki koşuda yeniden seçer, kart yeniden üretilir ve yeniden elenir
 		// (prod ölçümü: kart aşamasındaki elemelerin çoğu 3 temanın tekrarıydı).
 		// Tutarsız tema (~277) ve vendor-internal (~295) dallarıyla AYNI desen;
 		// tema yeni kanıt gelene dek (last_seen > incoherent_at) beklemede kalır.
-		if lensName, reason, blocked := blockedByIdeaLens(llm.WithStage(ctx, "mercek"), chat, &idea); blocked {
+		lensPrompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
+		lensOutcome, lensVerdicts := runBlockingLenses(ctx, chat, seedLenses, lensPrompt, true)
+		if lensOutcome.Err != nil {
+			log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", lensOutcome.Check, lensOutcome.Err)
+		} else if lensOutcome.Blocked {
 			blockedByLens++
-			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
-			if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
+			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensOutcome.Check, lensOutcome.Reason)
+			// Kart burada zaten ÜRETİLDİ (synthesizeOne yukarıda) — detail
+			// kartın problem_statement'ı (#138).
+			if err := applyGateOutcome(ctx, st, lensOutcome, idea.Title, idea.ProblemStatement,
+				func() error { return st.MarkThemeIncoherent(ctx, th.ID) }); err != nil {
 				// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
 				// satır log — recordElimination'ın best-effort tutumuyla aynı.
 				log.Printf("synthesize: tema %q MarkThemeIncoherent HATA: %v — devam ediliyor", th.Name, err)
 			}
-			// Kart burada zaten ÜRETİLDİ (synthesizeOne yukarıda) — detail
-			// kartın problem_statement'ı (#138).
-			recordElimination(ctx, st, "blocking_lens", idea.Title, "fail", "", reason, idea.ProblemStatement)
 			continue
+		} else {
+			// Tüm mercekler geçti (ya da unsure) — veri-erişimi merceğinin
+			// (#131) HAM kararı idea'ya yazılır (blockedByIdeaLens'in eski
+			// davranışıyla AYNI ilke).
+			var dataAccess lensVerdict
+			for i, lens := range seedLenses {
+				if lens.system == lensDataAccessSystem {
+					dataAccess = lensVerdicts[i]
+				}
+			}
+			idea.DataAccessVerdict = &dataAccess.Verdict
+			idea.DataAccessReason = &dataAccess.Reason
 		}
 
-		// Özgünlük merceği (#101 v3, #138): K1 (doygunluk) fail'i kartı
-		// YAZDIRMAZ (eliminations'a kaydedilip tema damgalanır — #151: artık
-		// blockedByIdeaLens ile AYNI ilke, tema MarkThemeIncoherent ile
-		// bekletilir, aksi halde ThemesReadyForSynthesis aynı temayı bir
-		// sonraki koşuda yeniden seçer ve kart yeniden üretilip yeniden
-		// elenir). K2-K4 fail yalnız kaydedilir, tema İŞARETLENMEZ, kart yine
-		// yazılır. Mercek çağrısı hata verirse alanlar NULL kalır, kart yine
-		// de yazılır, tema İŞARETLENMEZ (bloklama YOK ilkesi hata durumunda
-		// da geçerli).
-		if err := distinctivenessCheck(llm.WithStage(ctx, "özgünlük"), chat, &idea); err != nil {
-			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, err)
-		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
-			criterion := "none"
-			if idea.DistinctivenessCriterion != nil {
-				criterion = *idea.DistinctivenessCriterion
+		// Özgünlük merceği (#101 v3, #138, #153): K1 (doygunluk) fail'i
+		// kartı YAZDIRMAZ (eliminations'a kaydedilip tema damgalanır — #151:
+		// artık yukarıdaki bloklayıcı mercek bloğuyla AYNI ilke, tema
+		// MarkThemeIncoherent ile bekletilir, aksi halde ThemesReadyForSynthesis
+		// aynı temayı bir sonraki koşuda yeniden seçer ve kart yeniden
+		// üretilip yeniden elenir). K2-K4 fail yalnız kaydedilir, tema
+		// İŞARETLENMEZ, kart yine yazılır. Mercek çağrısı hata verirse
+		// alanlar NULL kalır, kart yine de yazılır, tema İŞARETLENMEZ
+		// (bloklama YOK ilkesi hata durumunda da geçerli).
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		if distinctOutcome.Err != nil {
+			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, distinctOutcome.Err)
+		} else if distinctOutcome.Stage == "distinctiveness" {
+			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement,
+				func() error { return st.MarkThemeIncoherent(ctx, th.ID) }); err != nil {
+				// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
+				// satır log — recordElimination'ın best-effort tutumuyla aynı.
+				log.Printf("synthesize: tema %q MarkThemeIncoherent HATA: %v — devam ediliyor", th.Name, err)
 			}
-			reason := ""
-			if idea.DistinctivenessReason != nil {
-				reason = *idea.DistinctivenessReason
-			}
-			recordElimination(ctx, st, "distinctiveness", idea.Title, "fail", criterion, reason, idea.ProblemStatement)
-			if criterion == "K1" {
+			if distinctOutcome.Blocked {
 				blockedBySaturation++
-				log.Printf("synthesize: tema %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", th.Name, reason)
-				if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
-					// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
-					// satır log — recordElimination'ın best-effort tutumuyla aynı.
-					log.Printf("synthesize: tema %q MarkThemeIncoherent HATA: %v — devam ediliyor", th.Name, err)
-				}
+				log.Printf("synthesize: tema %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", th.Name, distinctOutcome.Reason)
 				continue
 			}
 		}
@@ -421,41 +431,31 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 	return created, nil
 }
 
-// blockedByIdeaLens, kart üretildikten SONRA, DB'ye YAZILMADAN önce çalışan
-// 3 bloklayıcı merceği (#123) SIRAYLA dener: seeds.go'daki seedLenses listesi
-// ve parseLensVerdict deseni AYNEN kullanılır — iki kopya mercek/prompt
-// YOK. İlk "fail"de durur (kalan mercekler çağrılmaz, token tasarrufu) ve
-// bloklayan merceğin adı+sebebini döner. "unsure" BLOKLAMAZ — yalnız "fail"
-// bloklar. Mercek çağrısı HATA verirse (ağ/kota) kart DÜŞÜRÜLMEZ: hata
-// loglanır, blok yokmuş gibi (false) dönülür — distinctivenessCheck ile
-// aynı "bloklama yok" tutumu.
-//
+// blockedByIdeaLens: #153 ile SynthesizeIdeas artık runBlockingLenses'i
+// DOĞRUDAN kullanıyor (elle yazılmış döngü kaldırıldı) — bu fonksiyon
+// yalnızca geriye dönük ikinci bir kopya AÇMADAN (runBlockingLenses'e
+// DELEGE eder) eski dış davranışını (imza, log metni, erken-çıkış, veri-
+// erişimi yazımı) birebir koruyan İNCE bir sarmalayıcı olarak bırakıldı —
+// synthesize_test.go/usage_stage_test.go'daki birim testleri bu adı
+// doğrudan çağırıyor (TestBlockedByIdeaLens*, TestStagePropagationBlockedByIdeaLens).
+// "unsure" BLOKLAMAZ — yalnız "fail" bloklar. Mercek çağrısı HATA verirse
+// kart DÜŞÜRÜLMEZ: hata loglanır, blok yokmuş gibi (false) dönülür.
 // Veri-erişimi merceğinin (#131) HAM kararı idea.DataAccessVerdict/Reason'a
-// yazılır (idea pointer bu yüzden alınır) — ama YALNIZ üç mercek de hatasız
-// tamamlanıp sonuç bloklamadıysa (fonksiyonun SON satırı): kart zaten yalnız
-// bu durumda DB'ye yazılır. Erken dönüşte (bir mercek hata verdi ya da
-// "fail" bloklandı) idea'ya HİÇ DOKUNULMAZ — alanlar nil (dolayısıyla DB'de
-// NULL) kalır, distinctivenessCheck'in "mercek hata verirse alanlar NULL
-// kalır" tutumuyla aynı ilke. Bloklayan "fail" burada AYRICA eliminations'a
-// kaydedilmez — kayıt çağıran (SynthesizeIdeas) tarafında yapılır, çünkü
-// idea.Title/ProblemStatement (detail için) ve tema adı (subject için)
-// oradaki kapsamda bir arada bulunur.
+// yazılır — YALNIZ üç mercek de hatasız tamamlanıp sonuç bloklamadıysa.
 func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensName, reason string, blocked bool) {
 	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
+	outcome, verdicts := runBlockingLenses(ctx, chat, seedLenses, prompt, true)
+	if outcome.Err != nil {
+		log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", outcome.Check, outcome.Err)
+		return "", "", false
+	}
+	if outcome.Blocked {
+		return outcome.Check, outcome.Reason, true
+	}
 	var dataAccess lensVerdict
-	for _, lens := range seedLenses {
-		// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
-		raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, prompt, 0)
-		if err != nil {
-			log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", lens.name, err)
-			return "", "", false
-		}
-		v := parseLensVerdict(raw)
+	for i, lens := range seedLenses {
 		if lens.system == lensDataAccessSystem {
-			dataAccess = v
-		}
-		if v.Verdict == "fail" {
-			return lens.name, v.Reason, true
+			dataAccess = verdicts[i]
 		}
 	}
 	idea.DataAccessVerdict = &dataAccess.Verdict
