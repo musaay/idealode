@@ -469,10 +469,11 @@ func TestSynthesizeIdeasDistinctivenessFailStillWritesCard(t *testing.T) {
 }
 
 // TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords: özgünlük merceği
-// "fail" K1 (doygunluk) dönerse kart DB'ye YAZILMAZ, tema damgalanmaz
-// (blockedByIdeaLens ile AYNI ilke — #123 edge case notu: ThemesReadyFor
-// Synthesis davranışı değişmediğinden tema sonraki koşuda yeniden ele
-// alınabilir) ve eliminations'a stage=distinctiveness bir satır düşer (#138).
+// "fail" K1 (doygunluk) dönerse kart DB'ye YAZILMAZ, tema MarkThemeIncoherent
+// ile damgalanır (#151 — blockedByIdeaLens ile AYNI ilke: aksi halde
+// ThemesReadyForSynthesis aynı temayı bir sonraki koşuda yeniden döner ve
+// kart yeniden üretilip yeniden elenir) ve eliminations'a stage=distinctiveness
+// bir satır düşer (#138).
 func TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -546,6 +547,37 @@ func TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
+
+	// #151: K1 (doygunluk) ile bloklanan tema da MarkThemeIncoherent ile
+	// damgalanmalı — blockedByIdeaLens ile AYNI ilke.
+	var themeID int64
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT id, incoherent_at FROM themes WHERE theme_name = $1", tag).
+		Scan(&themeID, &incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt == nil {
+		t.Error("K1 ile bloklanan tema MarkThemeIncoherent ile damgalanmalı (incoherent_at NULL kalmamalı)")
+	}
+	ready, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, 50, false)
+	if err != nil {
+		t.Fatalf("ThemesReadyForSynthesis: %v", err)
+	}
+	if themeInList(ready, themeID) {
+		t.Error("K1 ile bloklanan tema bir sonraki ThemesReadyForSynthesis çağrısında DÖNMEMELİ")
+	}
+
+	// Negatif kontrol (kriter 3): aynı etiketten yeni kanıt gelince yeniden döner.
+	if _, _, err := st.UpsertTheme(ctx, tag, tag); err != nil {
+		t.Fatalf("yeni kanıt upsert: %v", err)
+	}
+	readyAfter, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, 50, false)
+	if err != nil {
+		t.Fatalf("ThemesReadyForSynthesis (yeni kanıt sonrası): %v", err)
+	}
+	if !themeInList(readyAfter, themeID) {
+		t.Error("aynı etiketten yeni kanıt gelip last_seen ilerleyince tema yeniden DÖNMELİ")
+	}
 }
 
 // TestSynthesizeIdeasDistinctivenessErrorStillWritesCard: mercek çağrısı
@@ -596,6 +628,15 @@ func TestSynthesizeIdeasDistinctivenessErrorStillWritesCard(t *testing.T) {
 	}
 	if verdict != nil || criterion != nil || reason != nil {
 		t.Errorf("mercek hatasında distinctiveness_* alanları NULL kalmalı, geldi: verdict=%v criterion=%v reason=%v", verdict, criterion, reason)
+	}
+
+	// #151 edge case: özgünlük merceği HATA verirse tema İŞARETLENMEMELİ.
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT incoherent_at FROM themes WHERE theme_name = $1", tag).Scan(&incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt != nil {
+		t.Error("özgünlük merceği hatası MarkThemeIncoherent çağırmamalı")
 	}
 }
 
@@ -855,7 +896,9 @@ func (f *synthLensChat) ChatJSONWithTemperature(ctx context.Context, system, use
 // TestSynthesizeIdeasLensFailNotWritten: 3 bloklayıcı merceğin (#123)
 // ikincisi "fail" dönerse kart DB'ye YAZILMAZ, özgünlük merceği
 // hiç çağrılmaz (boşa token) ve kalan 3. mercek de çağrılmaz (erken çıkış,
-// çağrı sayısı doğrulanır).
+// çağrı sayısı doğrulanır). #151: tema da MarkThemeIncoherent ile damgalanır
+// — sonraki ThemesReadyForSynthesis çağrısında dönmez, yeni kanıt gelince
+// yeniden döner.
 func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -930,6 +973,39 @@ func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
+
+	// #151: mercekten elenen tema MarkThemeIncoherent ile damgalanmalı —
+	// aksi halde ThemesReadyForSynthesis aynı temayı bir sonraki koşuda
+	// yeniden döner ve kart yeniden üretilip yeniden elenir.
+	var themeID int64
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT id, incoherent_at FROM themes WHERE theme_name = $1", tag).
+		Scan(&themeID, &incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt == nil {
+		t.Error("mercekten elenen tema MarkThemeIncoherent ile damgalanmalı (incoherent_at NULL kalmamalı)")
+	}
+	ready, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, 50, false)
+	if err != nil {
+		t.Fatalf("ThemesReadyForSynthesis: %v", err)
+	}
+	if themeInList(ready, themeID) {
+		t.Error("mercekten elenen tema bir sonraki ThemesReadyForSynthesis çağrısında DÖNMEMELİ")
+	}
+
+	// Negatif kontrol (kriter 3): aynı etiketten YENİ kanıt gelip last_seen
+	// ilerleyince tema yeniden sıraya girer (last_seen > incoherent_at, #149).
+	if _, _, err := st.UpsertTheme(ctx, tag, tag); err != nil {
+		t.Fatalf("yeni kanıt upsert: %v", err)
+	}
+	readyAfter, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, 50, false)
+	if err != nil {
+		t.Fatalf("ThemesReadyForSynthesis (yeni kanıt sonrası): %v", err)
+	}
+	if !themeInList(readyAfter, themeID) {
+		t.Error("aynı etiketten yeni kanıt gelip last_seen ilerleyince tema yeniden DÖNMELİ")
+	}
 }
 
 // TestSynthesizeIdeasLensUnsureWrites: 3 mercek de "unsure" dönerse kart
@@ -1003,6 +1079,15 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 	if dataAccessReason == nil || *dataAccessReason != "test-blok-sebebi" {
 		t.Errorf("data_access_reason=%q beklenirdi, geldi: %v", "test-blok-sebebi", dataAccessReason)
 	}
+
+	// #151 edge case: "unsure" bloklamaz, tema İŞARETLENMEMELİ.
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT incoherent_at FROM themes WHERE theme_name = $1", tag).Scan(&incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt != nil {
+		t.Error("unsure verdict MarkThemeIncoherent çağırmamalı")
+	}
 }
 
 // TestSynthesizeIdeasLensErrorStillWrites: bloklayıcı mercek çağrısı HATA
@@ -1072,6 +1157,16 @@ func TestSynthesizeIdeasLensErrorStillWrites(t *testing.T) {
 	}
 	if dataAccessVerdict != nil || dataAccessReason != nil {
 		t.Errorf("mercek hatasında data_access_* NULL kalmalı, geldi: verdict=%v reason=%v", dataAccessVerdict, dataAccessReason)
+	}
+
+	// #151 edge case: mercek çağrısı HATA verirse (blocked=false) tema
+	// İŞARETLENMEMELİ — bugünkü davranış korunur.
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT incoherent_at FROM themes WHERE theme_name = $1", tag).Scan(&incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt != nil {
+		t.Error("mercek hatası MarkThemeIncoherent çağırmamalı")
 	}
 }
 

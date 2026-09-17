@@ -409,8 +409,15 @@ func (s *Store) MarkThemeMerged(ctx context.Context, themeID, ideaID int64) erro
 	return err
 }
 
-// MarkThemeIncoherent, tutarlılık denetimini geçemeyen temayı işaretler;
-// tema, yeni kanıt gelene dek (last_seen > incoherent_at) senteze girmez.
+// MarkThemeIncoherent, temayı senteze kapalı ("beklemede") işaretler; tema,
+// yeni kanıt gelene dek (last_seen > incoherent_at) senteze girmez.
+//
+// #151: kolon adı tutarlılık denetiminden kalma ama artık yalnız "tutarsız
+// kova" anlamında kullanılmıyor — mercekten (blockedByIdeaLens) ya da
+// doygunluktan (K1) elenen temalar da BURADAN damgalanır, çünkü gerçek eleme
+// sebebi zaten eliminations.stage'de kayıtlı durur; incoherent_at yalnız
+// "bu tema yeni kanıt gelene kadar tekrar sentezlenmesin" bayrağıdır. Yeni
+// kolon/migration eklenmedi, bilinçli tercih.
 func (s *Store) MarkThemeIncoherent(ctx context.Context, themeID int64) error {
 	_, err := s.Pool.Exec(ctx,
 		`UPDATE themes SET incoherent_at = now() WHERE id = $1`, themeID)
