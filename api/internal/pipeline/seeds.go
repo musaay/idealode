@@ -548,69 +548,51 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			lenses = trendingLenses
 		}
 
-		verdicts := make([]lensVerdict, len(lenses))
-		lensErr := false
-		for li, lens := range lenses {
-			// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
-			raw, err := chat.ChatJSONWithTemperature(llm.WithStage(ctx, "mercek"), lens.system, lensUserPrompt(seed), 0)
-			if err != nil {
-				log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lens.name, err)
-				lensErr = true
-				break
-			}
-			verdicts[li] = parseLensVerdict(raw)
-		}
-		if lensErr {
+		// Bloklayıcı mercekler (#123, #153): runBlockingLenses(stopOnFirstFail=
+		// false) TÜMÜNÜ çalıştırır (veri-erişimi kararının her durumda karta
+		// yazılabilmesi ve "unsure" mercek(ler)in loglanabilmesi için) — fail
+		// baskındır, birden fazla "fail" varsa outcome.Check/Reason ", "/"; "
+		// ile birleştirilmiş listedir (mevcut log biçimiyle birebir).
+		lensOutcome, verdicts := runBlockingLenses(ctx, chat, lenses, lensUserPrompt(seed), false)
+		if lensOutcome.Err != nil {
+			log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lensOutcome.Check, lensOutcome.Err)
 			continue
 		}
 
 		// #131 PO düzeltmesi: yalnız "fail" tohumu eler ve kalıcı işaretler
-		// (mark) — organik yoldaki blockedByIdeaLens ile AYNI ilke. "unsure"
-		// ARTIK BLOKLAMAZ (ilk #131 tasarımı burada yanlıştı — düzeltildi):
-		// mercek çağrıları sıcaklık 0 ile yapılır, yani aynı tohum+prompt HER
-		// KOŞUDA AYNI "unsure" cevabını verir; bu, LLM hatasındaki GEÇİCİLİKTEN
-		// farklıdır (hata geçicidir, unsure deterministiktir) — unsure'u da
-		// "yeniden dene" sayıp imleçsiz atlasaydık tohum HİÇBİR ZAMAN
-		// ilerlemez, koşu başına 1-3 mercek çağrısını sonsuza dek boşa
-		// yakardı; üstelik yeni prompt bilerek "tanımadığın sağlayıcıda
-		// unsure de" diyor ve TR bizim ana alanımız — yani unsure SIKÇA
-		// dönecek. Kart normal üretilir; veri-erişimi merceğinin ham kararı
-		// (dataAccessVerdict) aynı geçişte yakalanır ve karta yazılır (bkz.
-		// aşağıda idea.DataAccessVerdict/Reason ataması). default dal
-		// savunmacıdır: parseLensVerdict zaten tanınmayan değeri "unsure"a
-		// indirger, ama bu switch kendi başına da yalnız "pass"/"fail"
-		// dışındakileri unsure sayar (CLAUDE.md: LLM cevapları savunmacı
-		// parse edilir).
-		var failedNames, failedReasons, unsureNames []string
-		hasFail := false
+		// (mark) — organik yoldaki bloklayıcı mercek bloğuyla AYNI ilke.
+		// "unsure" ARTIK BLOKLAMAZ (ilk #131 tasarımı burada yanlıştı —
+		// düzeltildi): mercek çağrıları sıcaklık 0 ile yapılır, yani aynı
+		// tohum+prompt HER KOŞUDA AYNI "unsure" cevabını verir; bu, LLM
+		// hatasındaki GEÇİCİLİKTEN farklıdır (hata geçicidir, unsure
+		// deterministiktir) — unsure'u da "yeniden dene" sayıp imleçsiz
+		// atlasaydık tohum HİÇBİR ZAMAN ilerlemez, koşu başına 1-3 mercek
+		// çağrısını sonsuza dek boşa yakardı; üstelik yeni prompt bilerek
+		// "tanımadığın sağlayıcıda unsure de" diyor ve TR bizim ana alanımız
+		// — yani unsure SIKÇA dönecek. Kart normal üretilir; veri-erişimi
+		// merceğinin ham kararı (dataAccessVerdict) aynı geçişte yakalanır ve
+		// karta yazılır (bkz. aşağıda idea.DataAccessVerdict/Reason ataması).
+		if lensOutcome.Blocked {
+			if err := applyGateOutcome(ctx, st, lensOutcome, seed.Name, seed.Summary, markProcessed); err != nil {
+				return created, err
+			}
+			log.Printf("seed %q elendi (mercek: %s — %s)", seed.Name, lensOutcome.Check, lensOutcome.Reason)
+			continue
+		}
+
+		// default dal savunmacıdır: parseLensVerdict zaten tanınmayan değeri
+		// "unsure"a indirger, burada da yalnız "pass" dışındakiler unsure
+		// sayılır (CLAUDE.md: LLM cevapları savunmacı parse edilir) —
+		// lensOutcome.Blocked==false olduğundan hiçbir verdict "fail" DEĞİL.
+		var unsureNames []string
 		var dataAccessVerdict lensVerdict
 		for li, v := range verdicts {
 			if lenses[li].system == lensDataAccessSystem {
 				dataAccessVerdict = v
 			}
-			switch v.Verdict {
-			case "pass":
-			case "fail":
-				hasFail = true
-				failedNames = append(failedNames, lenses[li].name)
-				failedReasons = append(failedReasons, v.Reason)
-			default:
+			if v.Verdict != "pass" {
 				unsureNames = append(unsureNames, lenses[li].name)
 			}
-		}
-		if hasFail {
-			if err := markProcessed(); err != nil {
-				return created, err
-			}
-			log.Printf("seed %q elendi (mercek: %s — %s)",
-				seed.Name, strings.Join(failedNames, ", "), strings.Join(failedReasons, "; "))
-			// Kart henüz üretilmedi (mercekler tohum üzerinde çalıştı) —
-			// detail için problem_statement yok, tohumun özeti kullanılır
-			// (#138: subject tek başına — "systeme.io" gibi bir ürün adı —
-			// neyin elendiğini anlatmaz).
-			recordElimination(ctx, st, "blocking_lens", seed.Name, "fail", "",
-				strings.Join(failedReasons, "; "), seed.Summary)
-			continue
 		}
 		if len(unsureNames) > 0 {
 			log.Printf("seed %q belirsiz (mercek: %s) — bloklamıyor, kart yine de üretiliyor",
@@ -656,29 +638,22 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		idea.DataAccessVerdict = &dataAccessVerdict.Verdict
 		idea.DataAccessReason = &dataAccessVerdict.Reason
 
-		// Özgünlük merceği (#101 v3, #138): K1 (doygunluk) fail'i kartı
-		// YAZDIRMAZ (eliminations'a kaydedilip tohum mark'lanır — bir daha
-		// denenmez, #131'deki hasFail ile AYNI ilke: deterministik sonuç bir
-		// daha üretilmez). K2-K4 fail yalnız kaydedilir, kart yine yazılır.
-		// Mercek çağrısı hata verirse alanlar NULL kalır, kart yine de
-		// yazılır (bloklama YOK ilkesi hata durumunda da geçerli).
-		if err := distinctivenessCheck(llm.WithStage(ctx, "özgünlük"), chat, &idea); err != nil {
-			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, err)
-		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
-			criterion := "none"
-			if idea.DistinctivenessCriterion != nil {
-				criterion = *idea.DistinctivenessCriterion
+		// Özgünlük merceği (#101 v3, #138, #153): K1 (doygunluk) fail'i
+		// kartı YAZDIRMAZ (eliminations'a kaydedilip tohum mark'lanır — bir
+		// daha denenmez, yukarıdaki bloklayıcı mercek bloğuyla AYNI ilke:
+		// deterministik sonuç bir daha üretilmez). K2-K4 fail yalnız
+		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
+		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
+		// durumunda da geçerli).
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		if distinctOutcome.Err != nil {
+			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)
+		} else if distinctOutcome.Stage == "distinctiveness" {
+			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement, markProcessed); err != nil {
+				return created, err
 			}
-			reason := ""
-			if idea.DistinctivenessReason != nil {
-				reason = *idea.DistinctivenessReason
-			}
-			recordElimination(ctx, st, "distinctiveness", idea.Title, "fail", criterion, reason, idea.ProblemStatement)
-			if criterion == "K1" {
-				if err := markProcessed(); err != nil {
-					return created, err
-				}
-				log.Printf("seeds: %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", idea.Title, reason)
+			if distinctOutcome.Blocked {
+				log.Printf("seeds: %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", idea.Title, distinctOutcome.Reason)
 				continue
 			}
 		}
