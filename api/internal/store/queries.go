@@ -421,14 +421,28 @@ func (s *Store) MarkThemeIncoherent(ctx context.Context, themeID int64) error {
 // domainTag, temanın doğduğu kaba kova (#127) — yalnız İLK insert'te
 // yazılır; çakışmada (tema zaten varsa) domain_tag DOKUNULMADAN kalır
 // (aynı tema adı iki farklı kovadan gelirse ilk yazan kovanınki geçerli
-// kalır — çakışmada UPDATE yok).
-func (s *Store) UpsertTheme(ctx context.Context, name, domainTag string) (int64, error) {
-	var id int64
-	err := s.Pool.QueryRow(ctx, `
+// kalır — çakışmada UPDATE yok). Dönen ownerDomainTag, satırın GERÇEKTE
+// sahibi olduğu domain_tag'tir (NULL için COALESCE ile boş string) — çağıran istediği
+// domainTag ile bunu karşılaştırarak bir isim çakışmasının başka bir
+// etikete ait bir temaya sessizce bağlanmasını DB sınırında yakalayabilir
+// (#149 review bulgusu: bellek-içi themeOwner kontrolü yalnız aynı partideki
+// etiketleri görür, partide olmayan etiketlerle çakışmayı KAÇIRIR).
+func (s *Store) UpsertTheme(ctx context.Context, name, domainTag string) (id int64, ownerDomainTag string, err error) {
+	// ON CONFLICT'te last_seen YALNIZ çakışma GERÇEK bir "yeni kanıt" ise
+	// (yazan domain_tag, satırın sahibi domain_tag ile aynıysa) tazelenir
+	// (#149 review bulgusu 2. tur): aksi halde bir isim çakışması (satır
+	// BAŞKA bir etikete aitse) yabancı temanın last_seen'ini sessizce
+	// günceller — ThemesReadyForSynthesis last_seen > incoherent_at
+	// koşuluyla tutarsızlıktan gömülmüş o temayı "yeni kanıt geldi" sanıp
+	// yeniden sentez sırasına sokar, hiçbir gerçek kanıt olmadan.
+	err = s.Pool.QueryRow(ctx, `
 		INSERT INTO themes (theme_name, domain_tag) VALUES ($1, $2)
-		ON CONFLICT (theme_name) DO UPDATE SET last_seen = now()
-		RETURNING id`, name, domainTag).Scan(&id)
-	return id, err
+		ON CONFLICT (theme_name) DO UPDATE SET last_seen = CASE
+			WHEN themes.domain_tag IS NOT DISTINCT FROM EXCLUDED.domain_tag THEN now()
+			ELSE themes.last_seen
+		END
+		RETURNING id, COALESCE(domain_tag, '')`, name, domainTag).Scan(&id, &ownerDomainTag)
+	return id, ownerDomainTag, err
 }
 
 // LinkThemePost, post'u temaya idempotent bağlar.
@@ -649,17 +663,26 @@ func (s *Store) RethemeResolve(ctx context.Context, minEvidence, limit int) (res
 	return len(targets), len(affected), nil
 }
 
+// themesByDomainTagLimit, ThemesByDomainTag'in etiket başına döndürdüğü en
+// fazla tema sayısı (#149). Kümeleme prompt'una "mevcut temalar" bağlamı
+// olarak girer — limitsiz liste zamanla prompt'u şişirip parti paketleme
+// tasarrufunu geri yer; en son görülen (last_seen DESC) 25 tema, kümeleme
+// için yeterli bağlamı ucuza verir.
+const themesByDomainTagLimit = 25
+
 // ThemesByDomainTag, verilen kovada (domain_tag) daha önce oluşturulmuş
 // temaları döner — kova içi LLM kümelemesine "mevcut tema adları" bağlamı
 // olarak verilir (#127). domain_tag DB'de nullable (eski satırlar migration
 // backfill'i ile dolar); COALESCE savunma amaçlı (ActiveSources'taki
-// category deseniyle aynı).
+// category deseniyle aynı). En fazla themesByDomainTagLimit tema, en son
+// görülen önce (#149).
 func (s *Store) ThemesByDomainTag(ctx context.Context, domainTag string) ([]Theme, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, theme_name, frequency, COALESCE(domain_tag, '')
 		FROM themes
 		WHERE domain_tag = $1
-		ORDER BY id`, domainTag)
+		ORDER BY last_seen DESC
+		LIMIT $2`, domainTag, themesByDomainTagLimit)
 	if err != nil {
 		return nil, err
 	}

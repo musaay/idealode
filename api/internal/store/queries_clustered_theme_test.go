@@ -268,7 +268,7 @@ func setupClusterTestTheme(t *testing.T, ctx context.Context, s *Store, platform
 			t.Fatal(err)
 		}
 	} else {
-		id, err := s.UpsertTheme(ctx, themeName, domainTag)
+		id, _, err := s.UpsertTheme(ctx, themeName, domainTag)
 		if err != nil {
 			t.Fatal(err)
 		}
