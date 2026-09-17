@@ -12,6 +12,7 @@
 //	api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç, #18)
 //	serve       web arayüzünü sunar (galeri + kart detayı, salt okunur)
 //	dump        idea card'ları JSON olarak stdout'a dök
+//	scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle, #100)
 package main
 
 import (
@@ -54,6 +55,8 @@ Komutlar:
   serve       web arayüzünü sunar (galeri + kart detayı); PORT, varsayılan 8080
   dump        idea card'ları JSON olarak stdout'a döker
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
+  scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle tetiklenir, #100)
+                --dry-run isteğe bağlı, hiçbir şey yazmaz
 
 Konfigürasyon ortam değişkenlerinden okunur; bkz. .env.example
 `
@@ -72,7 +75,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "retheme", "api", "serve", "dump", "migrate":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "retheme", "api", "serve", "dump", "migrate", "scrub-quotes":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -166,6 +169,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return cmdDump(ctx, cfg)
 	case "migrate":
 		return cmdMigrate(ctx, cfg)
+	case "scrub-quotes":
+		return cmdScrubQuotes(ctx, cfg)
 	}
 	return fmt.Errorf("bilinmeyen komut: %q", cmd)
 }
@@ -475,6 +480,31 @@ func cmdRetheme(ctx context.Context, cfg *config.Config) error {
 	}
 	log.Printf("retheme: %d gönderi %d eski temadan çözüldü, kalan %d", result.Resolved, result.Themes, result.Remaining)
 	return nil
+}
+
+// cmdScrubQuotes, TÜM kartların example_quotes/local_evidence alanlarını
+// profanity.Filter'dan geçirip küfür/ağır hakaret içeren satırları geriye
+// dönük ATAR (#100) — elle tetiklenir, cron/run akışına eklenmez. Yeni
+// kartlar zaten store yazım sınırında (InsertIdea vb.) korunuyor; bu komut
+// yalnız o guard'tan ÖNCE yazılmış eski kartlar için.
+func cmdScrubQuotes(ctx context.Context, cfg *config.Config) error {
+	fs := flag.NewFlagSet("scrub-quotes", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "hiçbir şey yazma, yalnız düşecek satırları raporla")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	_, err = pipeline.ScrubQuotes(ctx, st, *dryRun)
+	return err
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {

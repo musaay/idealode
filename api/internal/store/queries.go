@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/musaay/idealode/api/internal/profanity"
 )
 
 // ActiveSources, ingest'in işleyeceği aktif kaynakları döner.
@@ -301,6 +303,8 @@ func (s *Store) FusionCandidates(ctx context.Context, tags []string, problem str
 // SetIdeaLocalEvidence, füzyon sonucunu karta yazar; kanıt bulunamasa da
 // fused_at damgalanır (her koşuda yeniden denenmesin).
 func (s *Store) SetIdeaLocalEvidence(ctx context.Context, ideaID int64, evidence []string) error {
+	// Küfür/ağır hakaret içeren satırlar atılır (maskelenmez, #100).
+	evidence = profanity.Filter(evidence)
 	if evidence == nil {
 		evidence = []string{}
 	}
@@ -364,6 +368,8 @@ func (s *Store) MomentumCandidates(ctx context.Context, problem string, tags []s
 // işareti gerekir). nil slice pgx'te SQL NULL yazar ve `||` birleştirmesini
 // kırar; guard ile boş diziye indirgenir (CLAUDE.md nil-slice tuzağı).
 func (s *Store) AppendIdeaLocalEvidence(ctx context.Context, ideaID int64, lines []string) error {
+	// Küfür/ağır hakaret içeren satırlar atılır (maskelenmez, #100).
+	lines = profanity.Filter(lines)
 	if lines == nil {
 		lines = []string{}
 	}
@@ -816,6 +822,10 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 	if i.DomainTags == nil {
 		i.DomainTags = []string{}
 	}
+	// Küfür/ağır hakaret içeren alıntı satırları store yazım sınırında
+	// atılır (maskelenmez, #100) — profanity.Filter ASLA nil dönmez, guard
+	// yine de savunmacı olarak korunur.
+	i.ExampleQuotes = profanity.Filter(i.ExampleQuotes)
 	if i.ExampleQuotes == nil {
 		i.ExampleQuotes = []string{}
 	}
@@ -1237,12 +1247,15 @@ func (s *Store) AppendChat(ctx context.Context, ideaID int64, sid, role, message
 // (fonksiyonun sonunda) ErrNotFound dönerdi.
 func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft BlendDraft, sid string) (*Idea, error) {
 	// nil slice guard: pgx nil []string'i SQL NULL yazar, NOT NULL
-	// kolonları kırar (bkz. InsertPostAnalyses'teki aynı koruma).
-	quotes := parent.ExampleQuotes
+	// kolonları kırar (bkz. InsertPostAnalyses'teki aynı koruma). Ayrıca
+	// küfür/ağır hakaret satırları burada da filtrelenir (#100) — parent
+	// kart bu özellikten ÖNCE yazılmış olabilir, store yazım sınırı yine de
+	// garanti eder.
+	quotes := profanity.Filter(parent.ExampleQuotes)
 	if quotes == nil {
 		quotes = []string{}
 	}
-	localEvidence := parent.LocalEvidence
+	localEvidence := profanity.Filter(parent.LocalEvidence)
 	if localEvidence == nil {
 		localEvidence = []string{}
 	}
