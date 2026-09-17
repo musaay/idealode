@@ -41,7 +41,7 @@ Return ONLY a JSON object:
 
 Rules:
 - title, problem_statement, proposed_solution, target_user MUST be written in %s.
-- example_quotes: up to 5 short VERBATIM quotes copied from the evidence, in their ORIGINAL language — never translate or fabricate quotes.
+- example_quotes: up to 5 short VERBATIM quotes copied from the evidence, in their ORIGINAL language — never translate or fabricate quotes. Do not pick quotes containing profanity or personal insults.
 - domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated). Never translate tags.
 - urgency_score: integer 1-5 (how acute/frequent the pain looks in the evidence).
 - monetization_signal: integer 0-5, 0 = no signal at all (any mention of paying/pricing raises it).
