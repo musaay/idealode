@@ -328,12 +328,20 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// inşa edilebilirlik / veri-erişimi / pazar-işlerliği) organik
 		// yolda da SIRAYLA çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI.
 		// İlk "fail"de durur, kalan mercekler çağrılmaz; kart yazılmaz ve
-		// tema bir sonraki temaya geçilir. Mevcut ThemesReadyForSynthesis
-		// davranışı DEĞİŞMEDİĞİNDEN tema bir sonraki koşuda yeniden ele
-		// alınabilir (bilinçli tercih, bkz. issue #123 edge case notu).
+		// tema bir sonraki temaya geçilir. #151: tema burada MarkThemeIncoherent
+		// ile damgalanır — aksi halde ThemesReadyForSynthesis aynı temayı bir
+		// sonraki koşuda yeniden seçer, kart yeniden üretilir ve yeniden elenir
+		// (prod ölçümü: kart aşamasındaki elemelerin çoğu 3 temanın tekrarıydı).
+		// Tutarsız tema (~277) ve vendor-internal (~295) dallarıyla AYNI desen;
+		// tema yeni kanıt gelene dek (last_seen > incoherent_at) beklemede kalır.
 		if lensName, reason, blocked := blockedByIdeaLens(llm.WithStage(ctx, "mercek"), chat, &idea); blocked {
 			blockedByLens++
 			log.Printf("synthesize: tema %q elendi — mercek %q: %s", th.Name, lensName, reason)
+			if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
+				// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
+				// satır log — recordElimination'ın best-effort tutumuyla aynı.
+				log.Printf("synthesize: tema %q MarkThemeIncoherent HATA: %v — devam ediliyor", th.Name, err)
+			}
 			// Kart burada zaten ÜRETİLDİ (synthesizeOne yukarıda) — detail
 			// kartın problem_statement'ı (#138).
 			recordElimination(ctx, st, "blocking_lens", idea.Title, "fail", "", reason, idea.ProblemStatement)
@@ -341,13 +349,14 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		}
 
 		// Özgünlük merceği (#101 v3, #138): K1 (doygunluk) fail'i kartı
-		// YAZDIRMAZ (eliminations'a kaydedilip tema damgalanmadan atlanır —
-		// blockedByIdeaLens ile AYNI ilke: ThemesReadyForSynthesis mevcut
-		// davranışı değişmediğinden tema sonraki koşuda yeniden ele alınabilir,
-		// #123 edge case notuyla aynı bilinçli tercih). K2-K4 fail yalnız
-		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
-		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
-		// durumunda da geçerli).
+		// YAZDIRMAZ (eliminations'a kaydedilip tema damgalanır — #151: artık
+		// blockedByIdeaLens ile AYNI ilke, tema MarkThemeIncoherent ile
+		// bekletilir, aksi halde ThemesReadyForSynthesis aynı temayı bir
+		// sonraki koşuda yeniden seçer ve kart yeniden üretilip yeniden
+		// elenir). K2-K4 fail yalnız kaydedilir, tema İŞARETLENMEZ, kart yine
+		// yazılır. Mercek çağrısı hata verirse alanlar NULL kalır, kart yine
+		// de yazılır, tema İŞARETLENMEZ (bloklama YOK ilkesi hata durumunda
+		// da geçerli).
 		if err := distinctivenessCheck(llm.WithStage(ctx, "özgünlük"), chat, &idea); err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, err)
 		} else if idea.DistinctivenessVerdict != nil && *idea.DistinctivenessVerdict == "fail" {
@@ -363,6 +372,11 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			if criterion == "K1" {
 				blockedBySaturation++
 				log.Printf("synthesize: tema %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", th.Name, reason)
+				if err := st.MarkThemeIncoherent(ctx, th.ID); err != nil {
+					// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
+					// satır log — recordElimination'ın best-effort tutumuyla aynı.
+					log.Printf("synthesize: tema %q MarkThemeIncoherent HATA: %v — devam ediliyor", th.Name, err)
+				}
 				continue
 			}
 		}
