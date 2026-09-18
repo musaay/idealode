@@ -94,6 +94,55 @@ func (c *tooLargeThenOKChat) ChatJSONWithTemperature(ctx context.Context, system
 	return sb.String(), nil
 }
 
+// jsonValidateFailedThenOKChat, tooLargeThenOKChat'in json_validate_failed
+// (#158) karşılığı: kullanıcı prompt'undaki gönderi sayısı splitThreshold'u
+// AŞARSA llm.IsJSONValidateFailed'in true döneceği bir 400
+// json_validate_failed hatası, aşmazsa (parti yeterince küçültülmüşse) her
+// post için bir atama içeren başarılı bir cevap döner — clusterBatch'in
+// json_validate_failed'de bölüp özyinelemeli yeniden deneme davranışını
+// uçtan uca doğrulamak için.
+type jsonValidateFailedThenOKChat struct {
+	splitThreshold int
+	calls          int
+}
+
+func (c *jsonValidateFailedThenOKChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *jsonValidateFailedThenOKChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.calls++
+	n := strings.Count(user, "] (tag:")
+	if n > c.splitThreshold {
+		return "", llm.NewJSONValidateFailedError("test-host", `{"error":{"code":"json_validate_failed"}}`)
+	}
+	var sb strings.Builder
+	sb.WriteString(`{"assignments":[`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"post":%d,"theme":"theme-%d"}`, i, i)
+	}
+	sb.WriteString(`]}`)
+	return sb.String(), nil
+}
+
+// other400Chat, json_validate_failed DIŞINDA bir 400 hatası simülasyonu
+// (örn. geçersiz parametre) — clusterBatch'in yalnız 413 VE
+// json_validate_failed'de böldüğünü, DİĞER 400'lerde bölmediğini
+// doğrulamak için (#158 kabul kriteri).
+type other400Chat struct{ calls int }
+
+func (o *other400Chat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return o.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (o *other400Chat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	o.calls++
+	return "", fmt.Errorf("simulated 400: invalid_request_error")
+}
+
 // samplePost, clusterBatch birim testleri için minimal bir post_analysis
 // üretir (yalnız Title/Body kullanılır — prompt içeriği).
 func samplePost(postID int64, title string) store.PostAnalysis {
@@ -351,7 +400,7 @@ func TestClusterBatchSingleCallEvenAtBucketLimit(t *testing.T) {
 func TestClusterBatchFallbackOnLLMError(t *testing.T) {
 	chat := &errClusterChat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("LLM hatasında nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
 	}
@@ -363,7 +412,7 @@ func TestClusterBatchFallbackOnLLMError(t *testing.T) {
 func TestClusterBatchFallbackOnGarbageJSON(t *testing.T) {
 	chat := &fakeClusterChat{response: "not json"}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("bozuk JSON'da nil harita beklenirdi, geldi: %v", assignments)
 	}
@@ -372,7 +421,7 @@ func TestClusterBatchFallbackOnGarbageJSON(t *testing.T) {
 func TestClusterBatchFallbackOnEmptyResponse(t *testing.T) {
 	chat := &fakeClusterChat{response: ""}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("boş cevapta nil harita beklenirdi, geldi: %v", assignments)
 	}
@@ -382,7 +431,7 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	existingByTag := map[string][]store.Theme{"x": {{ID: 1, Name: "cannot export chat history"}}}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
 	if assignments[0] != "cannot export chat history" {
 		t.Errorf("mevcut temaya atama beklenirdi, geldi: %v", assignments)
 	}
@@ -394,7 +443,7 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 func TestClusterBatchGeneratesNewTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"no bulk invoice download"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments[0] != "no bulk invoice download" {
 		t.Errorf("yeni tema adı doğrudan kabul edilmeliydi, geldi: %v", assignments)
 	}
@@ -406,7 +455,7 @@ func TestClusterBatchGeneratesNewTheme(t *testing.T) {
 func TestClusterBatchPartialAssignmentFallsBackPerPost(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
-	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments[0] != "cannot export chat history" {
 		t.Errorf("post 0 atanmalıydı, geldi: %v", assignments)
 	}
@@ -437,7 +486,7 @@ func TestClusterBatchDoesNotFilterCrossTagAssignmentsInMemory(t *testing.T) {
 		posts:    []store.PostAnalysis{samplePost(1, "b-post")},
 		postTags: []string{"b"},
 	}
-	assignments, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
+	assignments, _, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
 	if assignments[0] != "foo" {
 		t.Errorf("clusterBatch atamayı süzmemeli (DB sınırı bunu ele alır), geldi: %v", assignments)
 	}
@@ -458,7 +507,7 @@ func TestClusterBatchSplitsOn413AndAssignsAllPosts(t *testing.T) {
 	// turu (10 -> 5+5 -> biri hâlâ >3 ise tekrar) gerektirir.
 	chat := &tooLargeThenOKChat{splitThreshold: 3}
 
-	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if splits == 0 {
 		t.Fatal("413 sonrası en az bir bölme+yeniden deneme beklenir")
 	}
@@ -480,7 +529,7 @@ func TestClusterBatchSingleFallsBackOnPersistent413(t *testing.T) {
 	// splitThreshold=0: tek postluk parti bile 413 alır.
 	chat := &tooLargeThenOKChat{splitThreshold: 0}
 
-	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if splits != 0 {
 		t.Errorf("tek postluk parti daha fazla bölünemez, splits=0 beklenirdi, geldi: %d", splits)
 	}
@@ -497,9 +546,79 @@ func TestClusterBatchDoesNotSplitOn429(t *testing.T) {
 	chat := &errClusterChat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
 
-	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if splits != 0 {
 		t.Errorf("429/genel hatada bölme yapılmamalı, splits=%d", splits)
+	}
+	if assignments != nil {
+		t.Errorf("nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
+	}
+	if chat.calls != 1 {
+		t.Errorf("TEK çağrı denenmeliydi (parti bölünmedi), geldi: %d", chat.calls)
+	}
+}
+
+// TestClusterBatchSplitsOnJSONValidateFailedAndAssignsAllPosts, #158 kabul
+// kriteri: clusterBatch 400 json_validate_failed aldığında partiyi ikiye
+// bölüp HER YARIYI ayrı ayrı (gerekirse özyinelemeli olarak tekrar) yeniden
+// dener ve sonunda TÜM gönderiler LLM kümelemeyle (eski davranışa
+// düşmeden) temaya bağlanır — 413 sayacı (splits413) ETKİLENMEZ, yalnız
+// json sayacı (splitsJSON) artar.
+func TestClusterBatchSplitsOnJSONValidateFailedAndAssignsAllPosts(t *testing.T) {
+	posts := make([]store.PostAnalysis, 10)
+	for i := range posts {
+		posts[i] = samplePost(int64(i), fmt.Sprintf("post-%d", i))
+	}
+	batch := singleTagBatch("x", posts)
+	// 3'ten fazla post içeren HER çağrı json_validate_failed alır — 10 post
+	// en az iki bölme turu gerektirir.
+	chat := &jsonValidateFailedThenOKChat{splitThreshold: 3}
+
+	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
+	if splits413 != 0 {
+		t.Errorf("json_validate_failed bölünmesi 413 sayacını (splits413) artırmamalı, geldi: %d", splits413)
+	}
+	if splitsJSON == 0 {
+		t.Fatal("json_validate_failed sonrası en az bir bölme+yeniden deneme (splitsJSON) beklenir")
+	}
+	if len(assignments) != len(posts) {
+		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(assignments), len(posts))
+	}
+	for i := range posts {
+		if _, ok := assignments[i]; !ok {
+			t.Errorf("post %d atanmamış kalmış", i)
+		}
+	}
+}
+
+// TestClusterBatchSingleFallsBackOnPersistentJSONValidateFailed, tek
+// gönderiye inince bile json_validate_failed devam ederse (daha fazla
+// bölünemez) o postun ESKİ davranışa düşürüldüğünü (nil harita — sonsuz
+// özyineleme YOK) doğrular (#158).
+func TestClusterBatchSingleFallsBackOnPersistentJSONValidateFailed(t *testing.T) {
+	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
+	// splitThreshold=0: tek postluk parti bile json_validate_failed alır.
+	chat := &jsonValidateFailedThenOKChat{splitThreshold: 0}
+
+	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
+	if splits413 != 0 || splitsJSON != 0 {
+		t.Errorf("tek postluk parti daha fazla bölünemez, splits413=0 splitsJSON=0 beklenirdi, geldi: %d/%d", splits413, splitsJSON)
+	}
+	if assignments != nil {
+		t.Errorf("kalıcı json_validate_failed'de nil harita (eski davranışa düşüş) beklenirdi, geldi: %v", assignments)
+	}
+}
+
+// TestClusterBatchDoesNotSplitOnOther400, #158 kabul kriteri:
+// json_validate_failed DIŞINDAKİ 400 hatalarında parti BÖLÜNMEZ — tek çağrı
+// denenir, doğrudan eski davranışa düşülür.
+func TestClusterBatchDoesNotSplitOnOther400(t *testing.T) {
+	chat := &other400Chat{}
+	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
+
+	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
+	if splits413 != 0 || splitsJSON != 0 {
+		t.Errorf("json_validate_failed DIŞINDAKİ 400'de bölme yapılmamalı, splits413=%d splitsJSON=%d", splits413, splitsJSON)
 	}
 	if assignments != nil {
 		t.Errorf("nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)

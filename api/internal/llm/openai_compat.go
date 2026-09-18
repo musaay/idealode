@@ -196,6 +196,56 @@ func isRequestTooLargeStatus(status int, body string) bool {
 	return status >= 400 && status < 500 && strings.Contains(strings.ToLower(body), "request too large")
 }
 
+// jsonValidateFailedError, sağlayıcının (Groq) modelin geçerli JSON
+// üretemediğini bildiren HTTP 400 + gövdede "code":"json_validate_failed"
+// hatasını taşır (#158). requestTooLargeError'la AYNI mantıkla ele alınır:
+// AYNI isteği burada tekrar denemek anlamsız (model yine aynı büyük/karmaşık
+// girdide bocalar) — retryable=false, çağıran paket (pipeline) partiyi
+// bölerek daha küçük istekler kurar. Diğer 400'ler (ör. kimlik doğrulama,
+// geçersiz parametre) ETKİLENMEZ — yalnız bu belirli "code" ayırt edilir.
+type jsonValidateFailedError struct {
+	host string
+	body string
+}
+
+func (e *jsonValidateFailedError) Error() string {
+	return fmt.Sprintf("%s: LLM geçerli JSON üretemedi (400 json_validate_failed): %s", e.host, e.body)
+}
+
+// IsJSONValidateFailed, err'nin sağlayıcıdan "modelin ürettiği çıktı geçerli
+// JSON değil" (400 json_validate_failed) hatası olup olmadığını bildirir —
+// çağıran paket (pipeline) bunu, IsRequestTooLarge ile aynı şekilde, parti
+// bölme + yeniden deneme tetikleyicisi olarak kullanır (#158).
+func IsJSONValidateFailed(err error) bool {
+	var e *jsonValidateFailedError
+	return errors.As(err, &e)
+}
+
+// NewJSONValidateFailedError, jsonValidateFailedError'ı DIŞ paketlere
+// (pipeline testlerindeki sahte Chat uygulamaları) açar — gerçek
+// json_validate_failed yanıtını simüle etmenin tek yolu budur, tür kendisi
+// bilerek dışa kapalı kalır (#158).
+func NewJSONValidateFailedError(host, body string) error {
+	return &jsonValidateFailedError{host: host, body: body}
+}
+
+// isJSONValidateFailedBody, HTTP 400 gövdesinin Groq'un
+// "code":"json_validate_failed" hatası olup olmadığını belirler. Gövde ham
+// JSON olarak ayrıştırılır (savunmacı — parse başarısızsa false döner,
+// diğer 400 yolları etkilenmez); yalnız bu belirli "code" alanı eşleşirse
+// true döner (#158).
+func isJSONValidateFailedBody(body string) bool {
+	var parsed struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return false
+	}
+	return parsed.Error.Code == "json_validate_failed"
+}
+
 func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (content string, usage Usage, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/chat/completions", bytes.NewReader(payload))
@@ -230,6 +280,13 @@ func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (con
 		// aşacak) — retryable=false: pipeline katmanı IsRequestTooLarge ile
 		// yakalayıp partiyi bölerek YENİ (daha küçük) istekler kuracak.
 		return "", Usage{}, false, &requestTooLargeError{host: c.host(), body: truncate(string(body), 200)}
+	}
+	if resp.StatusCode == http.StatusBadRequest && isJSONValidateFailedBody(string(body)) {
+		// Modelin ürettiği çıktı geçerli JSON değil — aynı isteği burada
+		// TEKRAR denemek anlamsız (retryable=false): pipeline katmanı
+		// IsJSONValidateFailed ile yakalayıp partiyi bölerek YENİ (daha
+		// küçük/daha az karmaşık) istekler kuracak (#158).
+		return "", Usage{}, false, &jsonValidateFailedError{host: c.host(), body: truncate(string(body), 200)}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", Usage{}, false, fmt.Errorf("%s HTTP %d: %s", c.host(), resp.StatusCode, truncate(string(body), 400))
