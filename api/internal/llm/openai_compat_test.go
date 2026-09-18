@@ -182,6 +182,63 @@ func TestChatJSON429IsNotRequestTooLarge(t *testing.T) {
 	}
 }
 
+// groqJSONValidateFailedBody, #158 issue'sunda karşılaşılan GERÇEK Groq 400
+// json_validate_failed gövdesidir (birebir) — model geçerli JSON
+// üretemediğinde döner, failed_generation genelde boştur.
+const groqJSONValidateFailedBody = `{"error":{"message":"Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.","type":"invalid_request_error","code":"json_validate_failed","failed_generation":""}}`
+
+// TestChatJSON400JSONValidateFailedNotRetriedButFlagged, 400
+// json_validate_failed alındığında AYNI istek içeride tekrar denenmediğini
+// (retryable=false — pipeline katmanı partiyi bölerek yeniden dener) ama
+// hatanın llm.IsJSONValidateFailed ile ayırt edilebildiğini doğrular (#158).
+// Gövde, issue'daki GERÇEK Groq yanıtının birebir aynısıdır.
+func TestChatJSON400JSONValidateFailedNotRetriedButFlagged(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(groqJSONValidateFailedBody))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, err := c.ChatJSON(context.Background(), "sys", "user")
+	if err == nil {
+		t.Fatal("400 json_validate_failed'de hata beklenir")
+	}
+	if !IsJSONValidateFailed(err) {
+		t.Errorf("IsJSONValidateFailed true dönmeliydi, err: %v", err)
+	}
+	if IsRequestTooLarge(err) {
+		t.Errorf("json_validate_failed IsRequestTooLarge=true vermemeli (ayrı hata türü), err: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("400 json_validate_failed içeride tekrar denenmemeli (parti bölme pipeline'da olur); çağrı sayısı: %d", calls.Load())
+	}
+}
+
+// TestChatJSON400OtherCodeIsNotJSONValidateFailed, json_validate_failed
+// DIŞINDAKİ bir 400'ün (ör. farklı bir "code" alanı ya da hiç "code" alanı
+// olmayan bir hata) IsJSONValidateFailed tarafından YAKALANMADIĞINI
+// doğrular — pipeline yalnız bu belirli hatada parti bölmeli (#158 kabul
+// kriteri: diğer 400'lerde bölme yok).
+func TestChatJSON400OtherCodeIsNotJSONValidateFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"model does not exist","type":"invalid_request_error","code":"model_not_found"}}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, err := c.ChatJSON(context.Background(), "sys", "user")
+	if err == nil {
+		t.Fatal("400'de hata beklenir")
+	}
+	if IsJSONValidateFailed(err) {
+		t.Errorf("json_validate_failed DIŞINDAKİ 400 IsJSONValidateFailed=true vermemeli, err: %v", err)
+	}
+}
+
 func TestHostFallsBackToBaseURL(t *testing.T) {
 	// Geçersiz/host'suz bir BaseURL verilirse hata metni yine anlamlı kalsın.
 	c := &OpenAICompatClient{BaseURL: "not-a-url"}
