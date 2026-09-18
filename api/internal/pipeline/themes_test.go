@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/musaay/idealode/api/internal/llm"
 	"github.com/musaay/idealode/api/internal/store"
 )
 
@@ -57,6 +59,41 @@ func (e *errClusterChat) ChatJSONWithTemperature(ctx context.Context, system, us
 	return "", fmt.Errorf("simulated 429")
 }
 
+// tooLargeThenOKChat, kullanıcı prompt'undaki gönderi sayısı splitThreshold'u
+// AŞARSA llm.IsRequestTooLarge'ın true döneceği bir 413 hatası, aşmazsa
+// (parti yeterince küçültülmüşse) her post için bir atama içeren başarılı
+// bir cevap döner — clusterBatch'in 413'te bölüp özyinelemeli yeniden
+// deneme davranışını (#156) uçtan uca doğrulamak için. Gönderi sayısı,
+// prompt'taki "[idx] (tag: ...)" satırlarının sayımıyla çıkarılır (posts
+// alanını doğrudan almadan, gerçek prompt üretimini de dolaylı sınamış
+// olur).
+type tooLargeThenOKChat struct {
+	splitThreshold int
+	calls          int
+}
+
+func (c *tooLargeThenOKChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *tooLargeThenOKChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.calls++
+	n := strings.Count(user, "] (tag:")
+	if n > c.splitThreshold {
+		return "", llm.NewRequestTooLargeError("test-host", "Request too large for model, please reduce your message size")
+	}
+	var sb strings.Builder
+	sb.WriteString(`{"assignments":[`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"post":%d,"theme":"theme-%d"}`, i, i)
+	}
+	sb.WriteString(`]}`)
+	return sb.String(), nil
+}
+
 // samplePost, clusterBatch birim testleri için minimal bir post_analysis
 // üretir (yalnız Title/Body kullanılır — prompt içeriği).
 func samplePost(postID int64, title string) store.PostAnalysis {
@@ -96,6 +133,52 @@ func insertPost(t *testing.T, ctx context.Context, st *store.Store, platform, re
 		t.Fatalf("insertPost analysis %s: %v", ref, err)
 	}
 	return id
+}
+
+// insertLongPost, insertPost'un başlık/gövde ÖZELLEŞTİRİLEBİLEN hali — #157
+// testinin tek bir domain_tag'i token bütçesi yüzünden (post SAYISI değil)
+// birden çok partiye bölecek kadar uzun gönderiler üretmesi için.
+func insertLongPost(t *testing.T, ctx context.Context, st *store.Store, platform, ref, tag, title, body string) int64 {
+	t.Helper()
+	if _, err := st.InsertRawPosts(ctx, []store.RawPost{
+		{Platform: platform, SourceRef: ref, Community: "c", Title: title, Body: body},
+	}); err != nil {
+		t.Fatalf("insertLongPost %s: %v", ref, err)
+	}
+	var id int64
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT id FROM raw_posts WHERE platform = $1 AND source_ref = $2", platform, ref).Scan(&id); err != nil {
+		t.Fatalf("insertLongPost select %s: %v", ref, err)
+	}
+	if err := st.InsertPostAnalyses(ctx, []store.PostAnalysis{
+		{PostID: id, Classification: "pain_point", DomainTags: []string{tag}},
+	}); err != nil {
+		t.Fatalf("insertLongPost analysis %s: %v", ref, err)
+	}
+	return id
+}
+
+// promptCapturingChat, kümeleme çağrılarının user prompt'unu SIRAYLA
+// kaydeden ve responses'taki cevapları sırayla döndüren sahte chat (#157) —
+// ikinci partinin prompt'unun birinci partide açılan tema adını görüp
+// görmediğini doğrulamak için. responses'ı aşan çağrılarda boş atama listesi
+// döner (o partideki tüm postlar eski davranışa düşer — teste zarar vermez).
+type promptCapturingChat struct {
+	prompts   []string
+	responses []string
+}
+
+func (c *promptCapturingChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *promptCapturingChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	idx := len(c.prompts)
+	c.prompts = append(c.prompts, user)
+	if idx < len(c.responses) {
+		return c.responses[idx], nil
+	}
+	return `{"assignments":[]}`, nil
 }
 
 // Gerçek DB isteyen entegrasyon testi; TEST_DATABASE_URL yoksa atlanır.
@@ -180,6 +263,64 @@ func TestGroupThemesIntegration(t *testing.T) {
 	}
 }
 
+// Gerçek DB isteyen entegrasyon testi; TEST_DATABASE_URL yoksa atlanır.
+// TestGroupThemesPropagatesNewThemeAcrossSplitBatches, #157 review bulgusunun
+// testi: existingByTag başta DB'den TEK sefer çekiliyor; aynı domain_tag'in
+// token bütçesi yüzünden (#156) birden çok partiye bölündüğü durumda, 2.
+// parti 1. partinin AÇTIĞI/bağladığı tema adını (DB'ye tekrar gitmeden,
+// bellekten) "mevcut tema" olarak görmeli — aksi halde yakın-yinelenen tema
+// adı riski doğar. Tek bir domain_tag, post SAYISI (39 < 40 sınırı) DEĞİL
+// TOKEN bütçesi yüzünden en az iki partiye bölünecek kadar uzun gövdeli
+// gönderilerle kurulur (bkz. TestPackBucketsSplitsLargeBucketByTokenBudget
+// ile aynı boyutlandırma).
+func TestGroupThemesPropagatesNewThemeAcrossSplitBatches(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	const platform = "test-theme-split"
+	const tag = "test-split-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE domain_tag = $1", tag)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	longBody := strings.Repeat("kelime dolgu metni ", 40) // clip(500)'e vurur
+	const n = 39                                          // themeClusterBucketLimit (40) altında — yalnız TOKEN bütçesi bölmeli
+	for i := 0; i < n; i++ {
+		insertLongPost(t, ctx, st, platform, fmt.Sprintf("split-%02d", i), tag,
+			fmt.Sprintf("uzun post basligi %d", i), longBody)
+	}
+
+	chat := &promptCapturingChat{
+		responses: []string{
+			`{"assignments":[{"post":0,"theme":"test-split-new-theme"}]}`,
+		},
+	}
+	linked, err := GroupThemes(ctx, st, chat)
+	if err != nil {
+		t.Fatalf("GroupThemes: %v", err)
+	}
+	if linked != n {
+		t.Fatalf("%d post bağlanmalıydı, geldi: %d", n, linked)
+	}
+	if len(chat.prompts) < 2 {
+		t.Fatalf("bu kova token bütçesi yüzünden en az 2 partiye bölünmeliydi, geldi: %d çağrı", len(chat.prompts))
+	}
+	if !strings.Contains(chat.prompts[1], "test-split-new-theme") {
+		t.Errorf("2. partinin prompt'u 1. partide açılan \"test-split-new-theme\" temasını GÖRMELİYDİ (existingByTag bellekte güncellenmeli), prompt:\n%s", chat.prompts[1])
+	}
+}
+
 // ------------------------------------------------------- clusterBatch (DB'siz)
 
 func TestClusterBatchUsesTemperatureZero(t *testing.T) {
@@ -210,7 +351,7 @@ func TestClusterBatchSingleCallEvenAtBucketLimit(t *testing.T) {
 func TestClusterBatchFallbackOnLLMError(t *testing.T) {
 	chat := &errClusterChat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("LLM hatasında nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
 	}
@@ -222,7 +363,7 @@ func TestClusterBatchFallbackOnLLMError(t *testing.T) {
 func TestClusterBatchFallbackOnGarbageJSON(t *testing.T) {
 	chat := &fakeClusterChat{response: "not json"}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("bozuk JSON'da nil harita beklenirdi, geldi: %v", assignments)
 	}
@@ -231,7 +372,7 @@ func TestClusterBatchFallbackOnGarbageJSON(t *testing.T) {
 func TestClusterBatchFallbackOnEmptyResponse(t *testing.T) {
 	chat := &fakeClusterChat{response: ""}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments != nil {
 		t.Errorf("boş cevapta nil harita beklenirdi, geldi: %v", assignments)
 	}
@@ -241,7 +382,7 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	existingByTag := map[string][]store.Theme{"x": {{ID: 1, Name: "cannot export chat history"}}}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments := clusterBatch(context.Background(), chat, batch, existingByTag)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
 	if assignments[0] != "cannot export chat history" {
 		t.Errorf("mevcut temaya atama beklenirdi, geldi: %v", assignments)
 	}
@@ -253,7 +394,7 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 func TestClusterBatchGeneratesNewTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"no bulk invoice download"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments[0] != "no bulk invoice download" {
 		t.Errorf("yeni tema adı doğrudan kabul edilmeliydi, geldi: %v", assignments)
 	}
@@ -265,7 +406,7 @@ func TestClusterBatchGeneratesNewTheme(t *testing.T) {
 func TestClusterBatchPartialAssignmentFallsBackPerPost(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
-	assignments := clusterBatch(context.Background(), chat, batch, nil)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, nil)
 	if assignments[0] != "cannot export chat history" {
 		t.Errorf("post 0 atanmalıydı, geldi: %v", assignments)
 	}
@@ -296,9 +437,75 @@ func TestClusterBatchDoesNotFilterCrossTagAssignmentsInMemory(t *testing.T) {
 		posts:    []store.PostAnalysis{samplePost(1, "b-post")},
 		postTags: []string{"b"},
 	}
-	assignments := clusterBatch(context.Background(), chat, batch, existingByTag)
+	assignments, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
 	if assignments[0] != "foo" {
 		t.Errorf("clusterBatch atamayı süzmemeli (DB sınırı bunu ele alır), geldi: %v", assignments)
+	}
+}
+
+// TestClusterBatchSplitsOn413AndAssignsAllPosts, #156 kabul kriteri:
+// clusterBatch 413 (istek çok büyük) aldığında partiyi ikiye bölüp HER
+// YARIYI ayrı ayrı (gerekirse özyinelemeli olarak tekrar) yeniden dener ve
+// sonunda TÜM gönderiler LLM kümelemeyle (eski davranışa düşmeden) temaya
+// bağlanır.
+func TestClusterBatchSplitsOn413AndAssignsAllPosts(t *testing.T) {
+	posts := make([]store.PostAnalysis, 10)
+	for i := range posts {
+		posts[i] = samplePost(int64(i), fmt.Sprintf("post-%d", i))
+	}
+	batch := singleTagBatch("x", posts)
+	// 3'ten fazla post içeren HER çağrı 413 alır — 10 post en az iki bölme
+	// turu (10 -> 5+5 -> biri hâlâ >3 ise tekrar) gerektirir.
+	chat := &tooLargeThenOKChat{splitThreshold: 3}
+
+	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	if splits == 0 {
+		t.Fatal("413 sonrası en az bir bölme+yeniden deneme beklenir")
+	}
+	if len(assignments) != len(posts) {
+		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(assignments), len(posts))
+	}
+	for i := range posts {
+		if _, ok := assignments[i]; !ok {
+			t.Errorf("post %d atanmamış kalmış", i)
+		}
+	}
+}
+
+// TestClusterBatchSingleFallsBackOnPersistent413, tek gönderiye inince bile
+// 413 devam ederse (daha fazla bölünemez) o postun ESKİ davranışa
+// düşürüldüğünü (nil harita — sonsuz özyineleme YOK) doğrular.
+func TestClusterBatchSingleFallsBackOnPersistent413(t *testing.T) {
+	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
+	// splitThreshold=0: tek postluk parti bile 413 alır.
+	chat := &tooLargeThenOKChat{splitThreshold: 0}
+
+	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	if splits != 0 {
+		t.Errorf("tek postluk parti daha fazla bölünemez, splits=0 beklenirdi, geldi: %d", splits)
+	}
+	if assignments != nil {
+		t.Errorf("kalıcı 413'te nil harita (eski davranışa düşüş) beklenirdi, geldi: %v", assignments)
+	}
+}
+
+// TestClusterBatchDoesNotSplitOn429, #156 kabul kriteri: 413 DIŞINDAKİ LLM
+// hatalarında (429/ağ/vb.) parti BÖLÜNMEZ — tek çağrı denenir, doğrudan eski
+// davranışa düşülür. 429'un backoff/retry'si zaten llm paketinde; pipeline
+// bunun üstüne binmemeli.
+func TestClusterBatchDoesNotSplitOn429(t *testing.T) {
+	chat := &errClusterChat{}
+	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
+
+	assignments, splits := clusterBatch(context.Background(), chat, batch, nil)
+	if splits != 0 {
+		t.Errorf("429/genel hatada bölme yapılmamalı, splits=%d", splits)
+	}
+	if assignments != nil {
+		t.Errorf("nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
+	}
+	if chat.calls != 1 {
+		t.Errorf("TEK çağrı denenmeliydi (parti bölünmedi), geldi: %d", chat.calls)
 	}
 }
 
@@ -387,6 +594,61 @@ func TestPackBucketsPreservesPostTagMapping(t *testing.T) {
 		if b.postTags[i] != wantTag {
 			t.Errorf("post %d (id=%d) etiketi %q olmalıydı, geldi: %q", i, p.PostID, wantTag, b.postTags[i])
 		}
+	}
+}
+
+// TestPackBucketsSplitsLargeBucketByTokenBudget, #156 kök nedeninin
+// (kova YALNIZ post sayısıyla sınırlanıyordu, token boyutuyla değil) birim
+// test karşılığı: post sayısı themeClusterBucketLimit'in (40) çok altında
+// ama gövdeler uzun olduğundan TOPLAM tahmini token themeClusterTokenBudget'ı
+// aşan TEK bir kova, birden çok partiye bölünmeli — hiçbir gönderi
+// kaybolmadan ve HİÇBİR partinin tahmini toplamı bütçeyi aşmadan.
+func TestPackBucketsSplitsLargeBucketByTokenBudget(t *testing.T) {
+	// clip(Body,500) sınırına vuracak kadar uzun gövde: her post ~500 rune
+	// gövde + ~30 rune başlık -> tahmini ~155 token/post. 35 post (post
+	// sayısı sınırının altında) toplamda ~5400+ token eder, tek partiye
+	// (6.026 kalan bütçe) sığmaz çünkü sistem prompt'u zaten pay alıyor —
+	// aşağıdaki assert gerçek estimateTokens ile hesaplanıp doğrulanıyor.
+	longBody := strings.Repeat("kelime dolgu metni ", 40) // ~760 rune, clip(500) devreye girer
+	const n = 39                                          // themeClusterBucketLimit'in (40) altında — post SAYISI sınırı bu kovayı bölmez
+	posts := make([]store.PostAnalysis, n)
+	for i := range posts {
+		posts[i] = store.PostAnalysis{PostID: int64(i), Title: fmt.Sprintf("uzun post basligi %d", i), Body: longBody}
+	}
+	order := []string{"big-tag"}
+	buckets := map[string][]store.PostAnalysis{"big-tag": posts}
+
+	// Önkoşul: bu kova tek başına bütçeyi gerçekten aşıyor (yoksa test
+	// hiçbir şey kanıtlamaz).
+	total := themeClusterSystemTokens
+	for i, a := range posts {
+		total += estimateTokens(postPromptLine(i, "big-tag", a))
+	}
+	if total <= themeClusterTokenBudget {
+		t.Fatalf("test kovası bütçeyi aşacak şekilde kurulmalıydı, tahmini=%d bütçe=%d", total, themeClusterTokenBudget)
+	}
+	if n > themeClusterBucketLimit {
+		t.Fatalf("test post sayısı sınırın (40) altında kalmalıydı, n=%d", n)
+	}
+
+	batches := packBuckets(order, buckets)
+	if len(batches) < 2 {
+		t.Fatalf("token bütçesini aşan kova (post sayısı sınırın altında olsa da) birden çok partiye bölünmeliydi, geldi: %d parti", len(batches))
+	}
+
+	gotTotal := 0
+	for bi, b := range batches {
+		gotTotal += len(b.posts)
+		tokens := themeClusterSystemTokens
+		for i, a := range b.posts {
+			tokens += estimateTokens(postPromptLine(i, b.postTags[i], a))
+		}
+		if tokens > themeClusterTokenBudget {
+			t.Errorf("parti %d tahmini token bütçesini aşıyor: %d > %d", bi, tokens, themeClusterTokenBudget)
+		}
+	}
+	if gotTotal != n {
+		t.Errorf("hiçbir post kaybolmamalı, toplam=%d beklenen=%d", gotTotal, n)
 	}
 }
 

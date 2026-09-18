@@ -10,11 +10,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -152,6 +154,48 @@ func retryDelay(err error, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second // 2s, 4s, 8s
 }
 
+// requestTooLargeError, sağlayıcının istek boyutu/dakikalık token (TPM)
+// sınırını TEK istekte aştığını bildiren hatayı taşır (Groq: HTTP 413 ya da
+// gövdede "Request too large" mesajı) (#156). rateLimitError'dan (429/5xx —
+// dakikalık/günlük KOTA) BİLEREK ayrı tutulur: kota hatası partiyi bölmekle
+// çözülmez (mevcut backoff/retry davranışı korunur), bu hata İSE partiyi
+// bölüp yeniden denemeyi anlamlı kılar (bkz. pipeline.clusterBatch).
+type requestTooLargeError struct {
+	host string
+	body string
+}
+
+func (e *requestTooLargeError) Error() string {
+	return fmt.Sprintf("%s: istek çok büyük (413): %s", e.host, e.body)
+}
+
+// IsRequestTooLarge, err'nin sağlayıcıdan "istek çok büyük" (413 tarzı)
+// hatası olup olmadığını bildirir — çağıran paket (pipeline) bunu parti
+// bölme + yeniden deneme tetikleyicisi olarak kullanır (#156).
+func IsRequestTooLarge(err error) bool {
+	var e *requestTooLargeError
+	return errors.As(err, &e)
+}
+
+// NewRequestTooLargeError, requestTooLargeError'ı DIŞ paketlere (pipeline
+// testlerindeki sahte Chat uygulamaları) açar — gerçek 413 yanıtını
+// simüle etmenin tek yolu budur, tür kendisi bilerek dışa kapalı kalır
+// (#156).
+func NewRequestTooLargeError(host, body string) error {
+	return &requestTooLargeError{host: host, body: body}
+}
+
+// isRequestTooLargeStatus, HTTP durum kodu/gövdesinin "istek çok büyük"
+// hatası olup olmadığını belirler. Öncelik gerçek 413 durum koduna; bazı
+// OpenAI-uyumlu sağlayıcılar aynı hatayı 400 + "Request too large" gövdesiyle
+// dönebildiğinden (#156), bu ikinci biçim de savunmacı olarak yakalanır.
+func isRequestTooLargeStatus(status int, body string) bool {
+	if status == http.StatusRequestEntityTooLarge {
+		return true
+	}
+	return status >= 400 && status < 500 && strings.Contains(strings.ToLower(body), "request too large")
+}
+
 func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (content string, usage Usage, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/chat/completions", bytes.NewReader(payload))
@@ -180,6 +224,12 @@ func (c *OpenAICompatClient) doRequest(ctx context.Context, payload []byte) (con
 			}
 		}
 		return "", Usage{}, true, &rateLimitError{host: c.host(), status: resp.StatusCode, retryAfter: after, body: truncate(string(body), 200)}
+	}
+	if isRequestTooLargeStatus(resp.StatusCode, string(body)) {
+		// Aynı boyuttaki isteği burada TEKRAR denemek anlamsız (yine
+		// aşacak) — retryable=false: pipeline katmanı IsRequestTooLarge ile
+		// yakalayıp partiyi bölerek YENİ (daha küçük) istekler kuracak.
+		return "", Usage{}, false, &requestTooLargeError{host: c.host(), body: truncate(string(body), 200)}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", Usage{}, false, fmt.Errorf("%s HTTP %d: %s", c.host(), resp.StatusCode, truncate(string(body), 400))
