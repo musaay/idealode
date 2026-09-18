@@ -100,6 +100,88 @@ func TestChatJSONUsesDefaultTemperature(t *testing.T) {
 	}
 }
 
+// groqRequestTooLargeBody, #156 issue'sunda karşılaşılan GERÇEK Groq 413
+// gövdesidir (birebir) — "type":"tokens","code":"rate_limit_exceeded" alanları
+// yanıltıcı biçimde kota hatasına benziyor olsa da bu bir TEK İSTEK boyut
+// hatasıdır (429 DEĞİL, HTTP 413), IsRequestTooLarge bunu ayırt etmeli.
+const groqRequestTooLargeBody = "{\"error\":{\"message\":\"Request too large for model `openai/gpt-oss-120b` in organization `org_test` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 8112, please reduce your message size and try again.\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}"
+
+// TestChatJSON413NotRetriedButFlagged, 413 (istek çok büyük) alındığında
+// AYNI istek içeride tekrar denenmediğini (retryable=false — tekrar denemek
+// anlamsız, aynı boyut yine aşar) ama hatanın llm.IsRequestTooLarge ile
+// ayırt edilebildiğini doğrular (#156) — pipeline paketi bunu parti bölme
+// tetikleyicisi olarak kullanır. Gövde, issue'daki GERÇEK Groq yanıtının
+// birebir aynısıdır: "code":"rate_limit_exceeded" alanı yanıltıcı olsa da
+// (429 rateLimitError İLE KARIŞTIRILMAMALI — HTTP durumu 413'tür) bu bir
+// istek boyutu hatasıdır.
+func TestChatJSON413NotRetriedButFlagged(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		w.Write([]byte(groqRequestTooLargeBody))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, err := c.ChatJSON(context.Background(), "sys", "user")
+	if err == nil {
+		t.Fatal("413'te hata beklenir")
+	}
+	if !IsRequestTooLarge(err) {
+		t.Errorf("IsRequestTooLarge true dönmeliydi, err: %v", err)
+	}
+	if _, isRateLimit := err.(*rateLimitError); isRateLimit {
+		t.Errorf("gövdedeki \"code\":\"rate_limit_exceeded\" yanıltmamalı — 413 rateLimitError'a dönüşmemeli, err: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("413 içeride tekrar denenmemeli (parti bölme pipeline'da olur); çağrı sayısı: %d", calls.Load())
+	}
+}
+
+// TestChatJSON413DetectedFrom400Body, bazı OpenAI-uyumlu sağlayıcıların aynı
+// hatayı gerçek 413 yerine 400 + "Request too large" gövdesiyle
+// dönebileceği durumu kapsar (#156 savunmacı ayırt etme).
+func TestChatJSON413DetectedFrom400Body(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"Request too large for model, TPM limit exceeded"}}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, err := c.ChatJSON(context.Background(), "sys", "user")
+	if !IsRequestTooLarge(err) {
+		t.Errorf("400 + \"Request too large\" gövdesi de IsRequestTooLarge=true vermeliydi, err: %v", err)
+	}
+}
+
+// TestChatJSON429IsNotRequestTooLarge, 429 (dakikalık/günlük kota) hatasının
+// IsRequestTooLarge tarafından YAKALANMADIĞINI doğrular — pipeline bu ikisini
+// ayırmak zorunda (#156 kabul kriteri: 429'da bölme YAPILMASIN). doRequest
+// doğrudan çağrılır (ChatJSON'un içteki retry/backoff döngüsünü — ayrı
+// TestChatJSONRetryOn429'da zaten kapsanıyor — atlayıp testi hızlı tutmak
+// için).
+func TestChatJSON429IsNotRequestTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, _, retryable, err := c.doRequest(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("429'da hata beklenir")
+	}
+	if !retryable {
+		t.Error("429 retryable=true olmalı (mevcut backoff davranışı)")
+	}
+	if IsRequestTooLarge(err) {
+		t.Errorf("429 asla IsRequestTooLarge=true vermemeli, err: %v", err)
+	}
+}
+
 func TestHostFallsBackToBaseURL(t *testing.T) {
 	// Geçersiz/host'suz bir BaseURL verilirse hata metni yine anlamlı kalsın.
 	c := &OpenAICompatClient{BaseURL: "not-a-url"}
