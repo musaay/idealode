@@ -94,3 +94,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Minimalist Phone (Martin Morávek) — telefonu bilinçli sürtünmeyle "aptal telefona" çeviren, ekstra erişim için ödenen tersine-özellik uygulaması, $20K/ay (2026-09-15)
 - Hero Analytics (Zac Cherin) — marka yerine ajanslara satılan e-posta/SMS pazarlama raporlama SaaS'ı, 19 ayda $1M ARR (2026-09-16)
 - HabitKit (Sebastian Röhl) — GitHub-grid görseliyle alışkanlık takibi, $1-2/ay aşırı düşük fiyatla kitlesel abonelik, ~$28K MRR / $600K+/yıl (2026-09-16)
+- Neolemon (Sachin Kamath) — aynı çizgi film karakterini sınırsız sahne/pozda tutarlı üreten AI illüstrasyon platformu (Character Consistency Engine), $35-50K MRR (2026-09-18)
+- PT Prior-Auth Ajanı (isimsiz, Foundra.ai vaka çalışması) — fizik tedavi kliniklerinin sigorta ön-onay evrakını otomatikleştiren tek-kurucu AI ajanı, 14 ayda $41K MRR (2026-09-18)
