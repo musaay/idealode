@@ -1,0 +1,37 @@
+# İki haftalık mercek/prompt denetimi — her ayın 1'i ve 15'inde 06:00 UTC
+# (09:00 TR) bir denetim issue'su açar. Oturum zamanlayıcılarından bağımsız,
+# kalıcı takvim. Rapor kanalı değildir; yalnız iş kaydı.
+name: lens-audit
+
+on:
+  schedule:
+    - cron: "0 6 1,15 * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  open-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Denetim issue'su aç
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          d=$(date -u +%Y-%m-%d)
+          gh issue create \
+            --title "[Denetim] Mercek/prompt denetimi — $d" \
+            --label audit \
+            --body "$(cat <<'EOF'
+          Otomatik açıldı (lens-audit.yml). Lead bu issue'yu In progress'e çeker ve şu ölçümü yapar:
+
+          1. Son 2 haftadaki `eliminations` dağılımı: hangi mercek kaç eleme yaptı; hiç eleme yapmayan mercek var mı?
+          2. Bu dönemde PO'nun yayınladığı ve arşivlediği kartlar; her mercek için altın sete eklenecek yeni örnekler.
+          3. Mercek başına: yayınlanan kartlardan haksız fail (yanlış negatif) ve arşivlenenlerden haksız pass (yanlış pozitif) var mı?
+          4. Sonuç: keep / rewrite / merge / remove önerisi, rakamla. Prompt değişikliği gerekiyorsa ayrı issue + altın set (CLAUDE.md kuralı).
+
+          Kapanış: ölçüm özeti bu issue'ya yorum olarak yazılır; değişiklik yoksa "değişiklik yok" diye kapatılır.
+          EOF
+          )"

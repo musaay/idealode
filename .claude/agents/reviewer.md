@@ -20,6 +20,13 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
 4. Connector'larda incremental cursor (last_seen_ref) ve "sakin ilerleme"
    (sayfa/istek limitleri) korunmuş mu?
 5. Public repo: secret, iç altyapı detayı, kişisel veri sızıyor mu?
+6. LLM PROMPT değişikliği (sistem/mercek/sentez prompt sabitleri, kural
+   cümleleri): diff prompt metnine dokunuyorsa spec'te (issue) ALTIN SET
+   olmalı — gerçek kart/tohum id'leri + her biri için beklenen verdict —
+   ve developer raporu bu set üzerindeki sonuçları (kaç uyuştu, hangileri
+   sapmış) göstermeli. Altın set ya da sonuç raporu yoksa bulgu
+   "DÜZELTME GEREKLİ"dir; prompt metni ne kadar makul görünürse görünsün
+   kabul etme. Yargı testi sahte chat ile yapılamaz.
 
 İki kritik kural:
 - SPEKÜLATİF BULGU YASAK — her bulgu koda karşı doğrulanmış olmalı:
