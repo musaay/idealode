@@ -96,3 +96,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - HabitKit (Sebastian Röhl) — GitHub-grid görseliyle alışkanlık takibi, $1-2/ay aşırı düşük fiyatla kitlesel abonelik, ~$28K MRR / $600K+/yıl (2026-09-16)
 - Neolemon (Sachin Kamath) — aynı çizgi film karakterini sınırsız sahne/pozda tutarlı üreten AI illüstrasyon platformu (Character Consistency Engine), $35-50K MRR (2026-09-18)
 - PT Prior-Auth Ajanı (isimsiz, Foundra.ai vaka çalışması) — fizik tedavi kliniklerinin sigorta ön-onay evrakını otomatikleştiren tek-kurucu AI ajanı, 14 ayda $41K MRR (2026-09-18)
+- SuperX (Rob Hallam, Tibo Louis-Lucas) — X gönderisini yayınlamadan önce "Algoritma Simülatörü" ile performansını tahmin eden büyüme aracı, $23K MRR, 650 ödeyen müşteri (2026-09-19)
