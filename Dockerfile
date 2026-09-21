@@ -1,7 +1,7 @@
 # IdeaLode — pipeline/API binary'si (backend modülü). Monorepo'da #178'den
 # beri iki ayrı Go modülü var (backend/, ui/); Nixpacks'ın kök dizin
 # varsayımına güvenmek yerine deterministik bir multi-stage build kullanıyoruz.
-# ui/ bu imaja hiç girmez (bkz. .dockerignore + Dockerfile.ui).
+# ui/ bu imaja hiç girmez (bkz. .dockerignore + ui/Dockerfile).
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src

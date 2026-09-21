@@ -1,12 +1,14 @@
 # IdeaLode — web arayüzü binary'si (ui modülü, #178). backend'i import
 # ETMEZ; API_BASE_URL üzerinden apiclient ile konuşur, DATABASE_URL görmez.
-# backend/ bu imaja hiç girmez (bkz. .dockerignore).
+# Railway'de bu servisin Root Directory'si ui/ olmalı — kökteki railway.json
+# ve Dockerfile'ı görmemesi için (#178 düzeltmesi, bkz. ui/railway.json).
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src
-COPY ui/go.mod ui/go.sum* ./
+COPY go.mod ./
+COPY go.sum* ./
 RUN go mod download
-COPY ui/ .
+COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /app/web ./cmd/web
 
 FROM alpine:3.20
