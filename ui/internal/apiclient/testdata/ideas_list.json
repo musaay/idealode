@@ -1,0 +1,93 @@
+{
+  "ideas": [
+    {
+      "id": 601,
+      "slug": "kart-601",
+      "title": "Kart 601",
+      "problem_statement": "Basit bir dert tanımı.",
+      "proposed_solution": "Basit bir çözüm.",
+      "target_user": "Herkes",
+      "evidence_count": 2,
+      "example_quotes": [
+        "örnek alıntı"
+      ],
+      "source_type": "pain_point",
+      "urgency_score": 3,
+      "monetization_signal": 1,
+      "domain_tags": [
+        "smb"
+      ],
+      "local_evidence": [],
+      "mine": false,
+      "created_at": "2026-09-01T08:00:00Z"
+    },
+    {
+      "id": 602,
+      "slug": "kart-602",
+      "title": "Kart 602 (türetilmiş)",
+      "problem_statement": "Sohbetten türetilen dert.",
+      "proposed_solution": "Sohbetten türetilen çözüm.",
+      "target_user": "KOBİ",
+      "evidence_count": 2,
+      "example_quotes": [
+        "örnek alıntı"
+      ],
+      "source_type": "ai_blended",
+      "urgency_score": 3,
+      "monetization_signal": 1,
+      "domain_tags": [
+        "smb"
+      ],
+      "local_evidence": [],
+      "parent_idea_id": 601,
+      "parent_slug": "kart-601",
+      "mine": true,
+      "created_at": "2026-09-03T09:00:00Z"
+    },
+    {
+      "id": 501,
+      "slug": "randevu-botu-9x8y",
+      "title": "Randevu Botu",
+      "problem_statement": "KOBİ'ler müşteri randevularını elle takip ediyor ve sık sık çakışma yaşıyor.",
+      "proposed_solution": "WhatsApp üzerinden otomatik randevu hatırlatma ve çakışma kontrolü sağlayan bot.",
+      "target_user": "Küçük işletme sahipleri",
+      "evidence_count": 6,
+      "example_quotes": [
+        "Randevularımı takip edemiyorum",
+        "Sürekli çakışma yaşıyorum"
+      ],
+      "source_type": "market_derived",
+      "source_theme_id": 12,
+      "urgency_score": 4,
+      "monetization_signal": 3,
+      "known_competitors_ai_guess": "Calendly, Acuity Scheduling",
+      "domain_tags": [
+        "smb",
+        "scheduling"
+      ],
+      "local_evidence": [
+        "yerel kanıt satırı"
+      ],
+      "mine": false,
+      "source_theme": "Randevu Yönetimi",
+      "created_at": "2026-09-01T10:00:00Z",
+      "fused_at": "2026-09-02T08:00:00Z",
+      "distinctiveness_verdict": "unsure",
+      "distinctiveness_reason": "Benzer ürünler var ama fark belirsiz.",
+      "data_access_verdict": "pass",
+      "data_access_reason": "",
+      "lens_verdicts": [
+        {
+          "lens": "veri-erişimi",
+          "prompt_version": "v1",
+          "subject": "card",
+          "verdict": "pass",
+          "reason": "Veri erişimi üçüncü taraf API üzerinden sağlanıyor.",
+          "at": "2026-09-01T09:55:00Z"
+        }
+      ],
+      "published_at": "2026-09-01T10:05:00Z"
+    }
+  ]
+}
+

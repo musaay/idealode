@@ -31,24 +31,24 @@ domain_tags, source_theme, local_evidence, created_at). nil slice → `[]` (asla
 
 ## developer — `api` (dosyalar)
 ```
-api/internal/api/server.go        NewServer(store) *http.Server-benzeri; router (Go 1.22 pattern), JSON yardımcıları, log + recover + 5s handler timeout
-api/internal/api/handlers.go      listIdeas, getIdea, ideaSources, healthz; parametre doğrulama yukarıdaki sözleşmeyle birebir
-api/internal/api/server_test.go   httptest + fake store: her uç için 200/404/boş liste/limit sınırları/bilinmeyen source_type/geçersiz id; nil slice → [] testi
-api/internal/store/models.go      IdeaSource'a json etiketleri (+ created_at omitempty davranışı için MarshalJSON veya view tipi)
-api/cmd/idealode/main.go          `api` subcommand (PORT, varsayılan 8080) + usage; `serve` artık DB açmaz: API_BASE_URL okur, apiclient.New(base, 5*time.Second) ile web.NewServer'ı besler (ui-developer'ın paketi gelene kadar derlenmez; imza aşağıda sabit)
+backend/internal/api/server.go        NewServer(store) *http.Server-benzeri; router (Go 1.22 pattern), JSON yardımcıları, log + recover + 5s handler timeout
+backend/internal/api/handlers.go      listIdeas, getIdea, ideaSources, healthz; parametre doğrulama yukarıdaki sözleşmeyle birebir
+backend/internal/api/server_test.go   httptest + fake store: her uç için 200/404/boş liste/limit sınırları/bilinmeyen source_type/geçersiz id; nil slice → [] testi
+backend/internal/store/models.go      IdeaSource'a json etiketleri (+ created_at omitempty davranışı için MarshalJSON veya view tipi)
+backend/cmd/idealode/main.go          `api` subcommand (PORT, varsayılan 8080) + usage; `serve` artık DB açmaz: API_BASE_URL okur, apiclient.New(base, 5*time.Second) ile web.NewServer'ı besler (ui-developer'ın paketi gelene kadar derlenmez; imza aşağıda sabit)
 README.md                         api komutu + env (API_BASE_URL, DATABASE_URL hangi süreçte)
 ```
 `api` süreci `store.IdeaStore`-benzeri arayüzü kendi tanımlar (fake ile test).
 
 ## ui-developer — istemci (dosyalar)
 ```
-api/internal/apiclient/client.go      package apiclient; func New(baseURL string, timeout time.Duration) *Client
+ui/internal/apiclient/client.go      package apiclient; func New(baseURL string, timeout time.Duration) *Client
                                       Client web.IdeaStore'u uygular: ListIdeasFiltered, GetIdea, IdeaSources
                                       404 → store.ErrNotFound; ağ/5xx/bozuk JSON → sarılı hata (%w) ; ctx iptali saygı
-api/internal/apiclient/client_test.go httptest sahte API: mutlu yol, 404→ErrNotFound, 500, timeout, bozuk JSON, boş liste
-api/internal/web/handlers.go          API hatası (ErrNotFound dışı) → 502 şablonlu sayfa ("Servis şu an yanıt vermiyor"), log
-api/internal/web/templates/error.html 502 varyantı; i18n anahtarı (tr/en eşit)
-api/internal/web/web_test.go          502 yolu testi
+ui/internal/apiclient/client_test.go httptest sahte API: mutlu yol, 404→ErrNotFound, 500, timeout, bozuk JSON, boş liste
+ui/internal/web/handlers.go          API hatası (ErrNotFound dışı) → 502 şablonlu sayfa ("Servis şu an yanıt vermiyor"), log
+ui/internal/web/templates/error.html 502 varyantı; i18n anahtarı (tr/en eşit)
+ui/internal/web/web_test.go          502 yolu testi
 ```
 `main.go`'ya DOKUNMAZ (developer'ın). `store` paketine dokunmaz; `store.ErrNotFound`'u import eder.
 

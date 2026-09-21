@@ -27,21 +27,21 @@ ai_blended (#20), kaynak yönetimi ve pipeline tetikleme (#18 admin uçları).
 
 ## Dosya yol haritası
 ```
-api/cmd/idealode/main.go                 serve subcommand + usage satırı
-api/internal/web/server.go               NewServer(deps) *http.Server, router, middleware (log, recover, security headers)
-api/internal/web/handlers.go             handleGallery, handleIdea, handleHealth, handleStatic, notFound/error render
-api/internal/web/view.go                 view modelleri: GalleryPage, IdeaPage, EvidenceItem; local_evidence satır parser'ı
-api/internal/web/i18n.go                 katalog yükleme, t() template func, dil çözümü
-api/internal/web/templates/layout.html   <html lang data-theme>, head, header (logo, dil TR/EN, tema), footer
-api/internal/web/templates/gallery.html  filtre chipleri, arama, kart grid, boş durum
-api/internal/web/templates/idea.html     başlık bloğu, problem, çözüm, kanıtlar, yerel talep, kaynaklar
-api/internal/web/templates/error.html    404 / 500
-api/internal/web/static/app.css          token'lar (:root + [data-theme=dark]), layout, bileşenler
-api/internal/web/static/app.js           tema/dil anahtarı (cookie yaz + reload), filtre chip aktif durumu; JS'siz çalışır
-api/internal/web/i18n/tr.json, en.json   anahtar kümeleri EŞİT olmalı (test)
-api/internal/store/queries.go            ListIdeasFiltered, GetIdea, IdeaSources (aşağıda)
-api/internal/store/models.go             Idea'ya LocalEvidence []string ekle; ListIdeas SELECT'ine local_evidence
-api/internal/web/*_test.go               handler (httptest), şablon parse, i18n eşitlik, local_evidence parser testleri
+backend/cmd/idealode/main.go                 serve subcommand + usage satırı
+ui/internal/web/server.go               NewServer(deps) *http.Server, router, middleware (log, recover, security headers)
+ui/internal/web/handlers.go             handleGallery, handleIdea, handleHealth, handleStatic, notFound/error render
+ui/internal/web/view.go                 view modelleri: GalleryPage, IdeaPage, EvidenceItem; local_evidence satır parser'ı
+ui/internal/web/i18n.go                 katalog yükleme, t() template func, dil çözümü
+ui/internal/web/templates/layout.html   <html lang data-theme>, head, header (logo, dil TR/EN, tema), footer
+ui/internal/web/templates/gallery.html  filtre chipleri, arama, kart grid, boş durum
+ui/internal/web/templates/idea.html     başlık bloğu, problem, çözüm, kanıtlar, yerel talep, kaynaklar
+ui/internal/web/templates/error.html    404 / 500
+ui/internal/web/static/app.css          token'lar (:root + [data-theme=dark]), layout, bileşenler
+ui/internal/web/static/app.js           tema/dil anahtarı (cookie yaz + reload), filtre chip aktif durumu; JS'siz çalışır
+ui/internal/web/i18n/tr.json, en.json   anahtar kümeleri EŞİT olmalı (test)
+backend/internal/store/queries.go            ListIdeasFiltered, GetIdea, IdeaSources (aşağıda)
+backend/internal/store/models.go             Idea'ya LocalEvidence []string ekle; ListIdeas SELECT'ine local_evidence
+ui/internal/web/*_test.go               handler (httptest), şablon parse, i18n eşitlik, local_evidence parser testleri
 Dockerfile                               değişmez (CMD run kalır); railway: ikinci servis startCommand "/app/idealode serve"
 README.md                                serve komutu + env
 ```

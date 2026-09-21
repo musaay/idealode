@@ -1,0 +1,111 @@
+package pipeline
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/musaay/idealode/backend/internal/config"
+	"github.com/musaay/idealode/backend/internal/store"
+)
+
+// tempRecordingChat, son çağrının sıcaklığını ve kullanıcı prompt'unu
+// kaydeden minimal sahte Chat (#106, #119 doğrulaması için).
+type tempRecordingChat struct {
+	response string
+	lastTemp float64
+	lastUser string
+}
+
+func (c *tempRecordingChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *tempRecordingChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.lastTemp = temp
+	c.lastUser = user
+	return c.response, nil
+}
+
+// TestClassifyChunkUsesTemperatureZero, sınıflandırma yargı çağrısının
+// (#106) sıcaklık 0 ile gittiğini doğrular.
+func TestClassifyChunkUsesTemperatureZero(t *testing.T) {
+	chat := &tempRecordingChat{response: `{"results":[{"id":1,"classification":"noise"}]}`}
+	cfg := &config.Config{OutputLang: "tr"}
+	if _, err := classifyChunk(context.Background(), cfg, chat, []store.RawPost{{ID: 1}}); err != nil {
+		t.Fatalf("classifyChunk: %v", err)
+	}
+	if chat.lastTemp != 0 {
+		t.Errorf("classifyChunk sıcaklık 0 ile çağırmalı, geldi: %v", chat.lastTemp)
+	}
+}
+
+// TestClassifyChunkClipsBodyToAnalyzeBodyClip, prompta giren gövdenin
+// analyzeBodyClip (800) ile kırpıldığını, başlığın ise 300'de sabit
+// kaldığını doğrular (#119 token bütçesi).
+func TestClassifyChunkClipsBodyToAnalyzeBodyClip(t *testing.T) {
+	longBody := strings.Repeat("a", 2000)
+	longTitle := strings.Repeat("b", 400)
+	chat := &tempRecordingChat{response: `{"results":[{"id":1,"classification":"noise"}]}`}
+	cfg := &config.Config{OutputLang: "tr"}
+	posts := []store.RawPost{{ID: 1, Title: longTitle, Body: longBody}}
+
+	if _, err := classifyChunk(context.Background(), cfg, chat, posts); err != nil {
+		t.Fatalf("classifyChunk: %v", err)
+	}
+
+	if strings.Contains(chat.lastUser, longBody) {
+		t.Error("gövde tam haliyle prompta girmemeli, analyzeBodyClip ile kırpılmalı")
+	}
+	if want := clip(longBody, analyzeBodyClip); !strings.Contains(chat.lastUser, want) {
+		t.Errorf("prompt gövdesi clip(body, analyzeBodyClip)=%q içermeli", want)
+	}
+	if want := clip(longTitle, 300); !strings.Contains(chat.lastUser, want) {
+		t.Errorf("başlık kırpma sınırı (300) değişmemiş olmalı, beklenen: %q", want)
+	}
+}
+
+func TestNormalizeTags(t *testing.T) {
+	in := []string{"Invoice Automation", "invoice-automation", "AI/ML", "", "a", "b", "c", "d"}
+	want := []string{"invoice-automation", "ai-ml", "a", "b", "c"} // dedup + max 5
+	if got := normalizeTags(in); !reflect.DeepEqual(got, want) {
+		t.Errorf("normalizeTags = %v, beklenen %v", got, want)
+	}
+}
+
+func TestParseClassifyResponse(t *testing.T) {
+	chunk := []store.RawPost{{ID: 1}, {ID: 2}}
+	raw := `{"results":[
+		{"id":1,"classification":"PAIN_POINT","problem_summary":"Fatura takibi zor","target_audience":"serbest çalışanlar","domain_tags":["Invoice Automation"],"willingness_to_pay":true},
+		{"id":2,"classification":"bogus-value","problem_summary":"","target_audience":"","domain_tags":[]},
+		{"id":99,"classification":"pain_point"},
+		{"id":1,"classification":"noise"}
+	]}`
+
+	out, err := parseClassifyResponse(raw, chunk)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("2 sonuç beklendi (id=99 dışarıda, id=1 tekrar sayılmaz), geldi: %d", len(out))
+	}
+	if out[0].PostID != 1 || out[0].Classification != "pain_point" || !out[0].WillingnessToPay {
+		t.Errorf("ilk sonuç hatalı: %+v", out[0])
+	}
+	if out[0].DomainTags[0] != "invoice-automation" {
+		t.Errorf("tag slug'lanmalı: %v", out[0].DomainTags)
+	}
+	if out[1].PostID != 2 || out[1].Classification != "noise" {
+		t.Errorf("geçersiz classification noise'a düşmeli: %+v", out[1])
+	}
+}
+
+func TestParseClassifyResponseInvalid(t *testing.T) {
+	if _, err := parseClassifyResponse("not json", []store.RawPost{{ID: 1}}); err == nil {
+		t.Error("JSON olmayan yanıt hata dönmeli")
+	}
+	if _, err := parseClassifyResponse(`{"results":[]}`, []store.RawPost{{ID: 1}}); err == nil {
+		t.Error("boş sonuç hata dönmeli")
+	}
+}

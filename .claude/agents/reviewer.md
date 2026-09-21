@@ -12,7 +12,7 @@ dosya değiştiren komutlar yasak).
 Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakları:
 1. nil slice → SQL NULL (NOT NULL DEFAULT '{}' kolonlarını kırar) — store
    katmanı guard'ları korunmuş mu?
-2. Migration disiplini: api/migrations/ ve api/internal/store/migrate_sql/
+2. Migration disiplini: backend/migrations/ ve backend/internal/store/migrate_sql/
    ÇİFT kopya + migrate.go'da embed + Exec zinciri; idempotent mi (her koşuda
    yeniden çalışır)?
 3. LLM cevabı parse'ı savunmacı mı (gpt-oss bitişik indeks "013"/13567,

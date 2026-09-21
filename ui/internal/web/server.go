@@ -1,0 +1,261 @@
+// Package web, IdeaLode'un salt okunur web arayüzünü (galeri + kart detayı)
+// sunar. Sunucuda render edilir: Go html/template + embed.FS; React/Node
+// toolchain yoktur. Şablonlar, i18n katalogları ve statik dosyalar binary'ye
+// gömülüdür ve süreç başlangıcında bir kez hazırlanır.
+package web
+
+import (
+	"context"
+	"crypto/sha256"
+	"embed"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"log"
+	"net/http"
+	"time"
+)
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static/*
+var staticFS embed.FS
+
+// Cookie adları — tercihler sunucuda okunur, JS zorunlu değildir.
+const (
+	cookieLang  = "lang"
+	cookieTheme = "theme"
+)
+
+// cookieMaxAge, tercih cookie'lerinin ömrü (1 yıl).
+const cookieMaxAge = 365 * 24 * 60 * 60
+
+// contentSecurityPolicy, spec'te tanımlı sabit politika. Inline script yok;
+// dış kaynaklardan yalnız Google Fonts stili/fontu yüklenir.
+const contentSecurityPolicy = "default-src 'self'; style-src 'self' fonts.googleapis.com; font-src fonts.gstatic.com"
+
+// ChatMessage, sohbet geçmişindeki tek mesaj (API sözleşmesindeki `Msg`).
+type ChatMessage struct {
+	ID        string
+	Role      string // "user" | "assistant"
+	Message   string
+	CreatedAt time.Time
+}
+
+// ChatReply, POST .../chat yanıtı: asistan mesajı + en fazla 3 öneri.
+type ChatReply struct {
+	Reply       ChatMessage
+	Suggestions []string
+}
+
+// Sohbet uçlarının tipli hataları. apiclient bunları döndürür, handler
+// errors.Is ile ayırıp kullanıcıya doğru mesajı gösterir. ErrNotFound
+// (404) ve sarılı ağ hataları (502 sayfası) önceki dilimlerdeki gibidir.
+var (
+	// ErrRateLimited, kota aşıldı (API 429).
+	ErrRateLimited = errors.New("kota aşıldı")
+	// ErrNoConversation, türetilecek sohbet yok (API 409).
+	ErrNoConversation = errors.New("sohbet boş")
+	// ErrUpstream, LLM tarafı hata verdi (API 502).
+	ErrUpstream = errors.New("llm yanıt vermedi")
+	// ErrBadRequest, istek sözleşmeye uymuyor (API 400).
+	ErrBadRequest = errors.New("geçersiz istek")
+)
+
+// IdeaStore, web katmanının API sürecinden ihtiyaç duyduğu yüzey.
+// Somut istemci yerine arayüz kullanılır ki handler testleri canlı
+// veritabanı/LLM olmadan fake ile koşsun.
+// IdeaStore'un kart kimliği artık slug'dır (#110): apiclient bu değeri
+// doğrudan API'nin `/api/ideas/{slug}/...` yollarına taşır — sayısal id web
+// katmanına hiç uğramaz.
+type IdeaStore interface {
+	ListIdeasFiltered(ctx context.Context, f IdeaFilter) ([]Idea, error)
+	GetIdeaBySlug(ctx context.Context, slug string) (*Idea, error)
+	IdeaSources(ctx context.Context, slug string) ([]IdeaSource, error)
+
+	// Sohbet (dilim 2). Oturum kimliği ctx'ten taşınır.
+	ListChat(ctx context.Context, slug string) ([]ChatMessage, error)
+	SendChat(ctx context.Context, slug string, message, lang string) (ChatReply, error)
+	Blend(ctx context.Context, slug string, lang string) (*Idea, error)
+}
+
+// Server, HTTP handler'larını ve önceden parse edilmiş şablonları taşır.
+type Server struct {
+	ideas    IdeaStore
+	tpl      map[string]*template.Template
+	assetVer string
+	static   http.Handler
+	mux      *http.ServeMux
+}
+
+// pageTemplates, sayfa adı -> şablon dosyası. Her sayfa layout ile birlikte
+// ayrı bir şablon kümesine parse edilir ("content" bloğu çakışmasın).
+var pageTemplates = map[string]string{
+	"gallery": "templates/gallery.html",
+	"idea":    "templates/idea.html",
+	"error":   "templates/error.html",
+}
+
+// NewServer, handler'ları kurar. Şablon hatası burada panic'e döner
+// (template.Must semantiği): bozuk şablonla ayağa kalkmak yerine erken çök.
+func NewServer(ideas IdeaStore) *Server {
+	s := &Server{
+		ideas:    ideas,
+		tpl:      mustParseTemplates(),
+		assetVer: mustAssetVersion(),
+	}
+
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(fmt.Sprintf("static alt dizini: %v", err))
+	}
+	s.static = http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /static/", s.handleStatic)
+	mux.HandleFunc("GET /ideas/{slug}", s.handleIdea)
+	mux.HandleFunc("POST /ideas/{slug}/chat", s.handleChat)
+	mux.HandleFunc("POST /ideas/{slug}/blend", s.handleBlend)
+	mux.HandleFunc("GET /{$}", s.handleGallery)
+	mux.HandleFunc("/", s.handleNotFound) // eşleşmeyen her yol
+	s.mux = mux
+	return s
+}
+
+// mustParseTemplates, tüm sayfaları başlangıçta bir kez parse eder.
+func mustParseTemplates() map[string]*template.Template {
+	out := make(map[string]*template.Template, len(pageTemplates))
+	for name, file := range pageTemplates {
+		out[name] = template.Must(
+			template.New("layout.html").ParseFS(templateFS, "templates/layout.html", file))
+	}
+	return out
+}
+
+// mustAssetVersion, gömülü statik dosyaların içeriğinden kısa bir sürüm
+// damgası üretir; app.css/app.js bağlantıları `?v=` ile bunu taşır, böylece
+// uzun cache güvenle kullanılabilir ve deploy'da tarayıcı yeniyi çeker.
+func mustAssetVersion() string {
+	h := sha256.New()
+	err := fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		b, err := staticFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(p))
+		h.Write(b)
+		return nil
+	})
+	if err != nil {
+		panic(fmt.Sprintf("statik sürüm damgası: %v", err))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// Handler, güvenlik başlıkları + log + anonim oturum + recover sarmalıyla
+// mux'ı döner. Oturum katmanı recover'ın DIŞINDA durur: panic hâlinde bile
+// çerez yazılmış olur, hata sayfası oturumu düşürmez.
+func (s *Server) Handler() http.Handler {
+	return securityHeaders(requestLog(sessionMiddleware(s.recoverPanic(s.mux))))
+}
+
+// ListenAndServe, sunucuyu addr üzerinde çalıştırır ve ctx iptal edilince
+// zarifçe kapatır.
+func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("serve: %s dinleniyor", addr)
+		errCh <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		log.Printf("serve: kapanıyor")
+		return srv.Shutdown(shutdownCtx)
+	}
+}
+
+// securityHeaders, her yanıta sabit güvenlik başlıklarını ekler.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// statusRecorder, log için yanıt kodunu yakalar.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return s.ResponseWriter.Write(b)
+}
+
+// requestLog, istek satırını süresiyle loglar. Sorgu dizesi loglanmaz —
+// arama metni kullanıcı verisidir, log'a düşmez.
+func requestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+		if rec.status == 0 {
+			rec.status = http.StatusOK
+		}
+		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+// recoverPanic, handler panic'ini tasarlanmış 500 sayfasına çevirir; süreç
+// ölmez. Yanıt henüz başlamadıysa şablon render edilir (render tampona yazar,
+// dolayısıyla panic anına kadar gövdeye bir şey gitmemiştir).
+func (s *Server) recoverPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("panic: %v (%s %s)", rec, r.Method, r.URL.Path)
+				s.renderServerError(w, r, s.newPage(w, r), fmt.Errorf("panic: %v", rec))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}

@@ -12,7 +12,7 @@ Kurallar:
 - CLAUDE.md konvansiyonlarına uy (özellikle: migration'lar çift kopya +
   migrate.go embed; nil slice → SQL NULL tuzağı; LLM cevapları savunmacı
   parse edilir; yorumlar Türkçe).
-- Rapor vermeden önce ZORUNLU: `cd api && go build ./... && go vet ./... && go test ./...` yeşil.
+- Rapor vermeden önce ZORUNLU: `cd backend && go build ./... && go vet ./... && go test ./...` yeşil.
 - git komutları YASAK — commit/branch/push lead'in işi.
 - Canlı DB'ye ve Groq'a dokunma; testler httptest/fake ile çalışır.
   Canlı doğrulama gerekiyorsa raporda "canlı doğrulama lead'e bırakıldı" yaz.
