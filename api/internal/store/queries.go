@@ -1112,6 +1112,25 @@ func (s *Store) GetIdeaBySlug(ctx context.Context, slug string, sid string) (*Id
 	return s.getIdeaWhere(ctx, "i.slug = $1", slug, sid)
 }
 
+// GetIdeaForAudit, id ile tek kartı GÖRÜNÜRLÜK FİLTRESİ OLMADAN döner
+// (#165, lens-ab): archived_at/published_at koşulları getIdeaWhere'deki
+// gibi UYGULANMAZ — altın set arşivlenmiş/beklemedeki kartları da (mercek
+// denetimi #163 için) içerir. Yalnız iç ölçüm aracı (idealode lens-ab)
+// içindir; API/web yüzeyine ASLA bağlanmaz — GetIdea/GetIdeaBySlug'daki
+// görünürlük kuralı (#74, #102, #110) burada bilinçli olarak atlanır,
+// ai_blended kartlar dahil her kayıt döner (Mine hesaplanmaz, sid yok).
+func (s *Store) GetIdeaForAudit(ctx context.Context, id int64) (*Idea, error) {
+	var i Idea
+	err := scanIdea(s.Pool.QueryRow(ctx, ideaSelect+` WHERE i.id = $1`, id), &i)
+	if err == pgx.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
 // maxIdeaSources, kart detayında listelenen kaynak satırı sayısı.
 const maxIdeaSources = 10
 
@@ -1308,6 +1327,25 @@ func (s *Store) InsertElimination(ctx context.Context, e Elimination) (int64, er
 		return 0, fmt.Errorf("eliminations insert: %w", err)
 	}
 	return id, nil
+}
+
+// GetElimination, id ile tek eleme satırını döner; kayıt yoksa ErrNotFound
+// (#165, lens-ab): altın set "kind":"elimination" satırları buradan
+// subject/detail çeker (bkz. pipeline.RunLensAB).
+func (s *Store) GetElimination(ctx context.Context, id int64) (*Elimination, error) {
+	var e Elimination
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, occurred_at, stage, subject, verdict, criterion, reason, detail
+		FROM eliminations
+		WHERE id = $1`, id).Scan(&e.ID, &e.OccurredAt, &e.Stage, &e.Subject, &e.Verdict,
+		&e.Criterion, &e.Reason, &e.Detail)
+	if err == pgx.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // EliminationsSince, since'den (dahil) sonra oluşmuş eleme kayıtlarını en

@@ -1,0 +1,999 @@
+[
+  {
+    "id": 20,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 22,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 23,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 34,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 74,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 75,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 80,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 81,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 82,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 83,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 84,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 85,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 87,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 89,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 91,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 92,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 93,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 103,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 113,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 123,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass"
+  },
+  {
+    "id": 53,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 61,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 65,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 77,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 79,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 86,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 90,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 99,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 114,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 128,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 25,
+    "kind": "elimination",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 37,
+    "kind": "elimination",
+    "lens": "third_party",
+    "expect": "fail"
+  },
+  {
+    "id": 95,
+    "kind": "idea",
+    "lens": "third_party",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 20,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 22,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 23,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 34,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 74,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 75,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 80,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 81,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect_any": [
+      "pass",
+      "unsure"
+    ]
+  },
+  {
+    "id": 82,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 83,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 84,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 85,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 87,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 89,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 91,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 92,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 93,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 103,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 113,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 123,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 21,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 112,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 53,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 61,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 66,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 127,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 60,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 65,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 76,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 77,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 86,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 88,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 94,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 96,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 19,
+    "kind": "elimination",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 44,
+    "kind": "elimination",
+    "lens": "data_access",
+    "expect": "fail"
+  },
+  {
+    "id": 111,
+    "kind": "elimination",
+    "lens": "data_access",
+    "expect_any": [
+      "pass",
+      "unsure"
+    ],
+    "watch": true
+  },
+  {
+    "id": 5,
+    "kind": "elimination",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 20,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 22,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 23,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 34,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 74,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 75,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 80,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 81,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 82,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 83,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 84,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 85,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 87,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 89,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 91,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 92,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 93,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 103,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 113,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 123,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 129,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 131,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "pass"
+  },
+  {
+    "id": 53,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 61,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 77,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 79,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 86,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 90,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 127,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 101,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 112,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 100,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 121,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 130,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 111,
+    "kind": "idea",
+    "lens": "market_viability",
+    "expect": "fail"
+  },
+  {
+    "id": 20,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 22,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 23,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 34,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 74,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 75,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 80,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 81,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 82,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 83,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 84,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 85,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 87,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 89,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 91,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 92,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 93,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 103,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 113,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 123,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 88,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 128,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 104,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 105,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 107,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 109,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 115,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 119,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 122,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 131,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 62,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 94,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 96,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 108,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 116,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 118,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 120,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 2,
+    "kind": "elimination",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 40,
+    "kind": "elimination",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 53,
+    "kind": "elimination",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K1"
+  },
+  {
+    "id": 90,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 97,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 79,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 86,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 127,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 31,
+    "kind": "elimination",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K2"
+  },
+  {
+    "id": 47,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3"
+  },
+  {
+    "id": 53,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3"
+  },
+  {
+    "id": 98,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3"
+  },
+  {
+    "id": 101,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3"
+  },
+  {
+    "id": 121,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3"
+  },
+  {
+    "id": 100,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K4"
+  }
+]

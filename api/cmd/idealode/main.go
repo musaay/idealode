@@ -13,6 +13,7 @@
 //	serve       web arayüzünü sunar (galeri + kart detayı, salt okunur)
 //	dump        idea card'ları JSON olarak stdout'a dök
 //	scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle, #100)
+//	lens-ab     altın set üzerinde v1/v3 mercek A/B karşılaştırması (elle, #165) — DB'ye yazmaz
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -57,6 +59,11 @@ Komutlar:
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
   scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle tetiklenir, #100)
                 --dry-run isteğe bağlı, hiçbir şey yazmaz
+  lens-ab     altın set üzerinde v1/v3 mercek A/B karşılaştırması (elle tetiklenir, #165)
+                DB'ye/eliminations'a hiçbir şey yazmaz, yalnız okur
+                --set <json> zorunlu, --prompt v1|v3 zorunlu
+                --lens <ad|all> (varsayılan all), --runs N (varsayılan 1)
+                --budget-tokens N (varsayılan 0 = sınırsız), --out <csv> (varsayılan stdout)
 
 Konfigürasyon ortam değişkenlerinden okunur; bkz. .env.example
 `
@@ -75,7 +82,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return
-	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "retheme", "api", "serve", "dump", "migrate", "scrub-quotes":
+	case "ingest", "analyze", "synthesize", "seeds", "generate", "fuse", "run", "retheme", "api", "serve", "dump", "migrate", "scrub-quotes", "lens-ab":
 		// aşağıda dispatch
 	default:
 		fmt.Fprintf(os.Stderr, "bilinmeyen komut: %q\n\n%s", cmd, usageText)
@@ -171,6 +178,8 @@ func dispatch(ctx context.Context, cfg *config.Config, cmd string) error {
 		return cmdMigrate(ctx, cfg)
 	case "scrub-quotes":
 		return cmdScrubQuotes(ctx, cfg)
+	case "lens-ab":
+		return cmdLensAB(ctx, cfg)
 	}
 	return fmt.Errorf("bilinmeyen komut: %q", cmd)
 }
@@ -505,6 +514,75 @@ func cmdScrubQuotes(ctx context.Context, cfg *config.Config) error {
 
 	_, err = pipeline.ScrubQuotes(ctx, st, *dryRun)
 	return err
+}
+
+// cmdLensAB, altın set üzerinde v1/v3 mercek A/B karşılaştırmasını çalıştırır
+// (#165, üst plan #163 §5/§6.2). DB'ye/eliminations'a HİÇBİR ŞEY yazmaz —
+// yalnız GetIdeaForAudit/GetElimination ile okur (bkz. pipeline.RunLensAB).
+// v3 metinleri lens_prompts_v3.go'da ayrı sabitler — bu komut dışında
+// hiçbir yere bağlı DEĞİL.
+func cmdLensAB(ctx context.Context, cfg *config.Config) error {
+	fs := flag.NewFlagSet("lens-ab", flag.ExitOnError)
+	setPath := fs.String("set", "", "altın set JSON dosyası (zorunlu)")
+	lens := fs.String("lens", "all", "mercek adı (third_party|data_access|market_viability|distinctiveness) ya da all")
+	promptVersion := fs.String("prompt", "", "v1|v3 (zorunlu)")
+	runs := fs.Int("runs", 1, "her çift için koşu sayısı (tekrarlanabilirlik için >=2)")
+	budgetTokens := fs.Int("budget-tokens", 0, "birikimli token bütçesi (0 = sınırsız)")
+	outPath := fs.String("out", "", "CSV çıktı dosyası (boşsa stdout)")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*setPath) == "" {
+		return fmt.Errorf("--set zorunlu")
+	}
+	if *promptVersion != "v1" && *promptVersion != "v3" {
+		return fmt.Errorf("--prompt v1|v3 olmalı")
+	}
+
+	raw, err := os.ReadFile(*setPath)
+	if err != nil {
+		return fmt.Errorf("altın set okunamadı: %w", err)
+	}
+	var set []pipeline.GoldenCase
+	if err := json.Unmarshal(raw, &set); err != nil {
+		return fmt.Errorf("altın set JSON değil: %w", err)
+	}
+
+	if err := cfg.RequireLLM(); err != nil {
+		return err
+	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	chat := newChat(cfg)
+	result, err := pipeline.RunLensAB(ctx, st, chat, set, pipeline.LensABOptions{
+		Lens: *lens, PromptVersion: *promptVersion, Runs: *runs, BudgetTokens: *budgetTokens,
+	})
+	if err != nil {
+		return err
+	}
+
+	var out io.Writer = os.Stdout
+	if strings.TrimSpace(*outPath) != "" {
+		f, err := os.Create(*outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		out = f
+	}
+	if err := pipeline.WriteLensABCSV(out, result.Rows); err != nil {
+		return err
+	}
+
+	fmt.Fprint(os.Stderr, pipeline.FormatLensABSummary(result))
+	return nil
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
