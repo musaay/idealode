@@ -5,18 +5,33 @@ platformlardan toplanan paylaşımlardan LLM ile doğrulanmış yazılım fikri
 kartları üretir. Ayrıntı: README.md.
 
 ## Komutlar
-- Build/test: `cd api && go build ./... && go vet ./... && go test ./...`
+#178'den beri backend (`github.com/musaay/idealode/backend`, pipeline/store/api)
+ve ui (`github.com/musaay/idealode/ui`, web arayüzü) iki AYRI Go modülü —
+ui backend'i import ETMEZ, yalnız HTTP (API_BASE_URL) ile konuşur.
+- Backend build/test: `cd backend && go build ./... && go vet ./... && go test ./...`
   (DB testleri `TEST_DATABASE_URL` yoksa atlanır. Gerçek DB'ye karşı koşarken
   `go test -p 1 ./...` kullan: store ve pipeline aynı DB'yi paylaşıyor, paket
   paralelliği kilit kuyruğu yaratıyor. CI bunu zaten böyle koşuyor.)
-- Migration uygulama: `idealode migrate` (elle tetiklenir, otomatik çalışmaz)
-- Pipeline: `idealode run` (= ingest + analyze + synthesize + fuse; advisory lock'lu)
+- ui build/test: `cd ui && go build ./... && go vet ./... && go test ./...`
+  (DB'ye bağlanmaz, dış bağımlılığı yok — testler apiclient'i httptest ile sınar.)
+- Migration uygulama: `idealode migrate` (elle tetiklenir, otomatik çalışmaz; backend'den)
+- Pipeline: `idealode run` (= ingest + analyze + synthesize + fuse; advisory lock'lu; backend'den)
+- Web arayüzü: eski `idealode serve` alt-komutu kaldırıldı, yerine `ui/cmd/web`
+  binary'si — PORT ve zorunlu API_BASE_URL env'iyle ayağa kalkar.
 
 ## Konvansiyonlar
 - Yorumlar ve log mesajları Türkçe; domain_tags/prompt'lar İngilizce.
-- Migration'lar İKİ kopya tutulur: `api/migrations/` + `api/internal/store/migrate_sql/`
+- Migration'lar İKİ kopya tutulur: `backend/migrations/` + `backend/internal/store/migrate_sql/`
   ve `migrate.go`'da embed + Exec zincirine eklenir. Her migration idempotent
   olmalı (tüm dosyalar her koşuda yeniden çalıştırılır).
+- ui, backend'in store.Idea/IdeaSource/IdeaFilter/ErrNotFound/FlagDoubtful
+  türlerini `ui/internal/web/models.go`'da JSON sözleşmesine göre birebir
+  yansıtır (import yok, ayrı modül). Sözleşme kopukluğuna karşı
+  `backend/internal/api/golden_test.go` gerçek handler JSON'unu
+  `ui/internal/apiclient/testdata/*.json` fixture'larıyla karşılaştırır
+  (golden) — backend alan eklerse/değiştirirse bu test kırılır; kasıtlıysa
+  `UPDATE_GOLDEN=1` ile fixture yeniden üretilir ve ui tarafındaki
+  `ui/internal/apiclient/golden_test.go` ile birlikte gözden geçirilir.
 - nil slice tuzağı: pgx nil `[]string`'i SQL NULL yazar, `NOT NULL DEFAULT '{}'`
   kolonlarını kırar — insert sınırında guard var, koru.
 - LLM cevapları savunmacı parse edilir (bitişik indeksler, boş cevap, skip).

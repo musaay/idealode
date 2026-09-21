@@ -29,14 +29,14 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 ### 2) Bir sonraki migration numarasını bul
 
 ```bash
-ls api/migrations/ | grep -E '^[0-9]+_' | sort -V | tail -1
+ls backend/migrations/ | grep -E '^[0-9]+_' | sort -V | tail -1
 ```
 
 Örn. son dosya `009_fusion_sources.sql` ise yeni dosya `010_<konu>.sql` olur
 (konu adı kısa ve açıklayıcı, İngilizce/TR karışık kullanım mevcut kod
 tabanında serbest — mevcut isimlendirme kalıbına bak).
 
-### 3) Yeni migration dosyasını yaz — `api/migrations/NNN_<konu>.sql`
+### 3) Yeni migration dosyasını yaz — `backend/migrations/NNN_<konu>.sql`
 
 Kalıp (mevcut `005_tr_sources.sql`, `009_fusion_sources.sql` örnek alınır):
 
@@ -64,15 +64,15 @@ COMMIT;
 ### 4) Aynı dosyayı `migrate_sql/`e kopyala
 
 ```bash
-cp api/migrations/NNN_<konu>.sql \
-   api/internal/store/migrate_sql/NNN_<konu>.sql
+cp backend/migrations/NNN_<konu>.sql \
+   backend/internal/store/migrate_sql/NNN_<konu>.sql
 ```
 
 İki kopya birebir aynı içerikte olmalı (CLAUDE.md kuralı).
 
 ### 5) `migrate.go`'ya embed + Exec zinciri ekle
 
-`api/internal/store/migrate.go` içinde iki yer değişir:
+`backend/internal/store/migrate.go` içinde iki yer değişir:
 
 a) Embed bildirimi (dosyanın üstündeki `//go:embed` blokla birlikte):
 
@@ -95,7 +95,7 @@ migration'ların üstüne).
 ### 6) Testleri çalıştır
 
 ```bash
-cd api && go build ./... && go vet ./... && go test ./...
+cd backend && go build ./... && go vet ./... && go test ./...
 ```
 
 ### 7) NOT — canlıya uygulama

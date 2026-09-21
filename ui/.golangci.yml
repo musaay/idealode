@@ -1,0 +1,13 @@
+version: "2"
+
+# #178: ui, backend'in web + apiclient paketlerinden ayrı modüle taşındı
+# (davranış değişmedi). backend/.golangci.yml'deki #129 kararıyla aynı
+# gerekçeyle aynı linter'lar kapalı — bu PR yalnız modül ayrımı, lint
+# bulgularını tek tek düzeltmek ayrı iş.
+linters:
+  default: standard
+  disable:
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused

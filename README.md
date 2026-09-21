@@ -18,13 +18,19 @@ ingest  →  analyze  →  synthesize
 
 ## Proje yapısı
 
-- `api/` — Go backend: pipeline + REST API
-- `api/internal/api/` — JSON API sunucusu (`idealode api`); DATABASE_URL'i
+#178'den beri backend ve ui İKİ AYRI Go modülü (ayrı `go.mod`, ayrı deploy) —
+ui backend'i import ETMEZ, yalnız HTTP (`API_BASE_URL`) ile konuşur.
+
+- `backend/` — Go modülü (`github.com/musaay/idealode/backend`): pipeline + REST API
+- `backend/internal/api/` — JSON API sunucusu (`idealode api`); DATABASE_URL'i
   gören TEK süreç (#18)
-- `api/internal/apiclient/` — web katmanının API'ye konuştuğu HTTP istemcisi
-- `api/internal/web/` — sunucuda render edilen web arayüzü (`idealode serve`);
+- `ui/` — Go modülü (`github.com/musaay/idealode/ui`): sunucuda render edilen
+  web arayüzü
+- `ui/internal/web/` — web arayüzü (`ui/cmd/web`, eski adıyla `idealode serve`);
   DB'ye bağlanmaz, kartları `apiclient` ile API'den okur
-- `ui/` — tasarım/prototip notları (arayüzün kendisi `api/internal/web/` altındadır)
+- `ui/internal/apiclient/` — web katmanının API'ye konuştuğu HTTP istemcisi;
+  backend'in store türlerini import etmez, kendi DTO kopyalarını taşır
+  (`ui/internal/web/models.go`) — sözleşme backend'deki golden test ile korunur
 - `scripts/` — yardımcı scriptler
 
 ## Kurulum
@@ -35,25 +41,26 @@ chat-completions endpoint'i sunan bir LLM sağlayıcısının API anahtarı
 sağlayıcıya geçilebilir, kod değişikliği gerekmez — bkz. `.env.example`).
 
 ```sh
-# 1. Derle
-cd api && go build -o idealode ./cmd/idealode
+# 1. Derle (iki ayrı modül, iki ayrı binary)
+cd backend && go build -o idealode ./cmd/idealode && cd ..
+cd ui && go build -o web ./cmd/web && cd ..
 
 # 2. Konfigürasyon — .env.example'ı kopyalayıp doldur
-#    (en az DATABASE_URL + LLM_API_KEY)
+#    (en az DATABASE_URL + LLM_API_KEY; backend/ kökünde ya da env'de)
 
 # 3. Veritabanı şemasını kur
-./idealode migrate
+./backend/idealode migrate
 
 # 4. Pipeline'ı çalıştır
-./idealode run    # ingest -> analyze -> synthesize
-./idealode dump   # üretilen idea card'ları JSON olarak incele
+./backend/idealode run    # ingest -> analyze -> synthesize
+./backend/idealode dump   # üretilen idea card'ları JSON olarak incele
 
 # 5. JSON API'yi aç (DATABASE_URL'i gören TEK süreç)
-./idealode api    # http://localhost:8080 (ör. PORT=8081 ile ayrı port)
+./backend/idealode api    # http://localhost:8080 (ör. PORT=8081 ile ayrı port)
 
 # 6. Web arayüzünü aç (salt okunur galeri + kart detayı) — API'nin adresini
 #    gösterir, kendi DB bağlantısı YOK
-API_BASE_URL=http://localhost:8081 ./idealode serve  # http://localhost:8080
+API_BASE_URL=http://localhost:8081 ./ui/web  # http://localhost:8080
 ```
 
 Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
@@ -63,8 +70,8 @@ Adımlar tek tek de çalıştırılabilir: `./idealode ingest`, `analyze`,
 
 `./idealode api` — pipeline'ın ürettiği idea card'ları JSON olarak sunar
 (#18) ve kart sohbeti/"Idea Copilot"u (#66) çalıştırır. `DATABASE_URL`'i
-gören TEK süreçtir; `serve` dahil hiçbir başka süreç veritabanına doğrudan
-bağlanmaz. LLM'e yalnız bu süreç gider — `LLM_API_KEY` (geriye uyumlu:
+gören TEK süreçtir; ui (`ui/cmd/web`) dahil hiçbir başka süreç veritabanına
+doğrudan bağlanmaz. LLM'e yalnız bu süreç gider — `LLM_API_KEY` (geriye uyumlu:
 `GROQ_API_KEY`) `api` için de zorunludur; `LLM_BASE_URL`/`LLM_MODEL`
 isteğe bağlıdır (varsayılan sağlayıcı: Groq). Sıcaklık politikası (#106):
 yargı çağrıları (sınıflandırma, tutarlılık/dedup/mercek/hakem kararları)
@@ -83,7 +90,7 @@ POST /api/ideas/{id}/blend          → sohbetten yeni `ai_blended` kart türeti
 ```
 
 `/healthz` dışındaki tüm uçlar `X-Session-Id: <hex>` başlığı ister (girişsiz
-kimlik — anonim oturum çerezi; `serve` üretir). Tüm yanıtlar
+kimlik — anonim oturum çerezi; ui üretir). Tüm yanıtlar
 `application/json; charset=utf-8`; hata gövdesi `{"error":"not_found"|
 "bad_request"|"internal"|"rate_limited"|"upstream"|"no_conversation"}`. Boş
 liste her zaman `[]` döner, asla `null` (nil slice'lar sözleşme sınırında
@@ -93,14 +100,15 @@ görünür (galeri + detay); başkasının kartı 404 döner. Ayrıntılı sözl
 `docs/specs/faz2-dilim1b-api.md`, `docs/specs/faz2-dilim2-chat.md`.
 
 Public domain almaz — Railway'de yalnız iç ağda (`idealode-web` servisinden)
-erişilir; dışa açık uç `serve`'dür.
+erişilir; dışa açık uç ui'dır.
 
 ## Web arayüzü
 
-`./idealode serve` kart havuzunu web'den okunur kılar: galeri (kaynak türü
-filtresi + arama) ve kart detayı (problem, çözüm, birebir alıntılar, yerel
-talep kanıtı, kaynak linkleri). Salt okunurdur — giriş, tepki ve sohbet
-sonraki dilimlerde.
+`ui/cmd/web` (`./ui/web` binary'si) kart havuzunu web'den okunur kılar:
+galeri (kaynak türü filtresi + arama) ve kart detayı (problem, çözüm,
+birebir alıntılar, yerel talep kanıtı, kaynak linkleri). Salt okunurdur —
+giriş, tepki ve sohbet sonraki dilimlerde. Ayrı Go modülü — backend'i import
+etmez, yalnız `apiclient` üzerinden HTTP ile konuşur.
 
 - **DB'ye bağlanmaz** — kartları `API_BASE_URL` üzerinden `idealode api`'den
   okur (zorunlu ortam değişkeni; ör. `http://idealode-api.railway.internal:8080`).
@@ -124,13 +132,16 @@ Tüm ayarlar ortam değişkeniyle verilir; liste ve açıklamalar için
 
 `DATABASE_URL` yalnız veritabanına doğrudan bağlanan süreçlerde zorunludur:
 `ingest`, `analyze`, `synthesize`, `fuse`, `seeds`, `run`, `migrate`, `dump`,
-`api`. `serve` DATABASE_URL görmez/kullanmaz; onun yerine `API_BASE_URL`
-zorunludur (`idealode api`'nin adresi).
+`api` (hepsi backend modülünde). ui DATABASE_URL görmez/kullanmaz; onun
+yerine `API_BASE_URL` zorunludur (`idealode api`'nin adresi).
 
 ## Geliştirme
 
 ```sh
-cd api
+cd backend
 go test ./...                                  # birim testler
 TEST_DATABASE_URL=postgres://... go test ./... # + DB entegrasyon testleri
+
+cd ../ui
+go test ./...                                  # birim testler (DB'ye dokunmaz)
 ```

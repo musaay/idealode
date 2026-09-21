@@ -1,0 +1,486 @@
+package apiclient
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/musaay/idealode/ui/internal/web"
+)
+
+// Client, web katmanının beklediği arayüzü uygulamalı — derleme zamanı kontrolü.
+var _ web.IdeaStore = (*Client)(nil)
+
+// newFake, verilen handler'ı çalıştıran sahte API + ona bağlı istemci döner.
+// Canlı ağ yoktur; httptest yerel dinleyici kullanır.
+func newFake(t *testing.T, h http.HandlerFunc) *Client {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return New(srv.URL, 2*time.Second)
+}
+
+func jsonHandler(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+func TestListIdeasHappyPath(t *testing.T) {
+	var gotPath, gotQuery string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		jsonHandler(http.StatusOK, `{"ideas":[
+			{"id":1,"title":"Randevu botu","problem_statement":"P","proposed_solution":"S",
+			 "target_user":"KOBİ","evidence_count":4,"example_quotes":["birebir alıntı"],
+			 "source_type":"pain_point","domain_tags":["smb"],"local_evidence":[],
+			 "urgency_score":4,"monetization_signal":3,"created_at":"2026-08-21T12:00:00Z"}]}`)(w, r)
+	})
+
+	ideas, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{
+		SourceType: "pain_point", Query: "randevu", Limit: 25,
+	})
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotPath != "/api/ideas" {
+		t.Errorf("yol = %q, /api/ideas bekleniyor", gotPath)
+	}
+	if gotQuery != "limit=25&q=randevu&source_type=pain_point" {
+		t.Errorf("sorgu = %q", gotQuery)
+	}
+	if len(ideas) != 1 {
+		t.Fatalf("kart sayısı = %d, 1 bekleniyor", len(ideas))
+	}
+	i := ideas[0]
+	if i.ID != 1 || i.Title != "Randevu botu" || i.EvidenceCount != 4 {
+		t.Errorf("kart alanları yanlış çözüldü: %+v", i)
+	}
+	if len(i.ExampleQuotes) != 1 || i.ExampleQuotes[0] != "birebir alıntı" {
+		t.Errorf("alıntı birebir değil: %v", i.ExampleQuotes)
+	}
+	if !i.CreatedAt.Equal(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)) {
+		t.Errorf("created_at = %v", i.CreatedAt)
+	}
+}
+
+// TestListIdeasDoubtfulFlag: `flag` yalnız beyaz listedeki değerle gönderilir
+// ve distinctiveness_* alanları JSON'dan çözülür (#104).
+func TestListIdeasDoubtfulFlag(t *testing.T) {
+	var gotQuery string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		jsonHandler(http.StatusOK, `{"ideas":[
+			{"id":1,"title":"Ekran süresi koçu","source_type":"pain_point",
+			 "distinctiveness_verdict":"fail","distinctiveness_criterion":"K1",
+			 "distinctiveness_reason":"Onlarca bilinen ürün aynı işi yapıyor."}]}`)(w, r)
+	})
+
+	ideas, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{Flag: web.FlagDoubtful})
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotQuery != "flag=doubtful" {
+		t.Errorf("sorgu = %q", gotQuery)
+	}
+	if len(ideas) != 1 {
+		t.Fatalf("kart sayısı = %d, 1 bekleniyor", len(ideas))
+	}
+	i := ideas[0]
+	if i.DistinctivenessVerdict == nil || *i.DistinctivenessVerdict != "fail" {
+		t.Errorf("verdict çözülmedi: %v", i.DistinctivenessVerdict)
+	}
+	if i.DistinctivenessCriterion == nil || *i.DistinctivenessCriterion != "K1" {
+		t.Errorf("criterion çözülmedi: %v", i.DistinctivenessCriterion)
+	}
+	if i.DistinctivenessReason == nil || *i.DistinctivenessReason != "Onlarca bilinen ürün aynı işi yapıyor." {
+		t.Errorf("reason çözülmedi: %v", i.DistinctivenessReason)
+	}
+
+	// Beyaz liste dışındaki değer hiç gönderilmez.
+	if _, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{Flag: "drop table"}); err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("bilinmeyen flag sorguya sızdı: %q", gotQuery)
+	}
+}
+
+func TestListIdeasNoFilterSendsNoQuery(t *testing.T) {
+	var gotQuery string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		jsonHandler(http.StatusOK, `{"ideas":[]}`)(w, r)
+	})
+	if _, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{}); err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("boş filtrede sorgu dizesi = %q, boş bekleniyor", gotQuery)
+	}
+}
+
+func TestListIdeasEmptyAndNilNeverNil(t *testing.T) {
+	for name, body := range map[string]string{
+		"boş dizi": `{"ideas":[]}`,
+		"null":     `{"ideas":null}`,
+		"alan yok": `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newFake(t, jsonHandler(http.StatusOK, body))
+			ideas, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{})
+			if err != nil {
+				t.Fatalf("beklenmeyen hata: %v", err)
+			}
+			if ideas == nil {
+				t.Fatal("nil dilim döndü, boş dilim bekleniyor")
+			}
+			if len(ideas) != 0 {
+				t.Errorf("uzunluk = %d, 0 bekleniyor", len(ideas))
+			}
+		})
+	}
+}
+
+func TestGetIdeaHappyPath(t *testing.T) {
+	var gotPath string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		jsonHandler(http.StatusOK, `{"idea":{"id":7,"slug":"kart-7ab2","title":"Kart","source_type":"market_derived"}}`)(w, r)
+	})
+	idea, err := c.GetIdeaBySlug(context.Background(), "kart-7ab2")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotPath != "/api/ideas/kart-7ab2" {
+		t.Errorf("yol = %q", gotPath)
+	}
+	if idea.ID != 7 || idea.Slug != "kart-7ab2" || idea.Title != "Kart" {
+		t.Errorf("kart yanlış: %+v", idea)
+	}
+	if idea.ParentIdeaID != nil || idea.Mine {
+		t.Errorf("ek alanlar boş beklenirdi: %+v", idea)
+	}
+}
+
+func TestGetIdeaNotFound(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusNotFound, `{"error":"not_found"}`))
+	_, err := c.GetIdeaBySlug(context.Background(), "yok-404x")
+	if !errors.Is(err, web.ErrNotFound) {
+		t.Fatalf("hata = %v, web.ErrNotFound bekleniyor", err)
+	}
+}
+
+func TestGetIdeaMissingIdeaFieldIsError(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusOK, `{}`))
+	_, err := c.GetIdeaBySlug(context.Background(), "kart-1a2b")
+	if err == nil {
+		t.Fatal("hata bekleniyordu")
+	}
+	if errors.Is(err, web.ErrNotFound) {
+		t.Error("sözleşme ihlali ErrNotFound'a çevrilmemeli")
+	}
+}
+
+func TestIdeaSourcesHappyPathAndZeroTime(t *testing.T) {
+	var gotPath string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		jsonHandler(http.StatusOK, `{"sources":[
+			{"platform":"hackernews","community":"news","url":"https://example.com/a","created_at":"2026-08-20T09:30:00Z"},
+			{"platform":"radar_seed","community":"","url":"https://example.com/b"}]}`)(w, r)
+	})
+	src, err := c.IdeaSources(context.Background(), "kart-3c4d")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotPath != "/api/ideas/kart-3c4d/sources" {
+		t.Errorf("yol = %q", gotPath)
+	}
+	if len(src) != 2 {
+		t.Fatalf("kaynak sayısı = %d, 2 bekleniyor", len(src))
+	}
+	if src[0].Platform != "hackernews" || src[0].URL != "https://example.com/a" {
+		t.Errorf("ilk kaynak yanlış: %+v", src[0])
+	}
+	if src[0].CreatedAt.IsZero() {
+		t.Error("created_at çözülemedi")
+	}
+	if !src[1].CreatedAt.IsZero() {
+		t.Errorf("created_at atlanmışsa sıfır zaman bekleniyor: %v", src[1].CreatedAt)
+	}
+}
+
+func TestIdeaSourcesEmptyNeverNil(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusOK, `{"sources":[]}`))
+	src, err := c.IdeaSources(context.Background(), "kart-1a2b")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if src == nil {
+		t.Fatal("nil dilim döndü, boş dilim bekleniyor")
+	}
+}
+
+func TestIdeaSourcesNotFound(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusNotFound, `{"error":"not_found"}`))
+	_, err := c.IdeaSources(context.Background(), "kart-9z8y")
+	if !errors.Is(err, web.ErrNotFound) {
+		t.Fatalf("hata = %v, web.ErrNotFound bekleniyor", err)
+	}
+}
+
+func TestServerErrorIsWrapped(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+		c := newFake(t, jsonHandler(status, `{"error":"internal"}`))
+		_, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{})
+		if err == nil {
+			t.Fatalf("%d için hata bekleniyordu", status)
+		}
+		if errors.Is(err, web.ErrNotFound) {
+			t.Errorf("%d ErrNotFound'a çevrilmemeli", status)
+		}
+	}
+}
+
+func TestMalformedJSONIsWrapped(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusOK, `{"ideas":[{"id":`))
+	_, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{})
+	if err == nil {
+		t.Fatal("bozuk JSON için hata bekleniyordu")
+	}
+	var syn *json.SyntaxError
+	if !errors.As(err, &syn) {
+		t.Errorf("altta yatan JSON hatası sarılmamış: %v", err)
+	}
+}
+
+func TestNetworkFailureIsWrapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := srv.URL
+	srv.Close() // dinleyici kapalı: bağlantı reddedilir
+
+	c := New(base, 2*time.Second)
+	_, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{})
+	if err == nil {
+		t.Fatal("ağ hatası bekleniyordu")
+	}
+	if errors.Is(err, web.ErrNotFound) {
+		t.Error("ağ hatası ErrNotFound'a çevrilmemeli")
+	}
+}
+
+func TestTimeoutIsWrapped(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+
+	c := New(srv.URL, 50*time.Millisecond)
+	_, err := c.GetIdeaBySlug(context.Background(), "kart-1a2b")
+	if err == nil {
+		t.Fatal("zaman aşımı hatası bekleniyordu")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !os.IsTimeout(err) {
+		t.Errorf("zaman aşımı hatası korunmadı: %v", err)
+	}
+}
+
+func TestContextCancellationRespected(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	c := New(srv.URL, 5*time.Second)
+	_, err := c.ListIdeasFiltered(ctx, web.IdeaFilter{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("hata = %v, context.Canceled bekleniyor", err)
+	}
+}
+
+func TestBaseURLTrailingSlashTrimmed(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		jsonHandler(http.StatusOK, `{"ideas":[]}`)(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL+"///", 2*time.Second)
+	if _, err := c.ListIdeasFiltered(context.Background(), web.IdeaFilter{}); err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotPath != "/api/ideas" {
+		t.Errorf("yol = %q, /api/ideas bekleniyor", gotPath)
+	}
+}
+
+// --------------------------------------------------- Idea Copilot (dilim 2)
+
+func TestGetIdeaCarriesParentAndMine(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusOK,
+		`{"idea":{"id":9,"slug":"turetilmis-9x8y","title":"Türetilmiş","source_type":"ai_blended","parent_idea_id":3,"parent_slug":"kaynak-3a2b","mine":true}}`))
+
+	idea, err := c.GetIdeaBySlug(context.Background(), "turetilmis-9x8y")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if idea.ID != 9 || idea.Slug != "turetilmis-9x8y" || idea.SourceType != "ai_blended" {
+		t.Errorf("kart yanlış: %+v", idea)
+	}
+	if idea.ParentIdeaID == nil || *idea.ParentIdeaID != 3 || idea.ParentSlug != "kaynak-3a2b" || !idea.Mine {
+		t.Errorf("ek alanlar = %+v", idea)
+	}
+}
+
+func TestSessionHeaderSentFromContext(t *testing.T) {
+	var gotSID, gotMethod, gotPath string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotSID = r.Header.Get("X-Session-Id")
+		gotMethod, gotPath = r.Method, r.URL.Path
+		jsonHandler(http.StatusOK, `{"messages":[]}`)(w, r)
+	})
+
+	ctx := web.WithSession(context.Background(), "abc123")
+	if _, err := c.ListChat(ctx, "kart-5e6f"); err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotSID != "abc123" {
+		t.Errorf("X-Session-Id = %q", gotSID)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/ideas/kart-5e6f/chat" {
+		t.Errorf("istek = %s %s", gotMethod, gotPath)
+	}
+}
+
+func TestListChatHappyPathAndNeverNil(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusOK,
+		`{"messages":[{"id":101,"role":"user","message":"Selam","created_at":"2026-09-02T10:00:00Z"},`+
+			`{"id":102,"role":"assistant","message":"Merhaba","created_at":"2026-09-02T10:00:05Z"}]}`))
+
+	msgs, err := c.ListChat(context.Background(), "kart-1a2b")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Message != "Merhaba" {
+		t.Fatalf("mesajlar = %+v", msgs)
+	}
+	if msgs[0].CreatedAt.UTC().Format(time.RFC3339) != "2026-09-02T10:00:00Z" {
+		t.Errorf("zaman damgası = %v", msgs[0].CreatedAt)
+	}
+
+	empty := newFake(t, jsonHandler(http.StatusOK, `{"messages":null}`))
+	got, err := empty.ListChat(context.Background(), "kart-1a2b")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("boş geçmiş nil dönmemeli: %#v", got)
+	}
+}
+
+func TestSendChatSendsBodyAndParsesReply(t *testing.T) {
+	var gotBody, gotType string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotType = string(b), r.Header.Get("Content-Type")
+		jsonHandler(http.StatusOK,
+			`{"reply":{"id":109,"role":"assistant","message":"Cevap","created_at":"2026-09-02T11:00:00Z"},`+
+				`"suggestions":["a","b"]}`)(w, r)
+	})
+
+	reply, err := c.SendChat(context.Background(), "kart-4d3c", "Soru", "tr")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if !strings.Contains(gotBody, `"message":"Soru"`) || !strings.Contains(gotBody, `"lang":"tr"`) {
+		t.Errorf("gövde = %s", gotBody)
+	}
+	if gotType != "application/json" {
+		t.Errorf("Content-Type = %q", gotType)
+	}
+	if reply.Reply.Message != "Cevap" || len(reply.Suggestions) != 2 {
+		t.Errorf("cevap = %+v", reply)
+	}
+}
+
+func TestChatStatusCodesMapToTypedErrors(t *testing.T) {
+	tests := []struct {
+		status int
+		want   error
+	}{
+		{http.StatusBadRequest, web.ErrBadRequest},
+		{http.StatusNotFound, web.ErrNotFound},
+		{http.StatusConflict, web.ErrNoConversation},
+		{http.StatusTooManyRequests, web.ErrRateLimited},
+		{http.StatusBadGateway, web.ErrUpstream},
+	}
+	for _, tt := range tests {
+		c := newFake(t, jsonHandler(tt.status, `{"error":"x"}`))
+		_, err := c.SendChat(context.Background(), "kart-1a2b", "soru", "tr")
+		if !errors.Is(err, tt.want) {
+			t.Errorf("durum %d -> hata %v, beklenen %v", tt.status, err, tt.want)
+		}
+	}
+
+	// Beklenmeyen durum tipli hataya çevrilmez (web 502 sayfası gösterir).
+	c := newFake(t, jsonHandler(http.StatusTeapot, `{}`))
+	_, err := c.SendChat(context.Background(), "kart-1a2b", "soru", "tr")
+	if err == nil || errors.Is(err, web.ErrUpstream) {
+		t.Errorf("beklenmeyen durum yanlış eşlendi: %v", err)
+	}
+}
+
+func TestBlendParsesCreatedIdea(t *testing.T) {
+	var gotPath, gotMethod string
+	c := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		jsonHandler(http.StatusCreated,
+			`{"idea":{"id":42,"slug":"yeni-8f2a","title":"Yeni","source_type":"ai_blended","evidence_count":4}}`)(w, r)
+	})
+
+	idea, err := c.Blend(context.Background(), "kart-7g8h", "en")
+	if err != nil {
+		t.Fatalf("beklenmeyen hata: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/ideas/kart-7g8h/blend" {
+		t.Errorf("istek = %s %s", gotMethod, gotPath)
+	}
+	if idea.ID != 42 || idea.Slug != "yeni-8f2a" || idea.SourceType != "ai_blended" {
+		t.Errorf("kart = %+v", idea)
+	}
+}
+
+func TestBlendMissingIdeaIsError(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusCreated, `{}`))
+	if _, err := c.Blend(context.Background(), "kart-7g8h", "tr"); err == nil {
+		t.Fatal("sözleşme ihlali hata dönmeliydi")
+	}
+}
+
+// TestBlendMissingSlugIsError, sözleşme ihlalini (id var ama slug yok)
+// yakalar — Blend'in Slug boşsa da hata dönmesi gerekir (#110).
+func TestBlendMissingSlugIsError(t *testing.T) {
+	c := newFake(t, jsonHandler(http.StatusCreated, `{"idea":{"id":42,"title":"Yeni","source_type":"ai_blended"}}`))
+	if _, err := c.Blend(context.Background(), "kart-7g8h", "tr"); err == nil {
+		t.Fatal("slug eksikken hata bekleniyordu")
+	}
+}
