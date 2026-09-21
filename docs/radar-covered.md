@@ -98,3 +98,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - PT Prior-Auth Ajanı (isimsiz, Foundra.ai vaka çalışması) — fizik tedavi kliniklerinin sigorta ön-onay evrakını otomatikleştiren tek-kurucu AI ajanı, 14 ayda $41K MRR (2026-09-18)
 - SuperX (Rob Hallam, Tibo Louis-Lucas) — X gönderisini yayınlamadan önce "Algoritma Simülatörü" ile performansını tahmin eden büyüme aracı, $23K MRR, 650 ödeyen müşteri (2026-09-19)
 - Pointerpro (Stefan Debois) — danışmanların kendi metodolojisini markalı, ücretli teşhis/değerlendirme raporuna dönüştürdüğü SaaS anket-değerlendirme motoru, $287K MRR, 65+ ülke (2026-09-20)
+- OpenStock (Open-Dev-Society) — pahalı borsa terminallerine açık kaynak alternatif, gerçek zamanlı fiyat takibi + AI özetli şirket profilleri, ★17K, ivme (2026-09-21)
