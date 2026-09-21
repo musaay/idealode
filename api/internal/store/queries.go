@@ -829,6 +829,12 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 	if i.ExampleQuotes == nil {
 		i.ExampleQuotes = []string{}
 	}
+	// #164: jsonb kolonu için de AYNI ilke — pgx nil slice'ı json "null"
+	// literaline çevirir (SQL NULL değil ama istenen "[]" de değil), guard
+	// gerçek boş dizi yazılmasını garanti eder.
+	if i.LensVerdicts == nil {
+		i.LensVerdicts = []LensVerdict{}
+	}
 
 	var id int64
 	var err error
@@ -840,14 +846,14 @@ func (s *Store) InsertIdea(ctx context.Context, i Idea) (int64, error) {
 				 example_quotes, source_type, source_theme_id, created_by_user_id,
 				 urgency_score, monetization_signal, known_competitors_ai_guess, domain_tags,
 				 distinctiveness_verdict, distinctiveness_criterion, distinctiveness_reason,
-				 data_access_verdict, data_access_reason)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17, $18, $19)
+				 data_access_verdict, data_access_reason, lens_verdicts)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17, $18, $19, $20)
 			RETURNING id`,
 			i.Title, slug, i.ProblemStatement, i.ProposedSolution, i.TargetUser, i.EvidenceCount,
 			i.ExampleQuotes, i.SourceType, i.SourceThemeID, nil,
 			i.UrgencyScore, i.MonetizationSignal, i.KnownCompetitorsAIGuess, i.DomainTags,
 			i.DistinctivenessVerdict, i.DistinctivenessCriterion, i.DistinctivenessReason,
-			i.DataAccessVerdict, i.DataAccessReason).Scan(&id)
+			i.DataAccessVerdict, i.DataAccessReason, i.LensVerdicts).Scan(&id)
 		if err == nil {
 			return id, nil
 		}
@@ -962,7 +968,7 @@ const ideaSelect = `
 	       i.local_evidence, i.parent_idea_id, COALESCE(pi.slug, ''), COALESCE(i.created_by_session_id, ''),
 	       COALESCE(t.theme_name, ''), i.created_at,
 	       i.distinctiveness_verdict, i.distinctiveness_criterion, i.distinctiveness_reason,
-	       i.data_access_verdict, i.data_access_reason,
+	       i.data_access_verdict, i.data_access_reason, i.lens_verdicts,
 	       i.published_at
 	FROM ideas i
 	LEFT JOIN themes t ON t.id = i.source_theme_id
@@ -979,7 +985,7 @@ func scanIdea(row pgx.Row, i *Idea) error {
 		&i.ParentIdeaID, &i.ParentSlug, &i.CreatedBySessionID,
 		&i.SourceTheme, &i.CreatedAt,
 		&i.DistinctivenessVerdict, &i.DistinctivenessCriterion, &i.DistinctivenessReason,
-		&i.DataAccessVerdict, &i.DataAccessReason,
+		&i.DataAccessVerdict, &i.DataAccessReason, &i.LensVerdicts,
 		&i.PublishedAt); err != nil {
 		return err
 	}
@@ -991,6 +997,9 @@ func scanIdea(row pgx.Row, i *Idea) error {
 	}
 	if i.LocalEvidence == nil {
 		i.LocalEvidence = []string{}
+	}
+	if i.LensVerdicts == nil {
+		i.LensVerdicts = []LensVerdict{}
 	}
 	return nil
 }
@@ -1317,12 +1326,18 @@ func (s *Store) InsertBlendedIdea(ctx context.Context, parent *Idea, draft Blend
 // durdurmaz — bu metot kendisi olağan hatayı döner, best-effort ilkesi
 // burada UYGULANMAZ (çağıranın sorumluluğu).
 func (s *Store) InsertElimination(ctx context.Context, e Elimination) (int64, error) {
+	// #164: jsonb kolonu için nil-slice guard — pgx nil slice'ı json "null"
+	// literaline çevirir (SQL NULL değil ama istenen "[]" de değil).
+	if e.Verdicts == nil {
+		e.Verdicts = []LensVerdict{}
+	}
+	// "check" Postgres'te ayrılmış anahtar sözcük — kolon adı çift tırnaklı.
 	var id int64
 	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO eliminations (stage, subject, verdict, criterion, reason, detail)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO eliminations (stage, subject, verdict, criterion, reason, detail, "check", verdicts)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		e.Stage, e.Subject, e.Verdict, e.Criterion, e.Reason, e.Detail).Scan(&id)
+		e.Stage, e.Subject, e.Verdict, e.Criterion, e.Reason, e.Detail, e.Check, e.Verdicts).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("eliminations insert: %w", err)
 	}
@@ -1352,7 +1367,7 @@ func (s *Store) GetElimination(ctx context.Context, id int64) (*Elimination, err
 // yeniden eskiye döner — raporlama için (#138, örn. "gün boyunca elenenler").
 func (s *Store) EliminationsSince(ctx context.Context, since time.Time) ([]Elimination, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, occurred_at, stage, subject, verdict, criterion, reason, detail
+		SELECT id, occurred_at, stage, subject, verdict, criterion, reason, detail, "check", verdicts
 		FROM eliminations
 		WHERE occurred_at >= $1
 		ORDER BY occurred_at DESC, id DESC`, since)
@@ -1365,8 +1380,11 @@ func (s *Store) EliminationsSince(ctx context.Context, since time.Time) ([]Elimi
 	for rows.Next() {
 		var e Elimination
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Stage, &e.Subject, &e.Verdict,
-			&e.Criterion, &e.Reason, &e.Detail); err != nil {
+			&e.Criterion, &e.Reason, &e.Detail, &e.Check, &e.Verdicts); err != nil {
 			return nil, err
+		}
+		if e.Verdicts == nil {
+			e.Verdicts = []LensVerdict{}
 		}
 		out = append(out, e)
 	}

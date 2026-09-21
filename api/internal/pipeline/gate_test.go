@@ -43,7 +43,7 @@ func (c *gateSeqChat) ChatJSONWithTemperature(ctx context.Context, system, user 
 // sayısıyla doğrular (#123'ün organik davranışı).
 func TestRunBlockingLensesStopOnFirstFailStopsEarly(t *testing.T) {
 	chat := &gateSeqChat{verdicts: []string{"pass", "fail", "pass"}, errAt: -1}
-	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", true)
+	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", true, "card")
 
 	if !outcome.Blocked {
 		t.Fatal("ikinci mercek fail dönünce Blocked=true olmalı")
@@ -64,7 +64,7 @@ func TestRunBlockingLensesStopOnFirstFailStopsEarly(t *testing.T) {
 // isim/sebeplerin birleştirildiğini doğrular (seeds.go'nun eski davranışı).
 func TestRunBlockingLensesStopOnFirstFailFalseRunsAll(t *testing.T) {
 	chat := &gateSeqChat{verdicts: []string{"fail", "unsure", "fail"}, errAt: -1}
-	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", false)
+	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", false, "seed")
 
 	if chat.calls != 3 {
 		t.Fatalf("stopOnFirstFail=false TÜM mercekleri çağırmalı, 3 çağrı beklenirdi, geldi %d", chat.calls)
@@ -91,7 +91,7 @@ func TestRunBlockingLensesStopOnFirstFailFalseRunsAll(t *testing.T) {
 func TestRunBlockingLensesErrorStopsEarlyBothModes(t *testing.T) {
 	for _, stopOnFirstFail := range []bool{true, false} {
 		chat := &gateSeqChat{errAt: 1}
-		outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", stopOnFirstFail)
+		outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", stopOnFirstFail, "card")
 
 		if outcome.Err == nil {
 			t.Errorf("stopOnFirstFail=%v: outcome.Err dolu olmalı", stopOnFirstFail)

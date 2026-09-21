@@ -112,6 +112,14 @@ type Idea struct {
 	DataAccessVerdict *string `json:"data_access_verdict,omitempty"` // pass | unsure | NULL
 	DataAccessReason  *string `json:"data_access_reason,omitempty"`
 
+	// LensVerdicts (#164): kartı üreten/etkileyen TÜM mercek çağrılarının
+	// (üçüncü-taraf/veri-erişimi/pazar-işlerliği/özgünlük, ivme tohumunda +
+	// ürünleştirilebilirlik) kalıcı denetim kaydı — pass/fail/unsure/error
+	// dahil HEPSİ (yalnız blocking "fail" değil). ai_blended kartlarda
+	// (kaynak karttan kopyalanmaz) ve bu alanı taşımayan eski satırlarda
+	// boş dizi ([]) — ASLA nil/NULL (NOT NULL DEFAULT '[]').
+	LensVerdicts []LensVerdict `json:"lens_verdicts,omitempty"`
+
 	// PublishedAt, moderasyon kuyruğu damgası (#102): NULL = beklemede (PO
 	// onayı yok, herkese açık galeri/detayda görünmez); dolu = yayında.
 	// `dump` (ListIdeas, DB'ye dokunan lead aracı) bekleyenleri de döner —
@@ -216,4 +224,41 @@ type Elimination struct {
 	// cümlesi, tohumdan geldiyse özeti, ikisi de yoksa en güçlü kanıtın
 	// başlığı; hiçbiri yoksa NULL.
 	Detail *string
+	// Check (#164): elemeyi yapan merceğin adı (stage=blocking_lens/
+	// distinctiveness satırlarında dolu — "üçüncü-taraf inşa edilebilirlik",
+	// "veri-erişimi", "özgünlük" gibi); mercek-dışı elemelerde (incoherent_
+	// theme, vendor_internal) NULL — bu satırların "check"i yok. "check"
+	// Postgres'te ayrılmış anahtar sözcük, kolon adı DAİMA tırnaklı
+	// kullanılır (bkz. queries.go).
+	Check *string
+	// Verdicts (#164): kartı üreten/etkileyen TÜM mercek çağrılarının
+	// (pass/fail/unsure/error) kalıcı kaydı — kart hiç yazılmadan elenen
+	// durumda (K1 doygunluk ya da bloklayıcı mercek fail'i) tek kalıcı
+	// yeri burasıdır; kart yazılan durumda ideas.lens_verdicts'in AYNISI.
+	// nil ASLA yazılmaz — boş dizi ([]LensVerdict{}) yazılır (NOT NULL
+	// DEFAULT '[]').
+	Verdicts []LensVerdict
+}
+
+// LensVerdict, ideas.lens_verdicts / eliminations.verdicts jsonb
+// kolonlarının eleman şeması (#164): bir mercek ÇAĞRISININ (başarılı ya da
+// hatalı) kalıcı kaydı. Çağrı hatası (429/413/400/ağ) Verdict="error" +
+// Reason=hata metniyle (500 rune'a kırpılmış) yazılır — NULL (hiç
+// çağrılmadı) ile karışmasın diye.
+type LensVerdict struct {
+	// Lens: merceğin Türkçe adı (seedLens.name ile birebir — "üçüncü-taraf
+	// inşa edilebilirlik", "veri-erişimi", "pazar-işlerliği", "özgünlük",
+	// "ürünleştirilebilirlik").
+	Lens string `json:"lens"`
+	// PromptVersion: mercek sabitinin yanındaki lensXVersion (şu an hepsi
+	// "v1" — sonraki v3 işlerinde artar, #163 §6).
+	PromptVersion string `json:"prompt_version"`
+	// Subject: mercek HANGİ girdi üzerinde çalıştı — "card" (üretilmiş kart
+	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ
+	// "card"; tohum yolunda 3(-4) bloklayıcı mercek "seed", özgünlük "card".
+	Subject string `json:"subject"`
+	// Verdict: pass | fail | unsure | error.
+	Verdict string    `json:"verdict"`
+	Reason  string    `json:"reason"`
+	At      time.Time `json:"at"`
 }

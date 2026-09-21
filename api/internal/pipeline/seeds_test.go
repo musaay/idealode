@@ -77,6 +77,19 @@ func seedTestStore(t *testing.T) *store.Store {
 	return st
 }
 
+// mustLensVerdicts, başlığa göre bir kartın lens_verdicts jsonb kolonunu
+// okur (#164). GetIdea/GetIdeaBySlug KULLANILAMAZ — ikisi de
+// published_at IS NOT NULL filtreler, test kartları henüz yayında değil
+// (moderasyon kuyruğunda); ham SQL doğrudan okur.
+func mustLensVerdicts(t *testing.T, ctx context.Context, st *store.Store, title string) []store.LensVerdict {
+	t.Helper()
+	var lv []store.LensVerdict
+	if err := st.Pool.QueryRow(ctx, "SELECT lens_verdicts FROM ideas WHERE title = $1", title).Scan(&lv); err != nil {
+		t.Fatalf("lens_verdicts okunamadı (%q): %v", title, err)
+	}
+	return lv
+}
+
 func TestProcessSeedsPassCreatesCard(t *testing.T) {
 	st := seedTestStore(t)
 	ctx := context.Background()
@@ -121,6 +134,29 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 	}
 	if len(quotes) != 1 || !strings.Contains(quotes[0], "Pass Seed") || !strings.Contains(quotes[0], seedURL) {
 		t.Errorf("example_quotes override edilmemiş (LLM'den değil, koddan gelmeli): %v", quotes)
+	}
+
+	// #164: lens_verdicts kalıcı kaydı — 3 bloklayıcı mercek subject="seed"
+	// (ham tohum alanları üzerinde çalıştı) + özgünlük subject="card" (kart
+	// üretildikten SONRA çalıştı), hepsi verdict="pass".
+	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
+	if len(lensVerdicts) != 4 {
+		t.Fatalf("lens_verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	}
+	for i, lv := range lensVerdicts[:3] {
+		if lv.Subject != "seed" {
+			t.Errorf("lens_verdicts[%d].Subject=seed beklenirdi (bloklayıcı mercekler), geldi %q", i, lv.Subject)
+		}
+		if lv.Verdict != "pass" {
+			t.Errorf("lens_verdicts[%d].Verdict=pass beklenirdi, geldi %q", i, lv.Verdict)
+		}
+		if lv.PromptVersion != "v1" {
+			t.Errorf("lens_verdicts[%d].PromptVersion=v1 beklenirdi, geldi %q", i, lv.PromptVersion)
+		}
+	}
+	last := lensVerdicts[3]
+	if last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
+		t.Errorf("lens_verdicts[3] özgünlük/card/pass beklenirdi, geldi: %+v", last)
 	}
 
 	var markCount int
@@ -231,6 +267,26 @@ func TestProcessSeedsFailMarksNoCard(t *testing.T) {
 	}
 	if found.Detail == nil || *found.Detail != "özet" {
 		t.Errorf("eliminations.detail tohumun özeti olmalı (%q), geldi: %v", "özet", found.Detail)
+	}
+	// #164: 3 mercek de "fail" (fakeSeedChat hepsine fail döner, tohum
+	// yolunda stopOnFirstFail=false → TÜMÜ çağrılır) — check isimlerin ", "
+	// ile birleşimi (mevcut log biçimiyle birebir), verdicts 3 eleman,
+	// hepsi subject=seed verdict=fail.
+	if found.Check == nil {
+		t.Fatal("eliminations.check dolu olmalı (bloklayan mercek adları)")
+	}
+	for _, name := range []string{seedLenses[0].name, seedLenses[1].name, seedLenses[2].name} {
+		if !strings.Contains(*found.Check, name) {
+			t.Errorf("eliminations.check %q içermeli, geldi: %q", name, *found.Check)
+		}
+	}
+	if len(found.Verdicts) != 3 {
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (3 bloklayıcı mercek), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	for i, lv := range found.Verdicts {
+		if lv.Subject != "seed" || lv.Verdict != "fail" {
+			t.Errorf("verdicts[%d] seed/fail beklenirdi, geldi: %+v", i, lv)
+		}
 	}
 }
 
@@ -808,6 +864,24 @@ func TestProcessSeedsDistinctivenessK1BlocksCard(t *testing.T) {
 	}
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
+	}
+	// #164: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
+	// kalıcı yeri eliminations.check/verdicts — check=özgünlük (bloklayan
+	// mercek), verdicts 3 bloklayıcı mercek (subject=seed, pass) + özgünlük
+	// (subject=card, fail) TÜMÜNÜ taşır.
+	if found.Check == nil || *found.Check != "özgünlük" {
+		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
+	}
+	if len(found.Verdicts) != 4 {
+		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	for i, lv := range found.Verdicts[:3] {
+		if lv.Subject != "seed" || lv.Verdict != "pass" {
+			t.Errorf("verdicts[%d] seed/pass beklenirdi, geldi: %+v", i, lv)
+		}
+	}
+	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
 	}
 }
 
