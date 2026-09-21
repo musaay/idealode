@@ -84,6 +84,11 @@ Watch for a reframing escape: the pain originates from a provider's own behavior
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
+// lensThirdPartyVersion (#164): lensThirdPartySystem'in sürümü — kalıcı
+// kayıtta (ideas.lens_verdicts/eliminations.verdicts) prompt_version olarak
+// yazılır, ileride prompt değişirse (#163 §6 v3 işleri) artar.
+const lensThirdPartyVersion = "v1"
+
 // lensDataAccessSystem: veri-erişimi merceği (#131 v2) — kartın ÇEKİRDEK
 // işlevinin veriye HANGİ YÖNTEMLE eriştiğini değerlendirir; platformun
 // büyüklüğü/markası/"kapalılık algısı" ölçüt DEĞİLDİR. #131 öncesi metin
@@ -114,12 +119,18 @@ An API that exposes only the developer's OWN account, app or property (seller/me
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
+// lensDataAccessVersion (#164): lensDataAccessSystem'in sürümü.
+const lensDataAccessVersion = "v1"
+
 const lensMarketViabilitySystem = `You evaluate whether a proposed software product idea has REALISTIC monetization potential, either in Turkey (TR) or globally.
 
 PASS if there is a plausible path to real revenue: a market of paying users/businesses exists, similar products already charge for this, or the pain is acute enough that people would pay.
 FAIL if the idea has no realistic path to revenue (e.g. a tiny hobbyist niche, a free-only expectation, or a need already fully solved for free).
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
+
+// lensMarketViabilityVersion (#164): lensMarketViabilitySystem'in sürümü.
+const lensMarketViabilityVersion = "v1"
 
 // lensDistinctivenessSystem: özgünlük merceği (#101 v3, #138) — K1
 // (doygunluk) artık BLOKLAYICI: kart DB'ye yazılmaz. K2-K4 hâlâ yalnız
@@ -139,6 +150,9 @@ The existence of competitors alone is never, by itself, a reason to fail.
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that triggered a "fail" verdict, or "none" if verdict is "pass"/"unsure".`
 
+// lensDistinctivenessVersion (#164): lensDistinctivenessSystem'in sürümü.
+const lensDistinctivenessVersion = "v1"
+
 // lensProductizableSystem: ivme tohumlarına özgü 4. mercek (#89 kapı madde
 // 4) — awesome-list, eğitim/kurs, makale/paper, model ağırlığı, saf
 // kütüphane/framework gibi son-kullanıcıya doğrudan ürün olmayan repoları
@@ -150,26 +164,32 @@ PASS if the repository is (or clearly evolves into) a standalone end-user tool o
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
-// seedLens, tek bir mercek: adı (log/rapor için Türkçe) + sistem prompt'u.
+// lensProductizableVersion (#164): lensProductizableSystem'in sürümü.
+const lensProductizableVersion = "v1"
+
+// seedLens, tek bir mercek: adı (log/rapor için Türkçe) + sistem prompt'u +
+// prompt sürümü (#164: ideas.lens_verdicts/eliminations.verdicts'e kalıcı
+// kayıtta prompt_version olarak yazılır).
 type seedLens struct {
-	name   string
-	system string
+	name    string
+	system  string
+	version string
 }
 
-// seedLenses, üç merceğin adı+sistem prompt'u (log/rapor için Türkçe ad).
-// kind=="revenue" tohumlarda TEK BAŞINA, kind=="trending" tohumlarda
+// seedLenses, üç merceğin adı+sistem prompt'u+sürümü (log/rapor için Türkçe
+// ad). kind=="revenue" tohumlarda TEK BAŞINA, kind=="trending" tohumlarda
 // lensProductizableSystem'in ÖNÜNE eklenmiş biçimde kullanılır (bkz.
 // trendingLenses). #123: synthesize.go'nun organik yolu (SynthesizeIdeas)
 // da bu AYNI listeyi kullanır — iki kopya mercek/prompt YOK.
 var seedLenses = []seedLens{
-	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem},
-	{"veri-erişimi", lensDataAccessSystem},
-	{"pazar-işlerliği", lensMarketViabilitySystem},
+	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem, lensThirdPartyVersion},
+	{"veri-erişimi", lensDataAccessSystem, lensDataAccessVersion},
+	{"pazar-işlerliği", lensMarketViabilitySystem, lensMarketViabilityVersion},
 }
 
 // trendingLenses, ivme tohumlarının koştuğu tüm mercekler: 4. mercek
 // (ürünleştirilebilirlik) + mevcut 3 mercek AYNEN (#89 kapı madde 4-5).
-var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem}}, seedLenses...)
+var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem, lensProductizableVersion}}, seedLenses...)
 
 type lensVerdict struct {
 	Verdict   string `json:"verdict"`
@@ -553,7 +573,9 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// yazılabilmesi ve "unsure" mercek(ler)in loglanabilmesi için) — fail
 		// baskındır, birden fazla "fail" varsa outcome.Check/Reason ", "/"; "
 		// ile birleştirilmiş listedir (mevcut log biçimiyle birebir).
-		lensOutcome, verdicts := runBlockingLenses(ctx, chat, lenses, lensUserPrompt(seed), false)
+		// subject="seed" (#164): bu 3(-4) mercek ham tohum alanları
+		// (lensUserPrompt) üzerinde çalışır — kart henüz üretilmedi.
+		lensOutcome, verdicts := runBlockingLenses(ctx, chat, lenses, lensUserPrompt(seed), false, "seed")
 		if lensOutcome.Err != nil {
 			log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lensOutcome.Check, lensOutcome.Err)
 			continue
@@ -598,6 +620,11 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			log.Printf("seed %q belirsiz (mercek: %s) — bloklamıyor, kart yine de üretiliyor",
 				seed.Name, strings.Join(unsureNames, ", "))
 		}
+
+		// #164: bloklayıcı mercek(ler)in kalıcı kaydı — özgünlük merceğinin
+		// kaydıyla aşağıda birleştirilip ya idea.LensVerdicts'e (kart
+		// yazılırsa) ya da eliminations.verdicts'e (K1 ile bloklanırsa) yazılır.
+		allVerdicts := append([]store.LensVerdict{}, lensOutcome.Verdicts...)
 
 		var system, userPrompt string
 		if isTrending {
@@ -645,10 +672,19 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
 		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
 		// durumunda da geçerli).
+		// subject="card" (#164): özgünlük kart üretildikten SONRA, kart
+		// alanları üzerinde çalışır — evaluateDistinctiveness bunu kendi
+		// içinde Subject="card" ile kaydeder.
 		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)
 		} else if distinctOutcome.Stage == "distinctiveness" {
+			// #164: K1 blokta kart hiç yazılmaz — o ana kadarki TÜM mercek
+			// çağrıları (3(-4) bloklayıcı + özgünlük) TEK kalıcı yeri olan
+			// eliminations.verdicts'e taşınır (K2-K4'te de aynısı zararsızca
+			// tekrarlanır, kart zaten idea.LensVerdicts ile de yazılacak).
+			distinctOutcome.Verdicts = allVerdicts
 			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement, markProcessed); err != nil {
 				return created, err
 			}
@@ -657,6 +693,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 				continue
 			}
 		}
+		idea.LensVerdicts = allVerdicts
 
 		dup, existing, err := findDuplicate(llm.WithStage(ctx, "dedup"), st, chat, idea)
 		if err != nil {

@@ -547,6 +547,20 @@ func TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
+	// #164: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
+	// kalıcı yeri eliminations.check/verdicts — check=özgünlük, verdicts 3
+	// bloklayıcı mercek (subject=card — organik yol, fakeChat cevabı
+	// "verdict" alanı taşımadığından savunmacı "unsure"a düşer) + özgünlük
+	// (subject=card, fail) TÜMÜNÜ taşır.
+	if found.Check == nil || *found.Check != "özgünlük" {
+		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
+	}
+	if len(found.Verdicts) != 4 {
+		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	}
 
 	// #151: K1 (doygunluk) ile bloklanan tema da MarkThemeIncoherent ile
 	// damgalanmalı — blockedByIdeaLens ile AYNI ilke.
@@ -973,6 +987,19 @@ func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
+	// #164: kart hiç yazılmadığından (bloklayıcı mercek fail'i) mercek
+	// kararlarının TEK kalıcı yeri burası — check bloklayan merceğin adı
+	// (seedLenses[1], ilk fail — stopOnFirstFail=true erken çıkar), verdicts
+	// yalnız o ana kadar çağrılan 2 mercek (pass, fail).
+	if found.Check == nil || *found.Check != seedLenses[1].name {
+		t.Errorf("eliminations.check=%q beklenirdi, geldi: %v", seedLenses[1].name, found.Check)
+	}
+	if len(found.Verdicts) != 2 {
+		t.Fatalf("eliminations.verdicts 2 eleman beklenirdi (erken çıkış), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	if found.Verdicts[0].Verdict != "pass" || found.Verdicts[1].Verdict != "fail" {
+		t.Errorf("verdicts sırası [pass, fail] beklenirdi, geldi: %+v", found.Verdicts)
+	}
 
 	// #151: mercekten elenen tema MarkThemeIncoherent ile damgalanmalı —
 	// aksi halde ThemesReadyForSynthesis aynı temayı bir sonraki koşuda
@@ -1065,6 +1092,21 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 		t.Error("unsure verdict kartı yazmalı")
 	}
 
+	// #164: lens_verdicts kalıcı kaydı — organik yolda TÜMÜ subject="card"
+	// (3 bloklayıcı mercek unsure + özgünlük pass).
+	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
+	if len(lensVerdicts) != 4 {
+		t.Fatalf("lens_verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	}
+	for i, lv := range lensVerdicts[:3] {
+		if lv.Subject != "card" || lv.Verdict != "unsure" {
+			t.Errorf("lens_verdicts[%d] card/unsure beklenirdi, geldi: %+v", i, lv)
+		}
+	}
+	if last := lensVerdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
+		t.Errorf("lens_verdicts[3] özgünlük/card/pass beklenirdi, geldi: %+v", last)
+	}
+
 	// #131: veri-erişimi merceğinin "unsure" HAM kararı karta yazılmalı —
 	// organik yolda unsure bloklamaz ama görünür olmalı.
 	var dataAccessVerdict, dataAccessReason *string
@@ -1145,6 +1187,21 @@ func TestSynthesizeIdeasLensErrorStillWrites(t *testing.T) {
 	}
 	if ideaCount != 1 {
 		t.Error("mercek hatasında kart yine de yazılmalı")
+	}
+
+	// #164: hata veren mercek çağrısı verdict="error" + hata metniyle kalıcı
+	// kaydedilir (NULL/hiç çağrılmadı ile karışmasın diye) — kalan 2 mercek
+	// hiç çağrılmadığından (erken çıkış) yalnız 1 "error" + özgünlüğün 1
+	// "pass"ı olmak üzere 2 eleman beklenir.
+	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
+	if len(lensVerdicts) != 2 {
+		t.Fatalf("lens_verdicts 2 eleman beklenirdi (1 hata + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	}
+	if lv := lensVerdicts[0]; lv.Verdict != "error" || lv.Subject != "card" || lv.Reason == "" {
+		t.Errorf("lens_verdicts[0] card/error (dolu reason) beklenirdi, geldi: %+v", lv)
+	}
+	if lv := lensVerdicts[1]; lv.Lens != "özgünlük" || lv.Verdict != "pass" {
+		t.Errorf("lens_verdicts[1] özgünlük/pass beklenirdi, geldi: %+v", lv)
 	}
 
 	// #131: mercek hatasında (ilk lens'te durulduğundan veri-erişimi merceği

@@ -30,10 +30,17 @@ var writeElimination eliminationWriter = func(ctx context.Context, st *store.Sto
 // hata döndürmez), bu yüzden bir yazım hatası akışı hiçbir şekilde
 // etkileyemez.
 //
-// criterion/reason/detail boş (TrimSpace sonrası "") ya da criterion "none"
-// ise NULL yazılır — yalnız stage=distinctiveness satırlarında gerçek bir
-// K1-K4 değeri beklenir.
-func recordElimination(ctx context.Context, st *store.Store, stage, subject, verdict, criterion, reason, detail string) {
+// criterion/reason/detail/check boş (TrimSpace sonrası "") ya da criterion
+// "none" ise NULL yazılır — yalnız stage=distinctiveness satırlarında
+// gerçek bir K1-K4 değeri, yalnız stage=blocking_lens/distinctiveness
+// satırlarında gerçek bir check (mercek adı) beklenir.
+//
+// check (#164): elemeyi yapan merceğin adı (gateOutcome.Check) —
+// incoherent_theme/vendor_internal gibi mercek-dışı elemelerde "" geçilir,
+// NULL yazılır. verdicts: o ana kadar yapılan TÜM mercek çağrılarının
+// kaydı — nil ise boş diziye ([]store.LensVerdict{}) indirgenir (ASLA
+// NULL/nil yazılmaz, CLAUDE.md nil-slice tuzağı ile AYNI ilke).
+func recordElimination(ctx context.Context, st *store.Store, stage, subject, verdict, criterion, reason, detail, check string, verdicts []store.LensVerdict) {
 	e := store.Elimination{Stage: stage, Subject: subject, Verdict: verdict}
 	if c := strings.TrimSpace(criterion); c != "" && c != "none" {
 		e.Criterion = &c
@@ -44,6 +51,13 @@ func recordElimination(ctx context.Context, st *store.Store, stage, subject, ver
 	if d := clip(strings.TrimSpace(detail), eliminationDetailLimit); d != "" {
 		e.Detail = &d
 	}
+	if c := strings.TrimSpace(check); c != "" {
+		e.Check = &c
+	}
+	if verdicts == nil {
+		verdicts = []store.LensVerdict{}
+	}
+	e.Verdicts = verdicts
 	if _, err := writeElimination(ctx, st, e); err != nil {
 		log.Printf("eliminations: %s/%q kaydı HATA: %v — pipeline devam ediyor", stage, subject, err)
 	}

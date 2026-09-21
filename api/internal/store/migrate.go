@@ -65,6 +65,9 @@ var migration018 string
 //go:embed migrate_sql/019_eliminations.sql
 var migration019 string
 
+//go:embed migrate_sql/020_lens_verdicts.sql
+var migration020 string
+
 // Migrate, embed edilmiş migration dosyalarını sırayla, DB'ye tek seferlik
 // uygular. `idealode migrate` subcommand'i tarafından elle tetiklenir —
 // uygulama normal çalışmasında (ingest/analyze/synthesize) OTOMATİK
@@ -142,6 +145,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	if _, err := conn.Exec(ctx, migration019); err != nil {
 		return fmt.Errorf("019_eliminations.sql: %w", err)
+	}
+	if _, err := conn.Exec(ctx, migration020); err != nil {
+		return fmt.Errorf("020_lens_verdicts.sql: %w", err)
 	}
 	return nil
 }

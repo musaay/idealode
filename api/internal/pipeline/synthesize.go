@@ -284,7 +284,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			// bu satıra ulaşıldığında evidence boş DEĞİL, döngü başında
 			// kontrol edildi, #138).
 			recordElimination(ctx, st, "incoherent_theme", th.Name, "fail", "",
-				fmt.Sprintf("%d/%d aynı dert", len(subset), len(evidence)), evidence[0].Title)
+				fmt.Sprintf("%d/%d aynı dert", len(subset), len(evidence)), evidence[0].Title, "", nil)
 			continue
 		}
 
@@ -300,7 +300,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			// Idea{} döner) — incoherent_theme ile AYNI konumda: detail
 			// temanın en güçlü kanıtının başlığı (#138).
 			recordElimination(ctx, st, "vendor_internal", th.Name, "fail", "",
-				"vendor-internal", evidence[0].Title)
+				"vendor-internal", evidence[0].Title, "", nil)
 			continue
 		}
 		if errors.Is(err, errDataLocked) {
@@ -316,7 +316,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			// ürünün kendi kusuru için ayrılmış, buraya karışmamalı.
 			log.Printf("synthesize: tema %q data-locked dedi — gömülmedi, sonraki koşuda sentez yeniden denenecek", th.Name)
 			recordElimination(ctx, st, "blocking_lens", th.Name, "fail", "",
-				"data-locked", evidence[0].Title)
+				"data-locked", evidence[0].Title, "", nil)
 			continue
 		}
 		if err != nil {
@@ -335,8 +335,15 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// (prod ölçümü: kart aşamasındaki elemelerin çoğu 3 temanın tekrarıydı).
 		// Tutarsız tema (~277) ve vendor-internal (~295) dallarıyla AYNI desen;
 		// tema yeni kanıt gelene dek (last_seen > incoherent_at) beklemede kalır.
+		// subject="card" (#164): organik yolda mercekler ZATEN üretilmiş kart
+		// alanları üzerinde çalışır (lensPrompt idea'dan kurulur) — tohum
+		// yolundaki subject="seed"in AKSİNE.
 		lensPrompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
-		lensOutcome, lensVerdicts := runBlockingLenses(ctx, chat, seedLenses, lensPrompt, true)
+		lensOutcome, lensVerdicts := runBlockingLenses(ctx, chat, seedLenses, lensPrompt, true, "card")
+		// #164: bloklayıcı mercek(ler)in kalıcı kaydı — özgünlük merceğinin
+		// kaydıyla aşağıda birleştirilip ya idea.LensVerdicts'e (kart
+		// yazılırsa) ya da eliminations.verdicts'e (bloklanırsa) yazılır.
+		allVerdicts := append([]store.LensVerdict{}, lensOutcome.Verdicts...)
 		if lensOutcome.Err != nil {
 			log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", lensOutcome.Check, lensOutcome.Err)
 		} else if lensOutcome.Blocked {
@@ -375,9 +382,15 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// alanlar NULL kalır, kart yine de yazılır, tema İŞARETLENMEZ
 		// (bloklama YOK ilkesi hata durumunda da geçerli).
 		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, distinctOutcome.Err)
 		} else if distinctOutcome.Stage == "distinctiveness" {
+			// #164: K1 blokta kart hiç yazılmaz — o ana kadarki TÜM mercek
+			// çağrıları (3 bloklayıcı + özgünlük) TEK kalıcı yeri olan
+			// eliminations.verdicts'e taşınır (K2-K4'te de aynısı zararsızca
+			// tekrarlanır, kart zaten idea.LensVerdicts ile de yazılacak).
+			distinctOutcome.Verdicts = allVerdicts
 			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement,
 				func() error { return st.MarkThemeIncoherent(ctx, th.ID) }); err != nil {
 				// #151 edge case: damgalama hatası koşuyu DURDURMAZ, tek
@@ -390,6 +403,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 				continue
 			}
 		}
+		idea.LensVerdicts = allVerdicts
 
 		// Dedup (#14): pg_trgm benzerliği + gri bölgede LLM hakemi. Mükerrer
 		// fikir yeni kart açmaz, mevcut kartın kanıtını güçlendirir.
@@ -444,7 +458,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 // yazılır — YALNIZ üç mercek de hatasız tamamlanıp sonuç bloklamadıysa.
 func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensName, reason string, blocked bool) {
 	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
-	outcome, verdicts := runBlockingLenses(ctx, chat, seedLenses, prompt, true)
+	outcome, verdicts := runBlockingLenses(ctx, chat, seedLenses, prompt, true, "card")
 	if outcome.Err != nil {
 		log.Printf("synthesize: mercek %q HATA: %v — kart yine de yazılıyor", outcome.Check, outcome.Err)
 		return "", "", false
