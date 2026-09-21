@@ -250,8 +250,8 @@ type LensVerdict struct {
 	// inşa edilebilirlik", "veri-erişimi", "pazar-işlerliği", "özgünlük",
 	// "ürünleştirilebilirlik").
 	Lens string `json:"lens"`
-	// PromptVersion: mercek sabitinin yanındaki lensXVersion (şu an hepsi
-	// "v1" — sonraki v3 işlerinde artar, #163 §6).
+	// PromptVersion: mercek sabitinin yanındaki lensXVersion (özgünlük #166
+	// ile "v4"e yükseldi, diğer mercekler hâlâ "v1" — #163 §6).
 	PromptVersion string `json:"prompt_version"`
 	// Subject: mercek HANGİ girdi üzerinde çalıştı — "card" (üretilmiş kart
 	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ

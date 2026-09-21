@@ -74,8 +74,9 @@ func parseRadarSeeds(jsonl string) []radarSeed {
 // (radarSeed) ya da kart (store.Idea) girdisi fark etmez. Özgünlük merceği
 // (lensDistinctivenessSystem) BURADA DEĞİL — bu listeye hâlâ girmez, kart
 // üretildikten sonra ayrıca çağrılır (bkz. distinctivenessCheck) — ama artık
-// "advisory" değil: K1 (doygunluk) fail'i kart yazımını bloklar, K2-K4 fail
-// yalnız eliminations'a kaydedilir (henüz bloklamaz, #138).
+// "advisory" değil: K1 (doygunluk) VE K2 (yerleşik çözüm) fail'i kart
+// yazımını bloklar (#166), K3-K4 fail yalnız eliminations'a kaydedilir
+// (henüz bloklamaz, #138).
 const lensThirdPartySystem = `You evaluate whether a proposed software product idea could be BUILT BY AN INDEPENDENT THIRD-PARTY developer — not merely patched by the original vendor.
 
 FAIL if the underlying opportunity is actually a defect, bug, or feature gap that only the ORIGINAL vendor could reasonably fix (their own onboarding, their own pricing, their own outage). PASS if an independent developer could build a STANDALONE product serving the same or an adjacent need, without needing to be the original vendor.
@@ -132,26 +133,39 @@ Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 // lensMarketViabilityVersion (#164): lensMarketViabilitySystem'in sürümü.
 const lensMarketViabilityVersion = "v1"
 
-// lensDistinctivenessSystem: özgünlük merceği (#101 v3, #138) — K1
-// (doygunluk) artık BLOKLAYICI: kart DB'ye yazılmaz. K2-K4 hâlâ yalnız
+// lensDistinctivenessSystem: özgünlük merceği v4 (#166, PO kararı
+// 2026-09-21) — v3'ün (lens_prompts_v3.go'daki lensDistinctivenessSystemV3,
+// dokunulmadı) K1'i aşırı sert uyguladığı canlı A/B ölçümüyle (#166 ilk
+// yorum) REDDEDİLMESİ ve ardından Gemini 3.5 Flash Lite tutarlılık
+// ölçümleriyle kalibre edilen v4 metniyle DEĞİŞTİRİLDİ. Artık K1 (doygunluk)
+// VE K2 (yerleşik çözüm) BLOKLAYICI: her ikisinde de kart DB'ye yazılmaz
+// (bkz. gate.go evaluateDistinctiveness). K3/K4 hâlâ yalnız
 // store.Idea'nın distinctiveness_* alanlarına yazılır, kart yazımını
 // engellemez (veri az — bilinçli sınır, #138). Hangi kriterde olursa olsun
 // "fail" eliminations'a da kaydedilir (bkz. distinctivenessCheck). Kart
 // üretildikten SONRA, hem synthesize.go'nun pain_point yolunda hem
 // seeds.go'nun ProcessSeeds'inde (revenue+trending) aynı biçimde çağrılır.
-const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria. If ANY criterion clearly holds, verdict is "fail" and criterion names which one; otherwise verdict is "pass" (or "unsure" if you cannot tell).
+const lensDistinctivenessSystem = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria for a builder whose home market is Turkey (TR). Check K1, then K2, then K4, then K3; the first criterion that clearly holds gives verdict "fail" and names it. If none holds, verdict is "pass".
 
-K1 Saturation: 10+ well-known (not obscure) products already do the same core job, AND this idea has no distinguishing angle from them. A few strong competitors alone (e.g. 2-3 established players) do NOT trigger K1 — only real saturation with no angle does.
-K2 Natively solvable: the underlying pain is already solved at the OS/platform level (screen time, notifications, etc.) and the product only adds a "nice trick" on top of that native solution. Simplicity alone is not the issue — the question is whether the pain it solves is already natively solved.
-K3 Demand reality: no concrete paying segment exists — especially in Turkey: "who in Turkey would pay for this, and why?" Even if a comparable product has real revenue elsewhere, if there's no TR segment, this still fails K3.
-K4 Platform fragility: a single update from an incumbent/OS vendor would make the idea pointless.
+K1 Saturation — ALL THREE must hold, otherwise K1 does not apply:
+(a) You can NAME at least ten well-known products that do the SAME NARROW job for the same buyer — not the broad category. A dependency checker that detects missing optional packages at install time is not the same job as Dependabot; a Turkish speech-therapy course is not the same job as a generic English speech app.
+(b) Those products can ALREADY serve this Turkish buyer today: they work in Turkish (language, content, speech or text models), accept and pay out to Turkish customers, and cover the local platforms, rules or institutions the job depends on. If the job itself depends on Turkish language, Turkish content or expertise, Turkish institutions, regulation or local platforms, and the incumbents do not cover that, (b) fails — that gap IS the angle.
+(c) The idea's only differences are packaging: Turkish-language UI, TL pricing, a local payment provider, "with AI", WhatsApp or another channel, a bundle of features the incumbents already have, or a cheaper plan. A global product copied to Turkey with only packaging changes is K1, even if no local competitor exists yet.
 
-The existence of competitors alone is never, by itself, a reason to fail.
+K2 Natively solvable: the pain is already solved by a named built-in feature of the OS, browser or platform the user is on, and the product only adds a lock, overlay or trick on top. Name the feature.
 
-Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that triggered a "fail" verdict, or "none" if verdict is "pass"/"unsure".`
+K4 Platform fragility: name the single vendor change that would end the idea. "Could be copied" or "APIs may change" is not K4.
 
-// lensDistinctivenessVersion (#164): lensDistinctivenessSystem'in sürümü.
-const lensDistinctivenessVersion = "v1"
+K3 Demand reality: no concrete paying segment. For a consumer or local-business product, name who in Turkey pays for this today (a paid product, agency or freelancer fee, or a manual cost it replaces). For a developer or B2B tool sold globally, a named payer anywhere is enough.
+
+Competitors existing is never, by itself, a reason to fail. When you are unsure whether K1 (b) or (c) holds, do not fail on K1.
+
+Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that fired, "none" for pass/unsure. reason at most 60 words: for K1 the named products and why they already serve this Turkish buyer; otherwise the angle found.`
+
+// lensDistinctivenessVersion (#164, #166): lensDistinctivenessSystem'in
+// sürümü — v4 metnine geçişle "v1"den "v4"e yükseldi (kalıcı kayıtta
+// prompt_version olarak yazılır).
+const lensDistinctivenessVersion = "v4"
 
 // lensProductizableSystem: ivme tohumlarına özgü 4. mercek (#89 kapı madde
 // 4) — awesome-list, eğitim/kurs, makale/paper, model ağırlığı, saf
@@ -237,12 +251,13 @@ func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
 }
 
 // distinctivenessCheck, kart üretildikten SONRA çağrılan özgünlük
-// merceğidir (#101 v3; adı #138 ile "advise"den değişti — artık K1 için
-// bloklayıcı): store.Idea'nın distinctiveness_verdict/criterion/reason
+// merceğidir (#101 v3; adı #138 ile "advise"den değişti — artık K1|K2 için
+// bloklayıcı, #166): store.Idea'nın distinctiveness_verdict/criterion/reason
 // alanlarını doldurur. BLOKLAMA KARARINI KENDİSİ VERMEZ — yalnız alanları
-// doldurur; çağıran (synthesize.go/seeds.go) verdict=="fail" &&
-// criterion=="K1" ise kartı yazmaz ve eliminations'a kaydeder (K2-K4 fail
-// yalnız kaydedilir, kart yine yazılır). Mercek çağrısı hata verirse
+// doldurur; çağıran (evaluateDistinctiveness/gate.go üzerinden synthesize.go/
+// seeds.go) verdict=="fail" && (criterion=="K1" || criterion=="K2") ise
+// kartı yazmaz ve eliminations'a kaydeder (K3-K4 fail yalnız kaydedilir,
+// kart yine yazılır). Mercek çağrısı hata verirse
 // (ağ/kota) alanlar dokunulmadan (dolayısıyla DB'de NULL) kalır ve hata
 // döner — çağıran loglar, kartı yine de yazar (bloklama YOK ilkesi hata
 // durumunda da geçerli).
@@ -504,9 +519,10 @@ func seedRawPost(s radarSeed) store.RawPost {
 // momentum_derived idea card üretilir, veri-erişimi merceğinin ham kararı
 // karta yazılır (bkz. aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
 // (dedup'tan önce) ayrıca özgünlük merceği çağrılır (bkz.
-// distinctivenessCheck, #101 v3): K1 (doygunluk) fail'i kartı YAZDIRMAZ
-// (eliminations'a stage=distinctiveness kaydedilir, tohum mark'lanır — bir
-// daha denenmez), K2-K4 fail yalnız kaydedilir, kart yine yazılır (#138).
+// distinctivenessCheck, #101 v3): K1 (doygunluk) VE K2 (yerleşik çözüm)
+// fail'i kartı YAZDIRMAZ (eliminations'a stage=distinctiveness kaydedilir,
+// tohum mark'lanır — bir daha denenmez, #166), K3-K4 fail yalnız kaydedilir,
+// kart yine yazılır (#138).
 // Her tohum raw_posts'a platform='radar_seed' olarak yazılır — bu yazım hem
 // idempotency kontrolü (InsertRawPosts ON CONFLICT DO NOTHING) hem de
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
@@ -623,7 +639,8 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 
 		// #164: bloklayıcı mercek(ler)in kalıcı kaydı — özgünlük merceğinin
 		// kaydıyla aşağıda birleştirilip ya idea.LensVerdicts'e (kart
-		// yazılırsa) ya da eliminations.verdicts'e (K1 ile bloklanırsa) yazılır.
+		// yazılırsa) ya da eliminations.verdicts'e (K1|K2 ile bloklanırsa,
+		// #166) yazılır.
 		allVerdicts := append([]store.LensVerdict{}, lensOutcome.Verdicts...)
 
 		var system, userPrompt string
@@ -665,13 +682,13 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		idea.DataAccessVerdict = &dataAccessVerdict.Verdict
 		idea.DataAccessReason = &dataAccessVerdict.Reason
 
-		// Özgünlük merceği (#101 v3, #138, #153): K1 (doygunluk) fail'i
-		// kartı YAZDIRMAZ (eliminations'a kaydedilip tohum mark'lanır — bir
-		// daha denenmez, yukarıdaki bloklayıcı mercek bloğuyla AYNI ilke:
-		// deterministik sonuç bir daha üretilmez). K2-K4 fail yalnız
-		// kaydedilir, kart yine yazılır. Mercek çağrısı hata verirse alanlar
-		// NULL kalır, kart yine de yazılır (bloklama YOK ilkesi hata
-		// durumunda da geçerli).
+		// Özgünlük merceği (#101 v3, #138, #153, #166): K1 (doygunluk) VE K2
+		// (yerleşik çözüm) fail'i kartı YAZDIRMAZ (eliminations'a kaydedilip
+		// tohum mark'lanır — bir daha denenmez, yukarıdaki bloklayıcı mercek
+		// bloğuyla AYNI ilke: deterministik sonuç bir daha üretilmez). K3-K4
+		// fail yalnız kaydedilir, kart yine yazılır. Mercek çağrısı hata
+		// verirse alanlar NULL kalır, kart yine de yazılır (bloklama YOK
+		// ilkesi hata durumunda da geçerli).
 		// subject="card" (#164): özgünlük kart üretildikten SONRA, kart
 		// alanları üzerinde çalışır — evaluateDistinctiveness bunu kendi
 		// içinde Subject="card" ile kaydeder.
@@ -680,16 +697,17 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		if distinctOutcome.Err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)
 		} else if distinctOutcome.Stage == "distinctiveness" {
-			// #164: K1 blokta kart hiç yazılmaz — o ana kadarki TÜM mercek
-			// çağrıları (3(-4) bloklayıcı + özgünlük) TEK kalıcı yeri olan
-			// eliminations.verdicts'e taşınır (K2-K4'te de aynısı zararsızca
-			// tekrarlanır, kart zaten idea.LensVerdicts ile de yazılacak).
+			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
+			// mercek çağrıları (3(-4) bloklayıcı + özgünlük) TEK kalıcı yeri
+			// olan eliminations.verdicts'e taşınır (K3-K4'te de aynısı
+			// zararsızca tekrarlanır, kart zaten idea.LensVerdicts ile de
+			// yazılacak).
 			distinctOutcome.Verdicts = allVerdicts
 			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement, markProcessed); err != nil {
 				return created, err
 			}
 			if distinctOutcome.Blocked {
-				log.Printf("seeds: %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", idea.Title, distinctOutcome.Reason)
+				log.Printf("seeds: %q özgünlükten (%s) bloklandı — kart yazılmadı: %s", idea.Title, distinctOutcome.Criterion, distinctOutcome.Reason)
 				continue
 			}
 		}

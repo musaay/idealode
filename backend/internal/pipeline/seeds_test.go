@@ -649,8 +649,8 @@ func TestProcessSeedsDuplicateSkipsCard(t *testing.T) {
 
 // TestSeedLensesExcludeDistinctiveness: özgünlük merceği (#101 v3) toplu
 // bloklayıcı seedLenses/trendingLenses listelerinde YER ALMAMALI — kart
-// üretildikten SONRA AYRICA çağrılır (bkz. distinctivenessCheck); #138 ile
-// K1 bloklayıcı olsa da bu ayrı-çağrılma düzeni değişmedi.
+// üretildikten SONRA AYRICA çağrılır (bkz. distinctivenessCheck); #138/#166
+// ile K1|K2 bloklayıcı olsa da bu ayrı-çağrılma düzeni değişmedi.
 func TestSeedLensesExcludeDistinctiveness(t *testing.T) {
 	for _, l := range seedLenses {
 		if l.system == lensDistinctivenessSystem {
@@ -667,8 +667,8 @@ func TestSeedLensesExcludeDistinctiveness(t *testing.T) {
 // distinctSeedChat: 3 bloklayıcı mercek + kart üretimi + dedup normal
 // davranır (pass/cardResponse/same:false); kart-sonrası özgünlük
 // merceği (lensDistinctivenessSystem) ayrıca yapılandırılabilir bir cevap ya
-// da hata döner — #101 v3/#138'in "K1 dışında kart her durumda yazılır,
-// K1 fail'i bloklar" davranışını doğrulamak için.
+// da hata döner — #101 v3/#138/#166'nın "K1|K2 dışında kart her durumda
+// yazılır, K1|K2 fail'i bloklar" davranışını doğrulamak için.
 type distinctSeedChat struct {
 	cardResponse      string
 	distinctVerdict   string // pass/fail/unsure; boşsa "pass"
@@ -882,6 +882,94 @@ func TestProcessSeedsDistinctivenessK1BlocksCard(t *testing.T) {
 	}
 	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
 		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	}
+}
+
+// TestProcessSeedsDistinctivenessK2BlocksCard: özgünlük merceği "fail" K2
+// (yerleşik çözüm) dönerse de K1 gibi kart DB'ye YAZILMAZ, tohum yine de
+// mark'lanır ve eliminations'a stage=distinctiveness criterion=K2 bir satır
+// düşer (#166: K2 artık K1 ile AYNI şekilde bloklayıcı).
+func TestProcessSeedsDistinctivenessK2BlocksCard(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-native"
+	title := "Test Yerleşik Çözüm Fikri"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+		st.Pool.Exec(ctx, "DELETE FROM eliminations WHERE subject = $1", title)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	since := time.Now().Add(-time.Minute)
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Native Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	chat := &distinctSeedChat{
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+		distinctVerdict:   "fail",
+		distinctCriterion: "K2",
+	}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("K2 fail bloklamalı, kart YAZILMAMALI, n=0 beklenirdi, geldi: %d", n)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 0 {
+		t.Error("K2 ile bloklanan kart DB'ye yazılmamalı")
+	}
+
+	var markCount int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM raw_posts WHERE platform = 'radar_seed' AND source_ref = $1", seedURL).
+		Scan(&markCount); err != nil {
+		t.Fatal(err)
+	}
+	if markCount != 1 {
+		t.Error("K2 ile bloklanan tohum da mark'lanmalı (yeniden işlenmesin, LLM maliyeti tekrarlanmasın)")
+	}
+
+	elims, err := st.EliminationsSince(ctx, since)
+	if err != nil {
+		t.Fatalf("EliminationsSince: %v", err)
+	}
+	var found *store.Elimination
+	for i := range elims {
+		if elims[i].Stage == "distinctiveness" && elims[i].Subject == title {
+			found = &elims[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("K2 bloğu eliminations'a stage=distinctiveness kaydı düşürmeli")
+	}
+	if found.Criterion == nil || *found.Criterion != "K2" {
+		t.Errorf("eliminations.criterion=K2 beklenirdi, geldi: %v", found.Criterion)
+	}
+	if found.Detail == nil || *found.Detail != "sorun" {
+		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
+	}
+	if len(found.Verdicts) != 4 {
+		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	}
+	// prompt_version #164/#166: distinctiveness merceğinin v4 metnine
+	// geçtiği kalıcı kayda ("v4") yansımalı.
+	if last := found.Verdicts[3]; last.PromptVersion != "v4" {
+		t.Errorf("verdicts[3].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
 	}
 }
 

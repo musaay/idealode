@@ -31,7 +31,8 @@ type gateOutcome struct {
 	// yolunda birden fazla mercek "fail" dönerse ", " ile birleştirilmiş
 	// isimler — mevcut log biçimiyle birebir).
 	Check string
-	// Criterion: yalnız Stage=="distinctiveness" iken K1..K4 dolu.
+	// Criterion: yalnız Stage=="distinctiveness" iken K1..K4 dolu (K1|K2
+	// bloklar — bkz. evaluateDistinctiveness).
 	Criterion string
 	// Reason: bloklayan/fail sebebi (tohum yolunda birden fazla mercek
 	// "fail" dönerse "; " ile birleştirilmiş sebepler).
@@ -128,13 +129,13 @@ func runBlockingLenses(ctx context.Context, chat llm.Chat, lenses []seedLens, us
 
 // evaluateDistinctiveness, distinctivenessCheck'i çağırıp (idea alanlarını
 // doldurmaya DEVAM eder — mevcut davranış) sonucu tek bir gateOutcome'a
-// yorumlar (#153): Blocked yalnız K1'de (doygunluk) true — kart yazılmaz.
-// K2-K4 "fail" Blocked=false ama Stage="distinctiveness" + Criterion dolu
-// döner (yalnız KAYIT için — applyGateOutcome hold() ÇAĞIRMAZ). "pass"/
-// "unsure" Stage="" döner (kayıt yok). Mercek çağrısı HATA verirse
-// outcome.Err dolu, Stage="" (kayıt yok, bloklama yok —
-// distinctivenessCheck'in "alanlar NULL kalır" davranışı aynen korunur).
-// llm.WithStage(ctx, "özgünlük") BURADA uygulanır.
+// yorumlar (#153, #166): Blocked K1'de (doygunluk) VE K2'de (yerleşik
+// çözüm) true — her ikisinde de kart yazılmaz. K3-K4 "fail" Blocked=false
+// ama Stage="distinctiveness" + Criterion dolu döner (yalnız KAYIT için —
+// applyGateOutcome hold() ÇAĞIRMAZ). "pass"/"unsure" Stage="" döner (kayıt
+// yok). Mercek çağrısı HATA verirse outcome.Err dolu, Stage="" (kayıt yok,
+// bloklama yok — distinctivenessCheck'in "alanlar NULL kalır" davranışı
+// aynen korunur). llm.WithStage(ctx, "özgünlük") BURADA uygulanır.
 //
 // #164: dönen gateOutcome.Verdicts TEK elemanlıdır (özgünlük merceğinin
 // kendi çağrısı, Subject="card" — özgünlük her iki yolda da kart
@@ -170,7 +171,7 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 		criterion = *idea.DistinctivenessCriterion
 	}
 	return gateOutcome{
-		Blocked:   criterion == "K1",
+		Blocked:   criterion == "K1" || criterion == "K2",
 		Stage:     "distinctiveness",
 		Check:     lensName,
 		Criterion: criterion,
@@ -184,8 +185,8 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 //
 // o.Stage=="" (pass/unsure/mercek-özgünlük hatası) ise HİÇBİR ŞEY yapılmaz.
 // o.Stage doluysa (yalnız "fail" verdict'lerinde — blocking_lens HER ZAMAN
-// bloklar, distinctiveness yalnız K1'de) recordElimination HER ZAMAN
-// çağrılır (K2-K4 dahil, best-effort — kendi hatasını yutar, pipeline'ı asla
+// bloklar, distinctiveness K1|K2'de, #166) recordElimination HER ZAMAN
+// çağrılır (K3-K4 dahil, best-effort — kendi hatasını yutar, pipeline'ı asla
 // durdurmaz). hold yalnız o.Blocked ise çağrılır; organikte
 // hold=MarkThemeIncoherent, tohumda hold=markProcessed. hold'un DÖNEN HATASI
 // bu fonksiyondan ÇAĞIRANA döner — organik çağıran onu loglayıp devam eder

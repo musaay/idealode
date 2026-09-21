@@ -43,8 +43,11 @@ type GoldenCase struct {
 	Watch bool `json:"watch,omitempty"`
 }
 
-// lensDef, kanonik mercek kimliğinin v1 (canlı) ve v3 (aday) sistem
-// prompt'unu taşır.
+// lensDef, kanonik mercek kimliğinin v1 = canlı sürüm (üretim sabitleri
+// lensThirdPartySystem/lensDataAccessSystem/lensMarketViabilitySystem/
+// lensDistinctivenessSystem — "v1" etiketi tarihsel, içerik özgünlükte #166
+// ile v4 metnine yükseldi ama lens-ab bunu hâlâ "v1" diye ölçer) ve v3 =
+// aday (lens_prompts_v3.go'daki *V3 sabitleri) sistem prompt'unu taşır.
 type lensDef struct {
 	v1, v3 string
 }

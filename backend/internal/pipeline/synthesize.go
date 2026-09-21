@@ -372,23 +372,23 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			idea.DataAccessReason = &dataAccess.Reason
 		}
 
-		// Özgünlük merceği (#101 v3, #138, #153): K1 (doygunluk) fail'i
-		// kartı YAZDIRMAZ (eliminations'a kaydedilip tema damgalanır — #151:
-		// artık yukarıdaki bloklayıcı mercek bloğuyla AYNI ilke, tema
-		// MarkThemeIncoherent ile bekletilir, aksi halde ThemesReadyForSynthesis
-		// aynı temayı bir sonraki koşuda yeniden seçer ve kart yeniden
-		// üretilip yeniden elenir). K2-K4 fail yalnız kaydedilir, tema
-		// İŞARETLENMEZ, kart yine yazılır. Mercek çağrısı hata verirse
-		// alanlar NULL kalır, kart yine de yazılır, tema İŞARETLENMEZ
-		// (bloklama YOK ilkesi hata durumunda da geçerli).
+		// Özgünlük merceği (#101 v3, #138, #153, #166): K1 (doygunluk) VE K2
+		// (yerleşik çözüm) fail'i kartı YAZDIRMAZ (eliminations'a kaydedilip
+		// tema damgalanır — #151: artık yukarıdaki bloklayıcı mercek
+		// bloğuyla AYNI ilke, tema MarkThemeIncoherent ile bekletilir, aksi
+		// halde ThemesReadyForSynthesis aynı temayı bir sonraki koşuda
+		// yeniden seçer ve kart yeniden üretilip yeniden elenir). K3-K4 fail
+		// yalnız kaydedilir, tema İŞARETLENMEZ, kart yine yazılır. Mercek
+		// çağrısı hata verirse alanlar NULL kalır, kart yine de yazılır,
+		// tema İŞARETLENMEZ (bloklama YOK ilkesi hata durumunda da geçerli).
 		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, distinctOutcome.Err)
 		} else if distinctOutcome.Stage == "distinctiveness" {
-			// #164: K1 blokta kart hiç yazılmaz — o ana kadarki TÜM mercek
-			// çağrıları (3 bloklayıcı + özgünlük) TEK kalıcı yeri olan
-			// eliminations.verdicts'e taşınır (K2-K4'te de aynısı zararsızca
+			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
+			// mercek çağrıları (3 bloklayıcı + özgünlük) TEK kalıcı yeri olan
+			// eliminations.verdicts'e taşınır (K3-K4'te de aynısı zararsızca
 			// tekrarlanır, kart zaten idea.LensVerdicts ile de yazılacak).
 			distinctOutcome.Verdicts = allVerdicts
 			if err := applyGateOutcome(ctx, st, distinctOutcome, idea.Title, idea.ProblemStatement,
@@ -399,7 +399,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			}
 			if distinctOutcome.Blocked {
 				blockedBySaturation++
-				log.Printf("synthesize: tema %q doygunluk (K1) ile bloklandı — kart yazılmadı: %s", th.Name, distinctOutcome.Reason)
+				log.Printf("synthesize: tema %q özgünlükten (%s) bloklandı — kart yazılmadı: %s", th.Name, distinctOutcome.Criterion, distinctOutcome.Reason)
 				continue
 			}
 		}
@@ -440,8 +440,8 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 	// Koşu sonu özet sayaç (#123): mercekten elenen kart sayısı — ödeme
 	// kapısı (#121) satırıyla aynı üslupta, ölçülebilirlik için.
 	log.Printf("synthesize: mercekten elenen kart: %d", blockedByLens)
-	// #138: doygunluktan (K1) bloklanan kart sayısı — aynı üslupta.
-	log.Printf("synthesize: doygunluktan (K1) bloklanan kart: %d", blockedBySaturation)
+	// #138, #166: özgünlükten (K1|K2) bloklanan kart sayısı — aynı üslupta.
+	log.Printf("synthesize: özgünlükten (K1|K2) bloklanan kart: %d", blockedBySaturation)
 	return created, nil
 }
 

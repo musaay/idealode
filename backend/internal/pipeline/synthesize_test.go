@@ -594,6 +594,119 @@ func TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords(t *testing.T) {
 	}
 }
 
+// TestSynthesizeIdeasDistinctivenessK2BlocksAndRecords: özgünlük merceği
+// "fail" K2 (yerleşik çözüm) dönerse de K1 gibi kart DB'ye YAZILMAZ, tema
+// MarkThemeIncoherent ile damgalanır ve eliminations'a stage=distinctiveness
+// criterion=K2 bir satır düşer (#166: K2 artık K1 ile AYNI şekilde
+// bloklayıcı).
+func TestSynthesizeIdeasDistinctivenessK2BlocksAndRecords(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	title := "Test Yerleşik Çözüm Sentez Fikri"
+	platform, tag := "test-syn-distinct-k2", "test-syn-distinct-k2-tag"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", tag)
+		st.Pool.Exec(ctx, "DELETE FROM eliminations WHERE subject = $1", title)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	since := time.Now().Add(-time.Minute)
+	setupSynthTheme(t, ctx, st, platform, tag, false)
+
+	cfg := &config.Config{MinThemeEvidence: 3, LLMSleepMS: 1, OutputLang: "tr"}
+	chat := &fakeChat{
+		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
+			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
+			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
+		distinctVerdict:   "fail",
+		distinctCriterion: "K2",
+	}
+
+	n, err := SynthesizeIdeas(ctx, cfg, st, chat)
+	if err != nil {
+		t.Fatalf("SynthesizeIdeas: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("K2 fail bloklamalı, kart YAZILMAMALI, n=0 beklenirdi, geldi: %d", n)
+	}
+
+	var ideaCount int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM ideas WHERE title = $1", title).Scan(&ideaCount); err != nil {
+		t.Fatal(err)
+	}
+	if ideaCount != 0 {
+		t.Error("K2 ile bloklanan kart DB'ye yazılmamalı")
+	}
+
+	elims, err := st.EliminationsSince(ctx, since)
+	if err != nil {
+		t.Fatalf("EliminationsSince: %v", err)
+	}
+	var found *store.Elimination
+	for i := range elims {
+		if elims[i].Stage == "distinctiveness" && elims[i].Subject == title {
+			found = &elims[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("K2 bloğu eliminations'a stage=distinctiveness kaydı düşürmeli")
+	}
+	if found.Verdict != "fail" {
+		t.Errorf("eliminations.verdict=fail beklenirdi, geldi: %q", found.Verdict)
+	}
+	if found.Criterion == nil || *found.Criterion != "K2" {
+		t.Errorf("eliminations.criterion=K2 beklenirdi, geldi: %v", found.Criterion)
+	}
+
+	// #164, #166: K2 bloğunda da (K1 gibi) kart hiç yazılmadığından mercek
+	// kararlarının TEK kalıcı yeri eliminations.check/verdicts.
+	if found.Check == nil || *found.Check != "özgünlük" {
+		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
+	}
+	if len(found.Verdicts) != 4 {
+		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	}
+	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	}
+	// prompt_version #164/#166: distinctiveness merceğinin v4 metnine
+	// geçtiği kalıcı kayda ("v4") yansımalı.
+	if last := found.Verdicts[3]; last.PromptVersion != "v4" {
+		t.Errorf("verdicts[3].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
+	}
+
+	// #151: K2 ile bloklanan tema da (K1 gibi) MarkThemeIncoherent ile
+	// damgalanmalı.
+	var themeID int64
+	var incoherentAt *time.Time
+	if err := st.Pool.QueryRow(ctx, "SELECT id, incoherent_at FROM themes WHERE theme_name = $1", tag).
+		Scan(&themeID, &incoherentAt); err != nil {
+		t.Fatal(err)
+	}
+	if incoherentAt == nil {
+		t.Error("K2 ile bloklanan tema MarkThemeIncoherent ile damgalanmalı (incoherent_at NULL kalmamalı)")
+	}
+	ready, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, 50, false)
+	if err != nil {
+		t.Fatalf("ThemesReadyForSynthesis: %v", err)
+	}
+	if themeInList(ready, themeID) {
+		t.Error("K2 ile bloklanan tema bir sonraki ThemesReadyForSynthesis çağrısında DÖNMEMELİ")
+	}
+}
+
 // TestSynthesizeIdeasDistinctivenessErrorStillWritesCard: mercek çağrısı
 // HATA verirse (ağ/kota) kart yine de yazılır, distinctiveness_* alanları
 // NULL kalır (#101 v3 edge case).

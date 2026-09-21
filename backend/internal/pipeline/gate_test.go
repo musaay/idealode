@@ -151,9 +151,32 @@ func TestEvaluateDistinctivenessK1Blocks(t *testing.T) {
 	}
 }
 
-// TestEvaluateDistinctivenessK3RecordsButDoesNotBlock: K2-K4 (örn. K3)
+// TestEvaluateDistinctivenessK2Blocks: K2 (yerleşik çözüm) "fail"i de K1
+// gibi Blocked=true + Stage=distinctiveness + Criterion=K2 döndürmeli
+// (#166: K2 artık K1 ile AYNI şekilde bloklayıcı).
+func TestEvaluateDistinctivenessK2Blocks(t *testing.T) {
+	chat := &distinctChat{verdict: "fail", criterion: "K2"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+
+	if !outcome.Blocked {
+		t.Error("K2 fail Blocked=true döndürmeli (#166)")
+	}
+	if outcome.Stage != "distinctiveness" {
+		t.Errorf("Stage=distinctiveness beklenirdi, geldi %q", outcome.Stage)
+	}
+	if outcome.Criterion != "K2" {
+		t.Errorf("Criterion=K2 beklenirdi, geldi %q", outcome.Criterion)
+	}
+	if outcome.Err != nil {
+		t.Errorf("K2 blokta Err nil olmalı, geldi %v", outcome.Err)
+	}
+}
+
+// TestEvaluateDistinctivenessK3RecordsButDoesNotBlock: K3-K4 (örn. K3)
 // "fail"i KAYIT için Stage=distinctiveness döndürmeli ama Blocked=false
-// olmalı (kart yine yazılır, #138).
+// olmalı (kart yine yazılır, #138, #166).
 func TestEvaluateDistinctivenessK3RecordsButDoesNotBlock(t *testing.T) {
 	chat := &distinctChat{verdict: "fail", criterion: "K3"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
@@ -168,6 +191,26 @@ func TestEvaluateDistinctivenessK3RecordsButDoesNotBlock(t *testing.T) {
 	}
 	if outcome.Criterion != "K3" {
 		t.Errorf("Criterion=K3 beklenirdi, geldi %q", outcome.Criterion)
+	}
+}
+
+// TestEvaluateDistinctivenessK4RecordsButDoesNotBlock: K4 (kırılganlık)
+// "fail"i de K3 gibi yalnız KAYIT için Stage=distinctiveness döndürmeli,
+// Blocked=false kalmalı (#166: K3/K4 hâlâ yalnız işaret).
+func TestEvaluateDistinctivenessK4RecordsButDoesNotBlock(t *testing.T) {
+	chat := &distinctChat{verdict: "fail", criterion: "K4"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+
+	if outcome.Blocked {
+		t.Error("K4 fail Blocked=false olmalı (bloklamayan kriter)")
+	}
+	if outcome.Stage != "distinctiveness" {
+		t.Errorf("Stage=distinctiveness beklenirdi (kayıt için), geldi %q", outcome.Stage)
+	}
+	if outcome.Criterion != "K4" {
+		t.Errorf("Criterion=K4 beklenirdi, geldi %q", outcome.Criterion)
 	}
 }
 
@@ -196,7 +239,7 @@ func TestEvaluateDistinctivenessErrorPasses(t *testing.T) {
 
 // TestApplyGateOutcomeHoldOnlyCalledWhenBlocked: hold() yalnız
 // o.Blocked==true iken çağrılmalı; recordElimination o.Stage!="" iken HER
-// ZAMAN çağrılmalı (K2-K4 dahil) — best-effort, hold bağımsız.
+// ZAMAN çağrılmalı (K3-K4 dahil) — best-effort, hold bağımsız.
 func TestApplyGateOutcomeHoldOnlyCalledWhenBlocked(t *testing.T) {
 	origWrite := writeElimination
 	t.Cleanup(func() { writeElimination = origWrite })
