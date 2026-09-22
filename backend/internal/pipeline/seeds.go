@@ -528,7 +528,11 @@ func seedRawPost(s radarSeed) store.RawPost {
 // "işlendi" imlecidir: ikinci koşuda aynı tohum tekrar işlenmez, dolayısıyla
 // analyze'ın hiç görmeyeceği bu satırlar LLM mercek/kart maliyetini de bir
 // kereye indirger.
-func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat, seedsJSONL string) (int, error) {
+// distinctChat (#166, opsiyonel — trailing variadic, mevcut çağrı imzaları
+// DEĞİŞMEDEN derlenmeye devam eder): SynthesizeIdeas'daki AYNI ilke —
+// doluysa özgünlük merceği bu istemciyi kullanır (chat'e yalnız hata
+// verirse yedek olarak düşer), boşsa özgünlük de chat'i kullanır.
+func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat, seedsJSONL string, distinctChat ...llm.Chat) (int, error) {
 	seeds := parseRadarSeeds(seedsJSONL)
 	if len(seeds) == 0 {
 		log.Printf("seeds: işlenecek tohum yok")
@@ -692,7 +696,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// subject="card" (#164): özgünlük kart üretildikten SONRA, kart
 		// alanları üzerinde çalışır — evaluateDistinctiveness bunu kendi
 		// içinde Subject="card" ile kaydeder.
-		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctChat...)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)

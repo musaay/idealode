@@ -112,10 +112,13 @@ func TestRunBlockingLensesErrorStopsEarlyBothModes(t *testing.T) {
 }
 
 // distinctChat, evaluateDistinctiveness birim testleri için sabit
-// verdict/criterion/reason döner ya da hata verir.
+// verdict/criterion/reason döner ya da hata verir. calls: kaç kez
+// çağrıldığı (#166 yedek/düşüş testlerinde hangi istemcinin çağrıldığını
+// saymak için).
 type distinctChat struct {
 	verdict, criterion string
 	err                bool
+	calls              int
 }
 
 func (c *distinctChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
@@ -123,11 +126,22 @@ func (c *distinctChat) ChatJSON(ctx context.Context, system, user string) (strin
 }
 
 func (c *distinctChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.calls++
 	if c.err {
 		return "", errors.New("simulated özgünlük merceği hatası")
 	}
 	return fmt.Sprintf(`{"verdict":%q,"criterion":%q,"reason":"test-reason"}`, c.verdict, c.criterion), nil
 }
+
+// namedDistinctChat, distinctChat'in llm.NamedChat uygulayan hâli (#166) —
+// hangi istemcinin karar verdiğinin store.LensVerdict.Model alanına doğru
+// yazıldığını sınamak için.
+type namedDistinctChat struct {
+	distinctChat
+	model string
+}
+
+func (c *namedDistinctChat) ModelName() string { return c.model }
 
 // TestEvaluateDistinctivenessK1Blocks: K1 (doygunluk) "fail"i Blocked=true
 // + Stage=distinctiveness + Criterion=K1 döndürmeli.
@@ -234,6 +248,111 @@ func TestEvaluateDistinctivenessErrorPasses(t *testing.T) {
 	}
 	if idea.DistinctivenessVerdict != nil {
 		t.Errorf("mercek hatasında distinctiveness_verdict NULL kalmalı, geldi %v", *idea.DistinctivenessVerdict)
+	}
+}
+
+// TestEvaluateDistinctivenessUsesDistinctChatWhenProvided (#166): ayrı bir
+// özgünlük istemcisi (distinctChat) verilmişse ÖNCE o kullanılır, başarılı
+// olursa varsayılan istemci (chat) HİÇ çağrılmaz ve kalıcı kayıttaki Model
+// alanı ayrı istemcinin adını taşır.
+func TestEvaluateDistinctivenessUsesDistinctChatWhenProvided(t *testing.T) {
+	def := &namedDistinctChat{distinctChat: distinctChat{verdict: "pass", criterion: "none"}, model: "default-model"}
+	distinct := &namedDistinctChat{distinctChat: distinctChat{verdict: "fail", criterion: "K1"}, model: "gemini-3.5-flash-lite"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+
+	if !outcome.Blocked {
+		t.Fatal("ayrı istemcinin K1 fail kararı bloklamalı (varsayılan çağrılsaydı pass dönerdi)")
+	}
+	if distinct.calls != 1 {
+		t.Errorf("ayrı istemci tam 1 kez çağrılmalı, geldi %d", distinct.calls)
+	}
+	if def.calls != 0 {
+		t.Errorf("ayrı istemci başarılıyken varsayılan istemci HİÇ çağrılmamalı, geldi %d çağrı", def.calls)
+	}
+	if len(outcome.Verdicts) != 1 || outcome.Verdicts[0].Model != "gemini-3.5-flash-lite" {
+		t.Errorf("verdict.Model ayrı istemcinin modeli olmalı, geldi: %+v", outcome.Verdicts)
+	}
+}
+
+// TestEvaluateDistinctivenessFallsBackToDefaultOnDistinctChatError (#166):
+// ayrı istemci hata verirse AYNI çağrı bir kez varsayılan istemciyle
+// tekrar denenir; varsayılan başarılı olursa onun kararı ve model adı
+// kullanılır.
+func TestEvaluateDistinctivenessFallsBackToDefaultOnDistinctChatError(t *testing.T) {
+	def := &namedDistinctChat{distinctChat: distinctChat{verdict: "fail", criterion: "K2"}, model: "default-model"}
+	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+
+	if outcome.Err != nil {
+		t.Fatalf("yedek deneme başarılıyken outcome.Err nil olmalı, geldi: %v", outcome.Err)
+	}
+	if distinct.calls != 1 {
+		t.Errorf("ayrı istemci tam 1 kez çağrılmalı (hata sonrası tekrar denenmez), geldi %d", distinct.calls)
+	}
+	if def.calls != 1 {
+		t.Errorf("varsayılan istemci tam 1 kez (yedek olarak) çağrılmalı, geldi %d", def.calls)
+	}
+	if !outcome.Blocked || outcome.Criterion != "K2" {
+		t.Errorf("varsayılanın K2 fail kararı bloklamalı, geldi Blocked=%v Criterion=%q", outcome.Blocked, outcome.Criterion)
+	}
+	if len(outcome.Verdicts) != 1 || outcome.Verdicts[0].Model != "default-model" {
+		t.Errorf("verdict.Model yedeğe düşülünce varsayılanın modeli olmalı, geldi: %+v", outcome.Verdicts)
+	}
+}
+
+// TestEvaluateDistinctivenessBothClientsErrorNoBlock (#166): ayrı istemci
+// VE yedek (varsayılan) istemci de hata verirse bugünkü davranış aynen
+// korunur — outcome.Err dolu, Blocked=false, Stage="" (kayıt yok).
+func TestEvaluateDistinctivenessBothClientsErrorNoBlock(t *testing.T) {
+	def := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "default-model"}
+	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+
+	if outcome.Err == nil {
+		t.Fatal("ikisi de hata verince outcome.Err dolu olmalı")
+	}
+	if outcome.Blocked {
+		t.Error("mercek hatası (ikisi de) BLOKLAMAMALI")
+	}
+	if outcome.Stage != "" {
+		t.Errorf("hata durumunda Stage boş olmalı (kayıt yok), geldi %q", outcome.Stage)
+	}
+	if distinct.calls != 1 || def.calls != 1 {
+		t.Errorf("ikisi de tam 1'er kez çağrılmalı, geldi distinct=%d default=%d", distinct.calls, def.calls)
+	}
+	if idea.DistinctivenessVerdict != nil {
+		t.Errorf("ikisi de hatada distinctiveness_verdict NULL kalmalı, geldi %v", *idea.DistinctivenessVerdict)
+	}
+}
+
+// TestEvaluateDistinctivenessSkipsFallbackWhenContextCancelled (#166 küçük
+// düzeltme): ctx zaten iptal edildiyse (ör. koşu deadline/cancel) ayrı
+// istemci hata verse bile varsayılana yedek deneme YAPILMAZ — boşuna ikinci
+// bir HTTP denemesi yaratılmaz.
+func TestEvaluateDistinctivenessSkipsFallbackWhenContextCancelled(t *testing.T) {
+	def := &namedDistinctChat{distinctChat: distinctChat{verdict: "pass", criterion: "none"}, model: "default-model"}
+	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	outcome := evaluateDistinctiveness(ctx, def, idea, distinct)
+
+	if outcome.Err == nil {
+		t.Fatal("ayrı istemci hatası ctx iptaliyle birlikte outcome.Err'e yansımalı")
+	}
+	if distinct.calls != 1 {
+		t.Errorf("ayrı istemci tam 1 kez çağrılmalı, geldi %d", distinct.calls)
+	}
+	if def.calls != 0 {
+		t.Errorf("ctx iptal edildiyse varsayılan istemci HİÇ çağrılmamalı, geldi %d çağrı", def.calls)
 	}
 }
 

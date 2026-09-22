@@ -261,4 +261,11 @@ type LensVerdict struct {
 	Verdict string    `json:"verdict"`
 	Reason  string    `json:"reason"`
 	At      time.Time `json:"at"`
+	// Model (#166): kararı veren modelin adı — istemciden alınabiliyorsa
+	// (bkz. llm.NamedChat) doldurulur; özgünlük merceği ayrı istemciye
+	// (Gemini) taşındığından burada hep dolu, diğer mercekler varsayılan
+	// istemciyi kullandığı için orada da modelin adı bilinir. Alınamıyorsa
+	// (sahte test istemcileri) boş kalır — geriye dönük uyum, eski
+	// kayıtlarda hiç yok.
+	Model string `json:"model,omitempty"`
 }

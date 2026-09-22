@@ -69,6 +69,10 @@ type LensVerdict struct {
 	Verdict       string    `json:"verdict"`
 	Reason        string    `json:"reason"`
 	At            time.Time `json:"at"`
+	// Model (#166): kararı veren modelin adı — özgünlük merceği ayrı
+	// istemciye (Gemini) taşındığından doldurulur, diğer mercek/eski
+	// kayıtlarda boş olabilir (omitempty).
+	Model string `json:"model,omitempty"`
 }
 
 // IdeaSource, `GET /api/ideas/{slug}/sources` yanıtındaki tek kaynak

@@ -212,7 +212,13 @@ func findDuplicate(ctx context.Context, st *store.Store, chat llm.Chat, idea sto
 // SynthesizeIdeas, frekans eşiğini geçen temalardan idea card üretir
 // (source_type=pain_point). Tema bazlı tekrar üretimi ThemesReadyForSynthesis
 // engeller; fikir bazlı mükerrerlik findDuplicate ile yakalanır (#14).
-func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat) (int, error) {
+//
+// distinctChat (#166, opsiyonel — trailing variadic, mevcut çağrı imzaları
+// DEĞİŞMEDEN derlenmeye devam eder): doluysa özgünlük merceği
+// (evaluateDistinctiveness) BU istemciyi kullanır, chat'e yalnız o istemci
+// hata verirse yedek olarak düşer; boşsa (çağrılmadıysa) özgünlük de chat'i
+// kullanır — bugünkü davranış birebir.
+func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, chat llm.Chat, distinctChat ...llm.Chat) (int, error) {
 	themes, err := st.ThemesReadyForSynthesis(ctx, cfg.MinThemeEvidence, synthesizeThemeLimit, cfg.PreferPaymentSignal)
 	if err != nil {
 		return 0, err
@@ -381,7 +387,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// yalnız kaydedilir, tema İŞARETLENMEZ, kart yine yazılır. Mercek
 		// çağrısı hata verirse alanlar NULL kalır, kart yine de yazılır,
 		// tema İŞARETLENMEZ (bloklama YOK ilkesi hata durumunda da geçerli).
-		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea)
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctChat...)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, distinctOutcome.Err)
