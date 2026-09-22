@@ -127,6 +127,61 @@ func TestAdminEmailsParsing(t *testing.T) {
 	}
 }
 
+// TestUseDistinctivenessLLM, özgünlük merceği için AYRI istemci kurulup
+// kurulmayacağını bildiren UseDistinctivenessLLM'in yalnız üçü de
+// (BASE_URL/API_KEY/MODEL) doluyken true döndüğünü doğrular (#166).
+func TestUseDistinctivenessLLM(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	t.Run("üçü de boş -> false", func(t *testing.T) {
+		t.Setenv("DISTINCTIVENESS_LLM_BASE_URL", "")
+		t.Setenv("DISTINCTIVENESS_LLM_API_KEY", "")
+		t.Setenv("DISTINCTIVENESS_LLM_MODEL", "")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.UseDistinctivenessLLM() {
+			t.Error("üçü de boşken UseDistinctivenessLLM false olmalı")
+		}
+	})
+
+	t.Run("biri eksik -> false", func(t *testing.T) {
+		t.Setenv("DISTINCTIVENESS_LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+		t.Setenv("DISTINCTIVENESS_LLM_API_KEY", "gemini-key")
+		t.Setenv("DISTINCTIVENESS_LLM_MODEL", "")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.UseDistinctivenessLLM() {
+			t.Error("MODEL eksikken UseDistinctivenessLLM false olmalı")
+		}
+	})
+
+	t.Run("üçü de dolu -> true, sondaki / kırpılır", func(t *testing.T) {
+		t.Setenv("DISTINCTIVENESS_LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+		t.Setenv("DISTINCTIVENESS_LLM_API_KEY", "gemini-key")
+		t.Setenv("DISTINCTIVENESS_LLM_MODEL", "gemini-3.5-flash-lite")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !c.UseDistinctivenessLLM() {
+			t.Error("üçü de doluyken UseDistinctivenessLLM true olmalı")
+		}
+		if c.DistinctivenessLLMBaseURL != "https://generativelanguage.googleapis.com/v1beta/openai" {
+			t.Errorf("DistinctivenessLLMBaseURL sondaki / kırpılmalı, geldi: %q", c.DistinctivenessLLMBaseURL)
+		}
+		if c.DistinctivenessLLMModel != "gemini-3.5-flash-lite" {
+			t.Errorf("DistinctivenessLLMModel yanlış: %q", c.DistinctivenessLLMModel)
+		}
+		if c.DistinctivenessLLMAPIKey != "gemini-key" {
+			t.Errorf("DistinctivenessLLMAPIKey yanlış: %q", c.DistinctivenessLLMAPIKey)
+		}
+	})
+}
+
 func TestRequireLLM(t *testing.T) {
 	c := &Config{}
 	if err := c.RequireLLM(); err == nil || !strings.Contains(err.Error(), "LLM_API_KEY") {

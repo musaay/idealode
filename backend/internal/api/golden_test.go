@@ -159,6 +159,15 @@ func goldenStore(t *testing.T) *fakeStore {
 				Reason:        "Veri erişimi üçüncü taraf API üzerinden sağlanıyor.",
 				At:            mustParseTime(t, "2026-09-01T09:55:00Z"),
 			},
+			{
+				Lens:          "özgünlük",
+				PromptVersion: "v4",
+				Subject:       "card",
+				Verdict:       "pass",
+				Reason:        "Yerel açı yeterli.",
+				At:            mustParseTime(t, "2026-09-01T09:56:00Z"),
+				Model:         "gemini-3.5-flash-lite",
+			},
 		},
 		PublishedAt: ptrTime(mustParseTime(t, "2026-09-01T10:05:00Z")),
 	}

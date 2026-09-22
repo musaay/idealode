@@ -39,6 +39,15 @@
         "verdict": "pass",
         "reason": "Veri erişimi üçüncü taraf API üzerinden sağlanıyor.",
         "at": "2026-09-01T09:55:00Z"
+      },
+      {
+        "lens": "özgünlük",
+        "prompt_version": "v4",
+        "subject": "card",
+        "verdict": "pass",
+        "reason": "Yerel açı yeterli.",
+        "at": "2026-09-01T09:56:00Z",
+        "model": "gemini-3.5-flash-lite"
       }
     ],
     "published_at": "2026-09-01T10:05:00Z"

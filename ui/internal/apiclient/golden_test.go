@@ -88,8 +88,14 @@ func TestGolden_ListIdeasParsesFixture(t *testing.T) {
 	if full.DataAccessVerdict == nil || *full.DataAccessVerdict != "pass" {
 		t.Errorf("data_access_verdict çözülmedi: %+v", full.DataAccessVerdict)
 	}
-	if len(full.LensVerdicts) != 1 || full.LensVerdicts[0].Lens != "veri-erişimi" || full.LensVerdicts[0].Verdict != "pass" {
+	if len(full.LensVerdicts) != 2 || full.LensVerdicts[0].Lens != "veri-erişimi" || full.LensVerdicts[0].Verdict != "pass" {
 		t.Errorf("lens_verdicts çözülmedi: %+v", full.LensVerdicts)
+	}
+	if full.LensVerdicts[1].Lens != "özgünlük" || full.LensVerdicts[1].Model != "gemini-3.5-flash-lite" {
+		t.Errorf("lens_verdicts[1].model çözülmedi (#166 özgünlük ayrı istemci): %+v", full.LensVerdicts[1])
+	}
+	if full.LensVerdicts[0].Model != "" {
+		t.Errorf("lens_verdicts[0].model boş kalmalı (fixture'da doldurulmadı), geldi %q", full.LensVerdicts[0].Model)
 	}
 	if full.PublishedAt == nil || full.PublishedAt.IsZero() {
 		t.Errorf("published_at çözülmedi: %+v", full.PublishedAt)

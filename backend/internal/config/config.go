@@ -32,6 +32,16 @@ type Config struct {
 	LLMModel   string // LLM_MODEL (default: openai/gpt-oss-120b); boşsa GROQ_MODEL
 	LLMAPIKey  string // LLM_API_KEY; boşsa GROQ_API_KEY
 
+	// Özgünlük merceği için AYRI istemci (#166 — v4 canlıda K1'i tutarsız
+	// uyguladığı ölçüldü, Gemini 3.5 Flash Lite'a taşındı; yalnız bu mercek).
+	// Üçü de (BASE_URL/API_KEY/MODEL) doluysa evaluateDistinctiveness bu
+	// istemciyi kullanır — bkz. UseDistinctivenessLLM(); biri eksikse
+	// özgünlük de varsayılan LLM istemcisini kullanır (bugünkü davranış
+	// birebir, geriye uyumlu).
+	DistinctivenessLLMBaseURL string // DISTINCTIVENESS_LLM_BASE_URL (sondaki "/" kırpılır)
+	DistinctivenessLLMModel   string // DISTINCTIVENESS_LLM_MODEL
+	DistinctivenessLLMAPIKey  string // DISTINCTIVENESS_LLM_API_KEY
+
 	// Çıktı dili — üretilen kullanıcıya dönük metinler bu dilde (Rev 2: tr).
 	// EN'e geçiş = env değişikliği; tag'ler kanonik EN slug olduğu için
 	// gruplama bozulmaz.
@@ -82,6 +92,9 @@ func Load() (*Config, error) {
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 	}
 	c.LLMBaseURL, c.LLMModel, c.LLMAPIKey = loadLLMEnv()
+	c.DistinctivenessLLMBaseURL = strings.TrimSuffix(os.Getenv("DISTINCTIVENESS_LLM_BASE_URL"), "/")
+	c.DistinctivenessLLMModel = os.Getenv("DISTINCTIVENESS_LLM_MODEL")
+	c.DistinctivenessLLMAPIKey = os.Getenv("DISTINCTIVENESS_LLM_API_KEY")
 
 	var err error
 	if c.MinThemeEvidence, err = getenvInt("MIN_THEME_EVIDENCE", 3); err != nil {
@@ -136,6 +149,15 @@ func loadPreferPaymentSignal() (bool, error) {
 		return getenvBool("PREFER_PAYMENT_SIGNAL", true)
 	}
 	return getenvBool("REQUIRE_PAYMENT_SIGNAL", true)
+}
+
+// UseDistinctivenessLLM, özgünlük merceği için AYRI bir llm.Chat istemcisi
+// kurulup kurulmayacağını bildirir (#166): DISTINCTIVENESS_LLM_BASE_URL/
+// API_KEY/MODEL üçü de doluysa true. Biri eksikse false — çağıran (cmd/
+// idealode) özgünlük için de varsayılan istemciyi kullanır, kısmi/yanlış
+// yapılandırma sessizce yarım çalışmaz.
+func (c *Config) UseDistinctivenessLLM() bool {
+	return c.DistinctivenessLLMBaseURL != "" && c.DistinctivenessLLMAPIKey != "" && c.DistinctivenessLLMModel != ""
 }
 
 // RequireLLM, LLM gerektiren subcommand'ların başında çağrılır.

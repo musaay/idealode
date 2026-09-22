@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ type gateOutcome struct {
 	// yolunda birden fazla mercek "fail" dönerse ", " ile birleştirilmiş
 	// isimler — mevcut log biçimiyle birebir).
 	Check string
-	// Criterion: yalnız Stage=="distinctiveness" iken K1..K4 dolu.
+	// Criterion: yalnız Stage=="distinctiveness" iken K1..K4 dolu (K1|K2
+	// bloklar — bkz. evaluateDistinctiveness).
 	Criterion string
 	// Reason: bloklayan/fail sebebi (tohum yolunda birden fazla mercek
 	// "fail" dönerse "; " ile birleştirilmiş sebepler).
@@ -92,14 +94,14 @@ func runBlockingLenses(ctx context.Context, chat llm.Chat, lenses []seedLens, us
 			// karışmasın diye. Bloklama/mevcut davranış DEĞİŞMEZ.
 			recorded = append(recorded, store.LensVerdict{
 				Lens: lens.name, PromptVersion: lens.version, Subject: subject,
-				Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), At: time.Now().UTC(),
+				Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), Model: modelNameOf(chat), At: time.Now().UTC(),
 			})
 			return gateOutcome{Check: lens.name, Err: err, Verdicts: recorded}, verdicts[:i]
 		}
 		verdicts[i] = parseLensVerdict(raw)
 		recorded = append(recorded, store.LensVerdict{
 			Lens: lens.name, PromptVersion: lens.version, Subject: subject,
-			Verdict: verdicts[i].Verdict, Reason: verdicts[i].Reason, At: time.Now().UTC(),
+			Verdict: verdicts[i].Verdict, Reason: verdicts[i].Reason, Model: modelNameOf(chat), At: time.Now().UTC(),
 		})
 		if stopOnFirstFail && verdicts[i].Verdict == "fail" {
 			return gateOutcome{Blocked: true, Stage: "blocking_lens", Check: lens.name, Reason: verdicts[i].Reason, Verdicts: recorded}, verdicts[:i+1]
@@ -128,26 +130,58 @@ func runBlockingLenses(ctx context.Context, chat llm.Chat, lenses []seedLens, us
 
 // evaluateDistinctiveness, distinctivenessCheck'i çağırıp (idea alanlarını
 // doldurmaya DEVAM eder — mevcut davranış) sonucu tek bir gateOutcome'a
-// yorumlar (#153): Blocked yalnız K1'de (doygunluk) true — kart yazılmaz.
-// K2-K4 "fail" Blocked=false ama Stage="distinctiveness" + Criterion dolu
-// döner (yalnız KAYIT için — applyGateOutcome hold() ÇAĞIRMAZ). "pass"/
-// "unsure" Stage="" döner (kayıt yok). Mercek çağrısı HATA verirse
-// outcome.Err dolu, Stage="" (kayıt yok, bloklama yok —
-// distinctivenessCheck'in "alanlar NULL kalır" davranışı aynen korunur).
-// llm.WithStage(ctx, "özgünlük") BURADA uygulanır.
+// yorumlar (#153, #166): Blocked K1'de (doygunluk) VE K2'de (yerleşik
+// çözüm) true — her ikisinde de kart yazılmaz. K3-K4 "fail" Blocked=false
+// ama Stage="distinctiveness" + Criterion dolu döner (yalnız KAYIT için —
+// applyGateOutcome hold() ÇAĞIRMAZ). "pass"/"unsure" Stage="" döner (kayıt
+// yok). Mercek çağrısı HATA verirse outcome.Err dolu, Stage="" (kayıt yok,
+// bloklama yok — distinctivenessCheck'in "alanlar NULL kalır" davranışı
+// aynen korunur). llm.WithStage(ctx, "özgünlük") BURADA uygulanır.
 //
 // #164: dönen gateOutcome.Verdicts TEK elemanlıdır (özgünlük merceğinin
 // kendi çağrısı, Subject="card" — özgünlük her iki yolda da kart
 // üretildikten SONRA kart alanları üzerinde çalışır). Çağıran (synthesize.go/
 // seeds.go) bunu kendi bloklayıcı mercek Verdicts'iyle BİRLEŞTİRİR (kart hiç
 // yazılmadan elenen durumda tek kalıcı yer eliminations.verdicts olur).
-func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Idea) gateOutcome {
+//
+// distinctChat (#166, opsiyonel — trailing variadic, geriye dönük uyumlu
+// çağrı imzası): doluysa (cmd/idealode, DISTINCTIVENESS_LLM_* üçü de
+// tanımlıysa) özgünlük çağrısı ÖNCE bu istemciyle denenir; o istemci hata
+// verirse (ağ/kota/413/json_validate) AYNI çağrı BİR KEZ chat (varsayılan
+// istemci) ile tekrar denenir — ikisi de hata verirse bugünkü davranış
+// (Err dolu, Stage="", bloklama yok) aynen korunur. ctx zaten iptal
+// edildiyse (ctx.Err()!=nil) yedek deneme ATLANIR — ikinci çağrı da anında
+// aynı iptal hatasını dönecektir. distinctChat boşsa
+// (çağrılmadıysa ya da nil) doğrudan chat kullanılır — bugünkü davranışla
+// birebir, tek çağrı. Kalıcı kayıttaki Model alanı hangi istemcinin
+// KARARI verdiğini taşır (yedeğe düşüldüyse chat'in modeli).
+func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Idea, distinctChat ...llm.Chat) gateOutcome {
 	ctx = llm.WithStage(ctx, "özgünlük")
 	const lensName = "özgünlük"
-	if err := distinctivenessCheck(ctx, chat, idea); err != nil {
+
+	var override llm.Chat
+	if len(distinctChat) > 0 {
+		override = distinctChat[0]
+	}
+	active := chat
+	usingOverride := override != nil
+	if usingOverride {
+		active = override
+	}
+
+	err := distinctivenessCheck(ctx, active, idea)
+	// ctx.Err() kontrolü: koşu iptal edildiyse (ör. bağlam deadline/cancel)
+	// yedek denemeyi ATLA — ikinci çağrı da anında aynı iptal hatasını
+	// dönecektir, boşuna bir HTTP denemesi/log kirliliği yaratmayalım.
+	if err != nil && usingOverride && ctx.Err() == nil {
+		log.Printf("özgünlük: ayrı istemci (%s) hata verdi, varsayılan istemciye tek seferlik yedek deneme: %v", modelNameOf(active), err)
+		active = chat
+		err = distinctivenessCheck(ctx, active, idea)
+	}
+	if err != nil {
 		return gateOutcome{Err: err, Verdicts: []store.LensVerdict{{
 			Lens: lensName, PromptVersion: lensDistinctivenessVersion, Subject: "card",
-			Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), At: time.Now().UTC(),
+			Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), Model: modelNameOf(active), At: time.Now().UTC(),
 		}}}
 	}
 	verdict := "unsure"
@@ -160,7 +194,7 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 	}
 	recorded := []store.LensVerdict{{
 		Lens: lensName, PromptVersion: lensDistinctivenessVersion, Subject: "card",
-		Verdict: verdict, Reason: reason, At: time.Now().UTC(),
+		Verdict: verdict, Reason: reason, Model: modelNameOf(active), At: time.Now().UTC(),
 	}}
 	if idea.DistinctivenessVerdict == nil || *idea.DistinctivenessVerdict != "fail" {
 		return gateOutcome{Verdicts: recorded}
@@ -170,7 +204,7 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 		criterion = *idea.DistinctivenessCriterion
 	}
 	return gateOutcome{
-		Blocked:   criterion == "K1",
+		Blocked:   criterion == "K1" || criterion == "K2",
 		Stage:     "distinctiveness",
 		Check:     lensName,
 		Criterion: criterion,
@@ -184,8 +218,8 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 //
 // o.Stage=="" (pass/unsure/mercek-özgünlük hatası) ise HİÇBİR ŞEY yapılmaz.
 // o.Stage doluysa (yalnız "fail" verdict'lerinde — blocking_lens HER ZAMAN
-// bloklar, distinctiveness yalnız K1'de) recordElimination HER ZAMAN
-// çağrılır (K2-K4 dahil, best-effort — kendi hatasını yutar, pipeline'ı asla
+// bloklar, distinctiveness K1|K2'de, #166) recordElimination HER ZAMAN
+// çağrılır (K3-K4 dahil, best-effort — kendi hatasını yutar, pipeline'ı asla
 // durdurmaz). hold yalnız o.Blocked ise çağrılır; organikte
 // hold=MarkThemeIncoherent, tohumda hold=markProcessed. hold'un DÖNEN HATASI
 // bu fonksiyondan ÇAĞIRANA döner — organik çağıran onu loglayıp devam eder
@@ -206,4 +240,16 @@ func applyGateOutcome(ctx context.Context, st *store.Store, o gateOutcome, subje
 		return nil
 	}
 	return hold()
+}
+
+// modelNameOf, verilen chat istemcisinin model adını döner (#166) —
+// istemci llm.NamedChat uyguluyorsa (canlıda *llm.OpenAICompatClient hep
+// uygular) o adı, uygulamıyorsa (sahte test istemcileri, isterse kendisi de
+// uygulayabilir) boş string döner. Yalnız gözlemlenebilirlik
+// (store.LensVerdict.Model) için — davranışı ETKİLEMEZ.
+func modelNameOf(chat llm.Chat) string {
+	if nc, ok := chat.(llm.NamedChat); ok {
+		return nc.ModelName()
+	}
+	return ""
 }

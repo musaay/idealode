@@ -46,6 +46,19 @@ type OpenAICompatClient struct {
 	HTTPClient *http.Client
 }
 
+// NamedChat, bir Chat uygulamasının model adını okumak için opsiyonel
+// arayüz (#166) — hangi modelin karar verdiğini kalıcı kayda
+// (store.LensVerdict.Model) yazmak isteyen çağıran, chat.(NamedChat) type
+// assertion'ıyla dener; OpenAICompatClient bunu uygular, sahte test
+// istemcileri de isterse uygulayabilir. Uygulamayan istemcilerde (ör. eski
+// sahte test chat'leri) alan boş kalır — davranış ETKİLENMEZ.
+type NamedChat interface {
+	ModelName() string
+}
+
+// ModelName, OpenAICompatClient'ı NamedChat yapar.
+func (c *OpenAICompatClient) ModelName() string { return c.Model }
+
 // NewOpenAICompat canlı istemci döner.
 func NewOpenAICompat(baseURL, apiKey, model string) *OpenAICompatClient {
 	return &OpenAICompatClient{

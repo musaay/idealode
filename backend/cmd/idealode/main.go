@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -376,6 +377,41 @@ func newChat(cfg *config.Config) llm.Chat {
 	return llm.NewOpenAICompat(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel)
 }
 
+// newDistinctChat, özgünlük merceği için AYRI istemci kurar (#166, PO
+// kararı 2026-09-22: Gemini 3.5 Flash Lite'a taşıma — yalnız bu mercek).
+// cfg.UseDistinctivenessLLM() false ise (DISTINCTIVENESS_LLM_* üçü de dolu
+// değilse) nil döner; çağıran bunu SynthesizeIdeas/ProcessSeeds'in opsiyonel
+// distinctChat parametresine AYNEN geçirir — nil geçince özgünlük de
+// varsayılan istemciyi kullanır (bugünkü davranış birebir).
+func newDistinctChat(cfg *config.Config) llm.Chat {
+	if !cfg.UseDistinctivenessLLM() {
+		return nil
+	}
+	return llm.NewOpenAICompat(cfg.DistinctivenessLLMBaseURL, cfg.DistinctivenessLLMAPIKey, cfg.DistinctivenessLLMModel)
+}
+
+// logDistinctivenessLens, koşu başında özgünlük merceğinin hangi model/host
+// üzerinden çalışacağını loglar (#166) — cmdSynthesize/cmdSeeds başında bir
+// kez çağrılır (run komutu ikisini de sırayla çalıştırdığından iki kez
+// görünebilir, zararsız).
+func logDistinctivenessLens(cfg *config.Config) {
+	model, base := cfg.LLMModel, cfg.LLMBaseURL
+	if cfg.UseDistinctivenessLLM() {
+		model, base = cfg.DistinctivenessLLMModel, cfg.DistinctivenessLLMBaseURL
+	}
+	log.Printf("özgünlük merceği: %s (%s)", model, hostOf(base))
+}
+
+// hostOf, log satırlarında API anahtarı/yol sızdırmadan sağlayıcıyı
+// belirtmek için base URL'in host kısmını döner (llm.OpenAICompatClient'ın
+// iç host() yardımcısıyla AYNI ilke — burada tekrarlanır çünkü o unexported).
+func hostOf(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
 // cmdMigrate, embed edilmiş .sql dosyalarını DB'ye elle tetiklenerek uygular
 // (bkz. internal/store/migrate.go). Otomatik/örtük çalışmaz.
 func cmdMigrate(ctx context.Context, cfg *config.Config) error {
@@ -594,10 +630,12 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
+	distinctChat := newDistinctChat(cfg)
+	logDistinctivenessLens(cfg)
 	if _, err := pipeline.GroupThemes(llm.WithStage(ctx, "kümeleme"), st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
-	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat)
+	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat, distinctChat)
 	log.Printf("synthesize tamam: %d yeni idea", n)
 	return err
 }
@@ -618,7 +656,9 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
-	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL)
+	distinctChat := newDistinctChat(cfg)
+	logDistinctivenessLens(cfg)
+	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL, distinctChat)
 	if err != nil {
 		return err
 	}

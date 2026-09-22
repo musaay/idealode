@@ -250,8 +250,8 @@ type LensVerdict struct {
 	// inşa edilebilirlik", "veri-erişimi", "pazar-işlerliği", "özgünlük",
 	// "ürünleştirilebilirlik").
 	Lens string `json:"lens"`
-	// PromptVersion: mercek sabitinin yanındaki lensXVersion (şu an hepsi
-	// "v1" — sonraki v3 işlerinde artar, #163 §6).
+	// PromptVersion: mercek sabitinin yanındaki lensXVersion (özgünlük #166
+	// ile "v4"e yükseldi, diğer mercekler hâlâ "v1" — #163 §6).
 	PromptVersion string `json:"prompt_version"`
 	// Subject: mercek HANGİ girdi üzerinde çalıştı — "card" (üretilmiş kart
 	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ
@@ -261,4 +261,11 @@ type LensVerdict struct {
 	Verdict string    `json:"verdict"`
 	Reason  string    `json:"reason"`
 	At      time.Time `json:"at"`
+	// Model (#166): kararı veren modelin adı — istemciden alınabiliyorsa
+	// (bkz. llm.NamedChat) doldurulur; özgünlük merceği ayrı istemciye
+	// (Gemini) taşındığından burada hep dolu, diğer mercekler varsayılan
+	// istemciyi kullandığı için orada da modelin adı bilinir. Alınamıyorsa
+	// (sahte test istemcileri) boş kalır — geriye dönük uyum, eski
+	// kayıtlarda hiç yok.
+	Model string `json:"model,omitempty"`
 }
