@@ -167,6 +167,26 @@ func retryDelay(err error, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second // 2s, 4s, 8s
 }
 
+// IsRateLimited, err zincirinde (ChatJSON*'nin döndüğü, %w ile sarmalanmış
+// hata dahil) oran sınırı (429) hatası olup olmadığını bildirir (#175) —
+// `idealode lens-ab` bunu, istemcinin KENDİ retry/backoff'u (doRequest'teki
+// maxRetries denemesi) TÜKENDİKTEN SONRA hâlâ oran sınırına takılan
+// çağrıları AYRICA bekleyip aynı çağrıyı yeniden denemek için kullanır.
+// rateLimitError hem 429'u hem 5xx'i taşır (bkz. doRequest) ama burada
+// BİLEREK yalnız 429 (+ Gemini'nin oran sınırını 429 dışında bir HTTP
+// statüsüyle de dönebildiği "RESOURCE_EXHAUSTED" gövde imzası) oran sınırı
+// sayılır — düz 5xx (sağlayıcı iç hatası, farklı bir arıza sınıfı) lens-ab'de
+// "oran sınırı dışı hata" yoluna düşer (bilinçli karar, gerekçe: lens-ab
+// spec'i #175 — 5xx'i de aynı bekle-dene yoluna sokmak sağlayıcı çöküşünü
+// oran sınırıyla karıştırıp gereksiz uzun beklemelere yol açabilir).
+func IsRateLimited(err error) bool {
+	var e *rateLimitError
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.status == http.StatusTooManyRequests || strings.Contains(e.body, "RESOURCE_EXHAUSTED")
+}
+
 // requestTooLargeError, sağlayıcının istek boyutu/dakikalık token (TPM)
 // sınırını TEK istekte aştığını bildiren hatayı taşır (Groq: HTTP 413 ya da
 // gövdede "Request too large" mesajı) (#156). rateLimitError'dan (429/5xx —

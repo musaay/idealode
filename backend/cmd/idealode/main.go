@@ -12,11 +12,12 @@
 //	api         JSON API'yi sunar (DATABASE_URL'i gören TEK süreç, #18)
 //	dump        idea card'ları JSON olarak stdout'a dök
 //	scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle, #100)
-//	lens-ab     altın set üzerinde v1/v3 mercek A/B karşılaştırması (elle, #165) — DB'ye yazmaz
+//	lens-ab     altın set üzerinde v1/v3 (ya da --prompt-file) mercek A/B karşılaştırması (elle, #165/#175) — DB'ye yazmaz
 package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,11 +59,22 @@ Komutlar:
   migrate     embed edilmiş .sql dosyalarını DB'ye uygular (elle tetiklenir)
   scrub-quotes geriye dönük küfür/ağır hakaret temizliği (elle tetiklenir, #100)
                 --dry-run isteğe bağlı, hiçbir şey yazmaz
-  lens-ab     altın set üzerinde v1/v3 mercek A/B karşılaştırması (elle tetiklenir, #165)
-                DB'ye/eliminations'a hiçbir şey yazmaz, yalnız okur
-                --set <json> zorunlu, --prompt v1|v3 zorunlu
+  lens-ab     altın set üzerinde v1/v3 (ya da aday) mercek A/B karşılaştırması
+                (elle tetiklenir, #165/#175); DB'ye/eliminations'a hiçbir şey
+                yazmaz, yalnız okur; özgünlük merceği üretimle AYNI istemciyle
+                (DISTINCTIVENESS_LLM_* doluysa) koşar, diğerleri LLM_*'la
+                --set <json> zorunlu
+                --prompt v1|v3 YA DA --prompt-file <dosya> — TAM OLARAK biri
+                  zorunlu (--prompt-file yalnız --lens=all DIŞINDA geçerlidir;
+                  CSV/özet'te etiketi "file:<dosya-taban-adı>")
                 --lens <ad|all> (varsayılan all), --runs N (varsayılan 1)
                 --budget-tokens N (varsayılan 0 = sınırsız), --out <csv> (varsayılan stdout)
+                --sleep-ms N (varsayılan 0): her LLM çağrısından sonra bekleme
+                --rate-wait-sec N (varsayılan 65), --rate-retries N (varsayılan 5):
+                  istemcinin kendi denemeleri sonrası hâlâ 429 dönerse bekle+
+                  yeniden dene; tükenirse o satır "error" ile yazılır, koşu sürer
+                --resume: --out zorunlu; var olan CSV'deki (hatasız) satırlar
+                  yeniden çağrılmaz, yeni satırlar dosyaya eklenir
 
 Konfigürasyon ortam değişkenlerinden okunur; bkz. .env.example
 `
@@ -547,27 +560,47 @@ func cmdScrubQuotes(ctx context.Context, cfg *config.Config) error {
 	return err
 }
 
-// cmdLensAB, altın set üzerinde v1/v3 mercek A/B karşılaştırmasını çalıştırır
-// (#165, üst plan #163 §5/§6.2). DB'ye/eliminations'a HİÇBİR ŞEY yazmaz —
-// yalnız GetIdeaForAudit/GetElimination ile okur (bkz. pipeline.RunLensAB).
-// v3 metinleri lens_prompts_v3.go'da ayrı sabitler — bu komut dışında
-// hiçbir yere bağlı DEĞİL.
+// cmdLensAB, altın set üzerinde v1/v3 (ya da --prompt-file'dan verilen bir
+// aday) mercek A/B karşılaştırmasını çalıştırır (#165, üst plan #163 §5/
+// §6.2; genişletme #175). DB'ye/eliminations'a HİÇBİR ŞEY yazmaz — yalnız
+// GetIdeaForAudit/GetElimination ile okur (bkz. pipeline.RunLensAB). v3
+// metinleri lens_prompts_v3.go'da ayrı sabitler — bu komut dışında hiçbir
+// yere bağlı DEĞİL. Özgünlük merceği üretimle AYNI istemci seçimini kullanır
+// (newDistinctChat doluysa özgünlükte O, diğer mercekler newChat'te) — ama
+// üretimin "tek seferlik gpt-oss yedeği" burada YOK: yalnız birincil model
+// ölçülür (#175 madde D).
 func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	fs := flag.NewFlagSet("lens-ab", flag.ExitOnError)
 	setPath := fs.String("set", "", "altın set JSON dosyası (zorunlu)")
 	lens := fs.String("lens", "all", "mercek adı (third_party|data_access|market_viability|distinctiveness) ya da all")
-	promptVersion := fs.String("prompt", "", "v1|v3 (zorunlu)")
+	promptVersion := fs.String("prompt", "", "v1|v3 (--prompt-file ile TAM OLARAK biri verilmeli)")
+	promptFile := fs.String("prompt-file", "", "sistem prompt dosyası (--prompt yerine; yalnız --lens=all DIŞINDA)")
 	runs := fs.Int("runs", 1, "her çift için koşu sayısı (tekrarlanabilirlik için >=2)")
 	budgetTokens := fs.Int("budget-tokens", 0, "birikimli token bütçesi (0 = sınırsız)")
 	outPath := fs.String("out", "", "CSV çıktı dosyası (boşsa stdout)")
+	sleepMs := fs.Int("sleep-ms", 0, "her LLM çağrısından sonra bekleme (ms, varsayılan 0)")
+	rateWaitSec := fs.Int("rate-wait-sec", 65, "oran sınırı (429) sonrası bekleme (sn)")
+	rateRetries := fs.Int("rate-retries", 5, "oran sınırı sonrası yeniden deneme sayısı")
+	resume := fs.Bool("resume", false, "var olan --out CSV'sini tamamla (hatasız satırlar tekrar çağrılmaz)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*setPath) == "" {
 		return fmt.Errorf("--set zorunlu")
 	}
-	if *promptVersion != "v1" && *promptVersion != "v3" {
+	havePromptVersion := strings.TrimSpace(*promptVersion) != ""
+	havePromptFile := strings.TrimSpace(*promptFile) != ""
+	if havePromptVersion == havePromptFile {
+		return fmt.Errorf("--prompt ile --prompt-file'dan TAM OLARAK biri verilmeli")
+	}
+	if havePromptVersion && *promptVersion != "v1" && *promptVersion != "v3" {
 		return fmt.Errorf("--prompt v1|v3 olmalı")
+	}
+	if havePromptFile && *lens == "all" {
+		return fmt.Errorf("--prompt-file yalnız tek mercekle kullanılabilir (--lens=all İLE OLMAZ)")
+	}
+	if *resume && strings.TrimSpace(*outPath) == "" {
+		return fmt.Errorf("--resume için --out zorunlu")
 	}
 
 	raw, err := os.ReadFile(*setPath)
@@ -577,6 +610,31 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	var set []pipeline.GoldenCase
 	if err := json.Unmarshal(raw, &set); err != nil {
 		return fmt.Errorf("altın set JSON değil: %w", err)
+	}
+
+	var promptText, promptLabel string
+	if havePromptFile {
+		promptRaw, err := os.ReadFile(*promptFile)
+		if err != nil {
+			return fmt.Errorf("--prompt-file okunamadı: %w", err)
+		}
+		promptText = string(promptRaw)
+		promptLabel = "file:" + filepath.Base(*promptFile)
+	}
+
+	// --resume: DB/LLM'e gitmeden önce var olan CSV okunur (dosya yoksa/boşsa
+	// hata VERMEZ — ilk --resume koşusu böyle başlar).
+	var existingRows []pipeline.LensABRow
+	var skipKeys map[pipeline.LensABRowKey]bool
+	appendMode := false
+	if *resume {
+		existingRows, skipKeys, err = pipeline.LoadLensABResumeState(*outPath, set)
+		if err != nil {
+			return fmt.Errorf("--resume: %w", err)
+		}
+		if fi, statErr := os.Stat(*outPath); statErr == nil && fi.Size() > 0 {
+			appendMode = true
+		}
 	}
 
 	if err := cfg.RequireLLM(); err != nil {
@@ -592,23 +650,56 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	defer st.Close()
 
 	chat := newChat(cfg)
-	result, err := pipeline.RunLensAB(ctx, st, chat, set, pipeline.LensABOptions{
-		Lens: *lens, PromptVersion: *promptVersion, Runs: *runs, BudgetTokens: *budgetTokens,
-	})
-	if err != nil {
-		return err
-	}
+	distinctChat := newDistinctChat(cfg)
+	logDistinctivenessLens(cfg)
 
 	var out io.Writer = os.Stdout
 	if strings.TrimSpace(*outPath) != "" {
-		f, err := os.Create(*outPath)
-		if err != nil {
-			return err
+		flags := os.O_CREATE | os.O_WRONLY
+		if appendMode {
+			flags |= os.O_APPEND
+		} else {
+			flags |= os.O_TRUNC
+		}
+		f, ferr := os.OpenFile(*outPath, flags, 0644)
+		if ferr != nil {
+			return ferr
 		}
 		defer f.Close()
 		out = f
 	}
-	if err := pipeline.WriteLensABCSV(out, result.Rows); err != nil {
+
+	// Satır satır/anında yazım (#175 madde B): süreç ortada ölse de o ana
+	// kadarki satırlar dosyada/stdout'ta kalır — sonda TEK seferlik
+	// WriteLensABCSV çağrısı YOK.
+	cw := csv.NewWriter(out)
+	if !appendMode {
+		if err := pipeline.WriteLensABCSVHeader(cw); err != nil {
+			return err
+		}
+		cw.Flush()
+		if err := cw.Error(); err != nil {
+			return err
+		}
+	}
+
+	result, err := pipeline.RunLensAB(ctx, st, chat, set, pipeline.LensABOptions{
+		Lens: *lens, PromptVersion: *promptVersion, Runs: *runs, BudgetTokens: *budgetTokens,
+		PromptText: promptText, PromptLabel: promptLabel,
+		SleepAfterCall: time.Duration(*sleepMs) * time.Millisecond,
+		RateWait:       time.Duration(*rateWaitSec) * time.Second,
+		RateRetries:    *rateRetries,
+		ExistingRows:   existingRows,
+		SkipKeys:       skipKeys,
+		OnRow: func(r pipeline.LensABRow) error {
+			if err := pipeline.WriteLensABCSVRow(cw, r); err != nil {
+				return err
+			}
+			cw.Flush()
+			return cw.Error()
+		},
+	}, distinctChat)
+	if err != nil {
 		return err
 	}
 
