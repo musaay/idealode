@@ -239,6 +239,66 @@ func TestChatJSON400OtherCodeIsNotJSONValidateFailed(t *testing.T) {
 	}
 }
 
+// TestIsRateLimited429, doRequest doğrudan çağrılır (ChatJSON'un içteki
+// retry/backoff döngüsünü — ayrı TestChatJSONRetryOn429'da zaten kapsanıyor
+// — atlayıp testi hızlı tutmak için, bkz. TestChatJSON429IsNotRequestTooLarge
+// deseni). 429'un IsRateLimited=true verdiğini doğrular (#175) — lens-ab'nin
+// kendi bekle-dene döngüsünü tetikleyen imza budur.
+func TestIsRateLimited429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, _, _, err := c.doRequest(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("429'da hata beklenir")
+	}
+	if !IsRateLimited(err) {
+		t.Errorf("IsRateLimited true dönmeliydi, err: %v", err)
+	}
+}
+
+// TestIsRateLimitedGeminiResourceExhausted, Gemini'nin oran sınırını farklı
+// bir gövde imzasıyla ("RESOURCE_EXHAUSTED") dönebildiği durumda da
+// IsRateLimited'ın true verdiğini doğrular (#175).
+func TestIsRateLimitedGeminiResourceExhausted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, _, _, err := c.doRequest(context.Background(), []byte(`{}`))
+	if !IsRateLimited(err) {
+		t.Errorf("RESOURCE_EXHAUSTED gövdesi IsRateLimited=true vermeliydi, err: %v", err)
+	}
+}
+
+// TestIsRateLimitedNotFor5xx, düz 5xx (RESOURCE_EXHAUSTED imzası olmayan)
+// hatanın IsRateLimited tarafından YAKALANMADIĞINI doğrular — lens-ab'de
+// "oran sınırı dışı hata" yoluna düşmesi gerekiyor (bilinçli ayrım, #175).
+func TestIsRateLimitedNotFor5xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":{"message":"internal error"}}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenAICompatClient{APIKey: "test", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	_, _, _, err := c.doRequest(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("500'de hata beklenir")
+	}
+	if IsRateLimited(err) {
+		t.Errorf("düz 5xx IsRateLimited=true vermemeliydi, err: %v", err)
+	}
+}
+
 func TestHostFallsBackToBaseURL(t *testing.T) {
 	// Geçersiz/host'suz bir BaseURL verilirse hata metni yine anlamlı kalsın.
 	c := &OpenAICompatClient{BaseURL: "not-a-url"}

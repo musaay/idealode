@@ -3,21 +3,30 @@ package pipeline
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/musaay/idealode/backend/internal/llm"
 	"github.com/musaay/idealode/backend/internal/store"
 )
 
-// lensab.go (#165, üst plan #163 §5/§6.2): `idealode lens-ab` komutunun
-// gövdesi — altın set üzerinde v1/v3 mercek prompt'larını canlı Groq'a karşı
-// karşılaştırır. HİÇBİR ŞEY DB'ye/eliminations'a YAZMAZ (yalnız
-// GetIdeaForAudit/GetElimination ile OKUR); mevcut mercekleri
-// (synthesize.go/seeds.go/gate.go) hiçbir şekilde ÇAĞIRMAZ ya da
-// ETKİLEMEZ — ayrı, salt-ölçüm bir çağrı yoludur.
+// lensab.go (#165, üst plan #163 §5/§6.2; genişletme #175): `idealode
+// lens-ab` komutunun gövdesi — altın set üzerinde v1/v3 (ya da --prompt-file
+// ile verilen bir aday) mercek prompt'larını canlı LLM'e karşı karşılaştırır.
+// HİÇBİR ŞEY DB'ye/eliminations'a YAZMAZ (yalnız GetIdeaForAudit/
+// GetElimination ile OKUR); mevcut mercekleri (synthesize.go/seeds.go/
+// gate.go) hiçbir şekilde ÇAĞIRMAZ ya da ETKİLEMEZ — ayrı, salt-ölçüm bir
+// çağrı yoludur. #175: canlı kullanımda görülen sorunlara karşı — istekler
+// arası bekleme (--sleep-ms), oran sınırı sonrası bekle-yeniden-dene
+// (--rate-wait-sec/--rate-retries), oran-sınırı-DIŞI hata/girdi hatasında
+// koşuyu bitirmeden "error" satırı yazıp devam etme, anında/akan CSV yazımı
+// (--out + --resume), CSV'de gerekçe (reason) + model sütunu, üretimle AYNI
+// istemci seçimi (özgünlükte distinctChat, diğerlerinde chat).
 
 // GoldenCase, testdata/lens-golden.json'daki tek satır (#165 §5'teki
 // tablodan üretildi). Kind=="idea" ise DB'den ideaLensUserPrompt kurulur
@@ -61,15 +70,38 @@ var lensRegistry = map[string]lensDef{
 	"distinctiveness":  {lensDistinctivenessSystem, lensDistinctivenessSystemV3},
 }
 
+// LensABRowKey, --resume'da bir (çift, koşu) sonucunu tekil belirleyen
+// anahtar (#175) — CSV'de zaten var olan (verdict!="error") bir satırın
+// koşusu bu anahtarla ATLANIR (LLM tekrar çağrılmaz).
+type LensABRowKey struct {
+	ID            int64
+	Kind          string
+	Lens          string
+	PromptVersion string
+	Run           int
+}
+
 // LensABOptions, RunLensAB'nin çalışma parametreleri (idealode lens-ab
 // bayraklarının doğrudan karşılığı).
 type LensABOptions struct {
 	// Lens: kanonik mercek kimliği (lensRegistry anahtarı) ya da "all"
 	// (varsayılan — set'teki her satır kendi Lens'iyle koşar).
 	Lens string
-	// PromptVersion: "v1" ya da "v3" — set'teki HER satır için AYNI sürüm
-	// kullanılır (A/B karşılaştırması iki ayrı komut koşusuyla yapılır).
+	// PromptVersion: "v1" ya da "v3" — PromptText boşsa ZORUNLU, set'teki
+	// HER satır için AYNI sürüm kullanılır (A/B karşılaştırması iki ayrı
+	// komut koşusuyla yapılır).
 	PromptVersion string
+	// PromptText: doluysa (--prompt-file'dan okunan) sistem prompt METNİ —
+	// PromptVersion YOK SAYILIR, mercek seçimi hâlâ lensRegistry'den
+	// (Lens'in var olduğunu doğrulamak için) yapılır ama sistem prompt'u
+	// SABİT bu metindir. Yalnız Lens != "all" iken geçerli (RunLensAB
+	// aksi halde hata döner) — bir aday prompt'u tüm dört mercekte AYNI
+	// anlama gelmez. Dosya okuması BURADA yapılmaz (main.go'nun işi) —
+	// testte doğrudan içerik verilebilir (#175).
+	PromptText string
+	// PromptLabel: PromptText doluyken CSV/özet'teki "prompt" kolonunun
+	// değeri ("file:<taban ad>" — main.go doldurur). Boşsa "file" kullanılır.
+	PromptLabel string
 	// Runs: çift başına koşu sayısı — tekrarlanabilirlik için >=2 (#165
 	// §5 kabul eşiği: "iki koşuda aynı verdict"). <=0 ise 1 sayılır.
 	Runs int
@@ -77,33 +109,68 @@ type LensABOptions struct {
 	// (kaldığı çift+koşu StoppedAtCase/StoppedAtRun'a yazılır). <=0 =
 	// sınırsız.
 	BudgetTokens int
+	// SleepAfterCall: her LLM çağrısından (başarılı ya da başarısız, oran
+	// sınırı yeniden denemeleri DAHİL) SONRA beklenecek süre — Gemini gibi
+	// dakikalık istek sınırı düşük sağlayıcılarda 429'u BAŞTAN azaltır
+	// (#175). <=0 = beklemez. ctx iptaline duyarlı (iptalde RunLensAB
+	// hemen durur — bu bir "hata satırı" değil, GERÇEK bir iptaldir).
+	SleepAfterCall time.Duration
+	// RateWait: istemcinin KENDİ yeniden denemeleri (llm paketindeki
+	// maxRetries) tükendikten SONRA hâlâ oran sınırı (llm.IsRateLimited)
+	// dönen bir çağrı için AYNI çağrıyı tekrar denemeden önce beklenecek
+	// süre.
+	RateWait time.Duration
+	// RateRetries: RateWait ile kaç kez daha denenir — tükenirse o (çift,
+	// koşu) için "error" satırı yazılır, koşu DEVAM EDER (bitmez).
+	RateRetries int
+	// ExistingRows: --resume'da VAR OLAN CSV'den okunmuş eski satırlar —
+	// bu koşuda YENİDEN ÜRETİLMEZ (SkipKeys zaten engeller), yalnız
+	// Summaries hesabına eski+yeni BİRLİKTE girsin diye taşınır (LensABResult.
+	// Rows bu koşuda ÜRETİLEN satırları içerir, ExistingRows'u TEKRARLAMAZ).
+	ExistingRows []LensABRow
+	// SkipKeys: --resume'da zaten tamamlanmış (verdict!="error")
+	// (id,kind,lens,prompt,run) anahtarları — bu koşularda LLM ÇAĞRILMAZ,
+	// girdi (DB) bile çekilmez (bir çiftin TÜM koşuları zaten tamamsa o
+	// çift baştan atlanır).
+	SkipKeys map[LensABRowKey]bool
+	// OnRow: doluysa RunLensAB her YENİ satırı ÜRETİLDİĞİ ANDA bu
+	// callback'e verir (main.go bunu CSV'ye anında yazıp Flush etmek için
+	// kullanır, #175 madde B — süreç ortada ölse de o ana kadarki satırlar
+	// dosyada kalır). err dönerse RunLensAB durur (örn. disk dolu).
+	OnRow func(LensABRow) error
 }
 
 // LensABRow, CSV'nin/raporun tek satırı — bir (çift, koşu) sonucudur.
 type LensABRow struct {
 	ID            int64
-	Kind          string // idea | elimination — CSV'ye yazılmaz, iç gruplama için
+	Kind          string // idea | elimination
 	Lens          string
-	PromptVersion string
+	PromptVersion string // "v1" | "v3" | "file:<taban ad>" (CSV "prompt" kolonu)
 	Run           int
-	Verdict       string
+	Verdict       string // pass | fail | unsure | error (llm hatası/oran sınırı tükendi/girdi hatası)
 	Criterion     string
 	Expect        string
 	Match         bool
 	Tokens        int
 	Watch         bool // CSV'ye yazılmaz — özet raporunda ayrı sayılır
-	Error         string
+	// Model: llm.NamedChat.ModelName() — istemci uygulamıyorsa boş (#175).
+	Model string
+	// Reason: BAŞARILI çağrıda lensVerdict.Reason, hata satırında hata
+	// metni — ikisi de 200 karaktere kırpılır (truncateReason).
+	Reason string
 }
 
 // LensABLensSummary, mercek başına özet (rapor sonunda).
 type LensABLensSummary struct {
 	Lens string
-	// Cases/Matches: İZLEME HARİÇ çiftler üzerinden, run=1'in Match'ine göre.
+	// Cases/Matches: İZLEME HARİÇ ve run=1'i HATA OLMAYAN çiftler
+	// üzerinden, run=1'in Match'ine göre (#175 madde E: hata satırları
+	// paydadan hariç).
 	Cases    int
 	Matches  int
 	MatchPct float64
-	// RepeatableTotal/RepeatableCases: yalnız Runs>=2 koşulan çiftler
-	// üzerinden — tüm koşularda AYNI verdict çıkanların oranı.
+	// RepeatableTotal/RepeatableCases: yalnız HATA OLMAYAN koşuları Runs>=2
+	// olan çiftler üzerinden — o koşularda AYNI verdict çıkanların oranı.
 	RepeatableTotal int
 	RepeatableCases int
 	RepeatablePct   float64
@@ -111,11 +178,21 @@ type LensABLensSummary struct {
 	// WatchCases/WatchMatch: izleme satırları — uyuma girmez, ayrı raporlanır.
 	WatchCases int
 	WatchMatch int
+	// ErrorRows: bu mercekte "error" verdict'i taşıyan TOPLAM satır sayısı
+	// (#175 madde D/E — özette ayrıca bildirilir).
+	ErrorRows int
+	// Model: bu merceği koşturan istemcinin adı (ilk hata-olmayan satırdan
+	// alınır — aynı koşuda hep aynı istemci kullanıldığından tekildir).
+	Model string
 }
 
 // LensABResult, RunLensAB'nin dönüşü.
 type LensABResult struct {
-	Rows           []LensABRow
+	// Rows: BU KOŞUDA üretilen YENİ satırlar (--resume'da ExistingRows
+	// TEKRARLANMAZ — onlar zaten diskte).
+	Rows []LensABRow
+	// Summaries: --resume'da ExistingRows + Rows BİRLİKTE (eski+yeni TÜM
+	// satırlar) üzerinden hesaplanır; aksi halde yalnız Rows.
 	Summaries      []LensABLensSummary // ilk görülme sırasına göre
 	TotalTokens    int
 	BudgetExceeded bool
@@ -125,22 +202,56 @@ type LensABResult struct {
 	StoppedAtRun  int
 }
 
+// truncateReason, LensABRow.Reason alanını 200 karaktere (rune bazlı —
+// çok baytlı TR karakterleri ortadan bölmemek için) kırpar (#175: "reason=
+// hata metni (ilk 200 karakter)").
+func truncateReason(s string) string {
+	const limit = 200
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	return string(r[:limit]) + "..."
+}
+
+// lensABSleep, d>0 ise ctx iptaline duyarlı şekilde d kadar bekler; d<=0 ise
+// hiçbir şey yapmaz. ctx iptal edilirse ctx.Err() döner — RunLensAB bunu
+// GERÇEK bir iptal sayıp tüm koşuyu durdurur (bir "hata satırı" DEĞİL).
+func lensABSleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // RunLensAB, set'teki (opts.Lens'e göre filtrelenmiş) her çifti
-// opts.PromptVersion sistem prompt'uyla, sıcaklık 0'da, opts.Runs kez
-// çalıştırır. Hiçbir DB YAZIMI yapmaz. llm.UsageMeter ile her (mercek,
-// sürüm) aşaması ayrı etiketlenir (llm.WithStage) — token sayımı buradan
-// okunur, testte gerçek istemci + httptest sunucusuyla doğrulanır (sahte
-// el-yazımı Chat'ler recordUsage'ı tetiklemez, bkz. usage_stage_test.go).
+// opts.PromptVersion (ya da opts.PromptText) sistem prompt'uyla, sıcaklık
+// 0'da, opts.Runs kez çalıştırır. Hiçbir DB YAZIMI yapmaz. distinctChat
+// doluysa (ilk eleman) "distinctiveness" mercek çağrıları ONUNLA yapılır —
+// diğer tüm mercekler chat ile (üretimdeki seçimle AYNI, bkz.
+// gate.evaluateDistinctiveness — ama üretimin "tek seferlik yedek deneme"si
+// BURADA YOK, #175 madde D: yalnız birincil istemci ölçülür).
+//
+// llm.UsageMeter ile her (mercek, sürüm) aşaması ayrı etiketlenir
+// (llm.WithStage) — token sayımı buradan okunur (yalnız BAŞARILI çağrılar
+// sayılır, retry'ler DEĞİL).
+//
+// Oran sınırı (llm.IsRateLimited) DIŞI bir LLM hatası, girdi (DB) hatası ya
+// da oran sınırı yeniden denemeleri (opts.RateRetries) tükenirse: o (çift,
+// koşu) için verdict="error" satırı yazılır, KOŞU BİTİRİLMEZ (devam eder).
 // Bütçe aşılınca kalan çiftler/koşular ÇAĞRILMAZ, StoppedAtCase/Run
 // doldurulur.
-func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []GoldenCase, opts LensABOptions) (LensABResult, error) {
+func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []GoldenCase, opts LensABOptions, distinctChat ...llm.Chat) (LensABResult, error) {
 	runs := opts.Runs
 	if runs <= 0 {
 		runs = 1
 	}
-	if opts.PromptVersion != "v1" && opts.PromptVersion != "v3" {
-		return LensABResult{}, fmt.Errorf("lens-ab: --prompt v1|v3 olmalı, geldi: %q", opts.PromptVersion)
-	}
+
 	lensFilter := opts.Lens
 	if lensFilter == "" {
 		lensFilter = "all"
@@ -149,6 +260,28 @@ func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []Golden
 		if _, ok := lensRegistry[lensFilter]; !ok {
 			return LensABResult{}, fmt.Errorf("lens-ab: bilinmeyen mercek: %q", lensFilter)
 		}
+	}
+
+	usingPromptText := opts.PromptText != ""
+	promptCol := opts.PromptVersion
+	if usingPromptText {
+		// Bir aday prompt metni tüm dört merceğe AYNI anlama gelmez —
+		// yalnız TEK mercekle ölçülür (main.go da aynı kısıtı erken
+		// uygular, burası testte doğrudan çağrılan RunLensAB için).
+		if lensFilter == "all" {
+			return LensABResult{}, fmt.Errorf("lens-ab: --prompt-file yalnız tek mercekle (--lens=all İLE OLMAZ) kullanılabilir")
+		}
+		promptCol = opts.PromptLabel
+		if promptCol == "" {
+			promptCol = "file"
+		}
+	} else if opts.PromptVersion != "v1" && opts.PromptVersion != "v3" {
+		return LensABResult{}, fmt.Errorf("lens-ab: --prompt v1|v3 olmalı, geldi: %q", opts.PromptVersion)
+	}
+
+	var distinctOverride llm.Chat
+	if len(distinctChat) > 0 {
+		distinctOverride = distinctChat[0]
 	}
 
 	cases := set
@@ -171,20 +304,20 @@ func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []Golden
 	order := []string{}
 	orderSeen := map[string]bool{}
 
+	emit := func(row LensABRow) error {
+		result.Rows = append(result.Rows, row)
+		result.TotalTokens += row.Tokens
+		if opts.OnRow != nil {
+			return opts.OnRow(row)
+		}
+		return nil
+	}
+
 outer:
 	for ci, gc := range cases {
 		def, ok := lensRegistry[gc.Lens]
 		if !ok {
 			return result, fmt.Errorf("lens-ab: altın set id=%d (%s) bilinmeyen mercek %q", gc.ID, gc.Kind, gc.Lens)
-		}
-		system := def.v1
-		if opts.PromptVersion == "v3" {
-			system = def.v3
-		}
-
-		userPrompt, err := lensABUserPrompt(ctx, st, gc)
-		if err != nil {
-			return result, fmt.Errorf("lens-ab: altın set id=%d (%s) girdi HATA: %w", gc.ID, gc.Kind, err)
 		}
 
 		if !orderSeen[gc.Lens] {
@@ -192,26 +325,111 @@ outer:
 			order = append(order, gc.Lens)
 		}
 
+		// Bu çiftin TÜM koşuları --resume'da zaten tamamlanmışsa (CSV'de
+		// hatasız satır olarak var) DB/LLM'e hiç gidilmez.
+		allDone := true
 		for run := 1; run <= runs; run++ {
-			stage := gc.Lens + "/" + opts.PromptVersion
+			if !opts.SkipKeys[LensABRowKey{ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run}] {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			continue
+		}
+
+		activeChat := chat
+		if gc.Lens == "distinctiveness" && distinctOverride != nil {
+			activeChat = distinctOverride
+		}
+		modelName := modelNameOf(activeChat)
+
+		system := def.v1
+		switch {
+		case usingPromptText:
+			system = opts.PromptText
+		case opts.PromptVersion == "v3":
+			system = def.v3
+		}
+
+		userPrompt, err := lensABUserPrompt(ctx, st, gc)
+		if err != nil {
+			// Girdi (DB) hatası: LLM'e hiç gidilmeden, henüz tamamlanmamış
+			// HER koşu için bir "error" satırı yazılır, sonraki çifte
+			// geçilir (#175 madde A).
+			for run := 1; run <= runs; run++ {
+				key := LensABRowKey{ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run}
+				if opts.SkipKeys[key] {
+					continue
+				}
+				row := LensABRow{
+					ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+					Verdict: "error", Expect: expectLabel(gc), Watch: gc.Watch,
+					Model: modelName, Reason: truncateReason(fmt.Sprintf("girdi hatası: %v", err)),
+				}
+				if werr := emit(row); werr != nil {
+					return result, werr
+				}
+			}
+			continue
+		}
+
+		for run := 1; run <= runs; run++ {
+			key := LensABRowKey{ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run}
+			if opts.SkipKeys[key] {
+				continue
+			}
+
+			stage := gc.Lens + "/" + promptCol
 			callCtx := llm.WithStage(baseCtx, stage)
-			raw, err := chat.ChatJSONWithTemperature(callCtx, system, userPrompt, 0)
-			if err != nil {
-				return result, fmt.Errorf("lens-ab: altın set id=%d (%s) run=%d: LLM HATA: %w", gc.ID, gc.Kind, run, err)
-			}
-			v := parseLensVerdict(raw)
 
-			snap := meter.Snapshot()[stage]
-			delta := snap.TotalTokens - prevStageTotal[stage]
-			prevStageTotal[stage] = snap.TotalTokens
-
-			row := LensABRow{
-				ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: opts.PromptVersion, Run: run,
-				Verdict: v.Verdict, Criterion: v.Criterion, Expect: expectLabel(gc),
-				Match: matchGoldenCase(gc, v), Tokens: delta, Watch: gc.Watch,
+			var raw string
+			var callErr error
+			rateRetriesUsed := 0
+			for {
+				raw, callErr = activeChat.ChatJSONWithTemperature(callCtx, system, userPrompt, 0)
+				if sleepErr := lensABSleep(ctx, opts.SleepAfterCall); sleepErr != nil {
+					return result, sleepErr
+				}
+				if callErr == nil {
+					break
+				}
+				if !llm.IsRateLimited(callErr) || rateRetriesUsed >= opts.RateRetries {
+					break
+				}
+				rateRetriesUsed++
+				if waitErr := lensABSleep(ctx, opts.RateWait); waitErr != nil {
+					return result, waitErr
+				}
 			}
-			result.Rows = append(result.Rows, row)
-			result.TotalTokens += delta
+
+			var row LensABRow
+			if callErr != nil {
+				// Oran sınırı DIŞI hata YA DA oran sınırı yeniden denemeleri
+				// tükendi: koşu BİTİRİLMEZ, "error" satırı yazılıp devam
+				// edilir (#175 madde A).
+				row = LensABRow{
+					ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+					Verdict: "error", Expect: expectLabel(gc), Watch: gc.Watch,
+					Model: modelName, Reason: truncateReason(callErr.Error()),
+				}
+			} else {
+				v := parseLensVerdict(raw)
+				snap := meter.Snapshot()[stage]
+				delta := snap.TotalTokens - prevStageTotal[stage]
+				prevStageTotal[stage] = snap.TotalTokens
+
+				row = LensABRow{
+					ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+					Verdict: v.Verdict, Criterion: v.Criterion, Expect: expectLabel(gc),
+					Match: matchGoldenCase(gc, v), Tokens: delta, Watch: gc.Watch,
+					Model: modelName, Reason: truncateReason(v.Reason),
+				}
+			}
+
+			if werr := emit(row); werr != nil {
+				return result, werr
+			}
 
 			if opts.BudgetTokens > 0 && result.TotalTokens >= opts.BudgetTokens {
 				result.BudgetExceeded = true
@@ -222,7 +440,13 @@ outer:
 		}
 	}
 
-	result.Summaries = buildLensSummaries(order, result.Rows)
+	allRows := result.Rows
+	if len(opts.ExistingRows) > 0 {
+		allRows = make([]LensABRow, 0, len(opts.ExistingRows)+len(result.Rows))
+		allRows = append(allRows, opts.ExistingRows...)
+		allRows = append(allRows, result.Rows...)
+	}
+	result.Summaries = buildLensSummaries(order, allRows)
 	return result, nil
 }
 
@@ -293,6 +517,9 @@ func matchGoldenCase(gc GoldenCase, v lensVerdict) bool {
 
 // buildLensSummaries, satırları mercek+id+kind bazında gruplayıp özet
 // istatistikleri üretir. order, mercek adlarının ilk görülme sırasıdır.
+// "error" verdict'li satırlar uyum (Cases/Matches) ve tekrarlanabilirlik
+// (RepeatableTotal/RepeatableCases) paydalarından HARİÇ tutulur (#175
+// madde E) — ayrıca ErrorRows'a sayılır.
 func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 	type key struct {
 		lens string
@@ -309,6 +536,12 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 	for _, r := range rows {
 		if s, ok := summaries[r.Lens]; ok {
 			s.TotalTokens += r.Tokens
+			if r.Verdict == "error" {
+				s.ErrorRows++
+			}
+			if s.Model == "" && r.Model != "" {
+				s.Model = r.Model
+			}
 		}
 		k := key{r.Lens, r.ID, r.Kind}
 		if _, ok := groups[k]; !ok {
@@ -323,17 +556,34 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 		if !ok {
 			continue
 		}
+
+		// first: run==1 VE hata OLMAYAN satır — uyum yalnız BAŞARILI ilk
+		// koşuya bakar; run==1 hata verdiyse bu çift Cases/Matches
+		// paydasına HİÇ girmez (#175 madde E).
 		var first *LensABRow
-		allSame := true
 		for i := range grp {
-			if grp[i].Run == 1 {
+			if grp[i].Run == 1 && grp[i].Verdict != "error" {
 				r := grp[i]
 				first = &r
+				break
 			}
-			if grp[i].Verdict != grp[0].Verdict {
+		}
+
+		// Tekrarlanabilirlik yalnız HATA OLMAYAN koşular üzerinden
+		// hesaplanır (hatalı koşular karşılaştırma dışı).
+		nonError := make([]LensABRow, 0, len(grp))
+		for _, r := range grp {
+			if r.Verdict != "error" {
+				nonError = append(nonError, r)
+			}
+		}
+		allSame := true
+		for i := 1; i < len(nonError); i++ {
+			if nonError[i].Verdict != nonError[0].Verdict {
 				allSame = false
 			}
 		}
+
 		watch := len(grp) > 0 && grp[0].Watch
 		if watch {
 			s.WatchCases++
@@ -342,11 +592,13 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 			}
 			continue
 		}
-		s.Cases++
-		if first != nil && first.Match {
-			s.Matches++
+		if first != nil {
+			s.Cases++
+			if first.Match {
+				s.Matches++
+			}
 		}
-		if len(grp) > 1 {
+		if len(nonError) > 1 {
 			s.RepeatableTotal++
 			if allSame {
 				s.RepeatableCases++
@@ -368,28 +620,50 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 	return out
 }
 
-// lensABCSVHeader, WriteLensABCSV'nin ürettiği kolon sırası (#165 spec:
-// "id, lens, prompt, run, verdict, criterion, expect, match, tokens").
-var lensABCSVHeader = []string{"id", "lens", "prompt", "run", "verdict", "criterion", "expect", "match", "tokens"}
+// lensABCSVHeader, WriteLensABCSV'nin ürettiği kolon sırası (#175: "kind" ve
+// "model" eklendi, "reason" en sona eklendi — id, kind, lens, prompt, run,
+// verdict, criterion, expect, match, tokens, model, reason).
+var lensABCSVHeader = []string{"id", "kind", "lens", "prompt", "run", "verdict", "criterion", "expect", "match", "tokens", "model", "reason"}
 
-// WriteLensABCSV, sonuç satırlarını sözleşmedeki kolonlarla yazar.
+// WriteLensABCSVHeader, yalnız başlık satırını yazar — main.go'nun anında
+// yazım akışında (satırlar WriteLensABCSVRow ile AYRI yazılır) dosyanın
+// başında BİR KEZ çağrılır; --resume'da var olan dosyaya eklenirken
+// ATLANIR (#175 madde B).
+func WriteLensABCSVHeader(cw *csv.Writer) error {
+	return cw.Write(lensABCSVHeader)
+}
+
+// WriteLensABCSVRow, TEK satırı yazar — main.go bunu her satır üretildiğinde
+// çağırıp hemen Flush eder (#175 madde B: süreç ortada ölse de o ana
+// kadarki satırlar dosyada kalır).
+func WriteLensABCSVRow(cw *csv.Writer, r LensABRow) error {
+	return cw.Write([]string{
+		strconv.FormatInt(r.ID, 10),
+		r.Kind,
+		r.Lens,
+		r.PromptVersion,
+		strconv.Itoa(r.Run),
+		r.Verdict,
+		r.Criterion,
+		r.Expect,
+		strconv.FormatBool(r.Match),
+		strconv.Itoa(r.Tokens),
+		r.Model,
+		r.Reason,
+	})
+}
+
+// WriteLensABCSV, sonuç satırlarını sözleşmedeki kolonlarla TEK seferde
+// yazar (testler ve tek seferlik/toplu kullanım için — cmdLensAB artık
+// WriteLensABCSVHeader + satır satır WriteLensABCSVRow+Flush kullanıyor,
+// #175 madde B).
 func WriteLensABCSV(w io.Writer, rows []LensABRow) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write(lensABCSVHeader); err != nil {
+	if err := WriteLensABCSVHeader(cw); err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if err := cw.Write([]string{
-			strconv.FormatInt(r.ID, 10),
-			r.Lens,
-			r.PromptVersion,
-			strconv.Itoa(r.Run),
-			r.Verdict,
-			r.Criterion,
-			r.Expect,
-			strconv.FormatBool(r.Match),
-			strconv.Itoa(r.Tokens),
-		}); err != nil {
+		if err := WriteLensABCSVRow(cw, r); err != nil {
 			return err
 		}
 	}
@@ -397,9 +671,117 @@ func WriteLensABCSV(w io.Writer, rows []LensABRow) error {
 	return cw.Error()
 }
 
-// FormatLensABSummary, mercek başına uyum/tekrarlanabilirlik/token
-// özetini + izleme listesini + bütçe durma notunu TR metin olarak üretir
-// (stderr'e basılır, CSV'ye karışmaz).
+// parseLensABCSVRow, LoadLensABResumeState'in tek bir veri satırını (başlık
+// HARİÇ) LensABRow'a geri çevirir — sütun sırası lensABCSVHeader ile BİREBİR.
+// Watch burada DOLDURULMAZ (CSV'de yok) — çağıran altın settem eşleştirir.
+func parseLensABCSVRow(rec []string) (LensABRow, error) {
+	if len(rec) != len(lensABCSVHeader) {
+		return LensABRow{}, fmt.Errorf("sütun sayısı %d, beklenen %d", len(rec), len(lensABCSVHeader))
+	}
+	id, err := strconv.ParseInt(rec[0], 10, 64)
+	if err != nil {
+		return LensABRow{}, fmt.Errorf("id: %w", err)
+	}
+	run, err := strconv.Atoi(rec[4])
+	if err != nil {
+		return LensABRow{}, fmt.Errorf("run: %w", err)
+	}
+	match, err := strconv.ParseBool(rec[8])
+	if err != nil {
+		return LensABRow{}, fmt.Errorf("match: %w", err)
+	}
+	tokens, err := strconv.Atoi(rec[9])
+	if err != nil {
+		return LensABRow{}, fmt.Errorf("tokens: %w", err)
+	}
+	return LensABRow{
+		ID: id, Kind: rec[1], Lens: rec[2], PromptVersion: rec[3], Run: run,
+		Verdict: rec[5], Criterion: rec[6], Expect: rec[7], Match: match, Tokens: tokens,
+		Model: rec[10], Reason: rec[11],
+	}, nil
+}
+
+// lensABHeadersEqual, iki dilimin sırayla AYNI olup olmadığını bildirir (CSV
+// başlığı karşılaştırması için — encoding/csv sonucu her zaman []string).
+// ingest_test.go'daki AYNI amaçlı equalStrings'le İSİM ÇAKIŞMASINI önlemek
+// için ayrı adlandırıldı.
+func lensABHeadersEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// LoadLensABResumeState, --resume için VAR OLAN CSV çıktısını okur (#175):
+// her satırı LensABRow'a geri çevirir (Watch, set'teki eşleşen GoldenCase'in
+// Watch alanından kurulur — CSV bunu taşımaz), verdict'i "error" OLMAYAN
+// satırların LensABRowKey'ini skip kümesine ekler (bu koşularda LLM TEKRAR
+// ÇAĞRILMAZ). path yoksa (henüz üretilmemiş dosya) ya da tamamen boşsa
+// hata VERMEDEN boş durumla döner — ilk --resume koşusu böyle başlar.
+// Başlık lensABCSVHeader'la BİREBİR uyuşmuyorsa net hata döner.
+func LoadLensABResumeState(path string, set []GoldenCase) ([]LensABRow, map[LensABRowKey]bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, map[LensABRowKey]bool{}, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("lens-ab --resume: CSV açılamadı: %w", err)
+	}
+	defer f.Close()
+
+	cr := csv.NewReader(f)
+	header, err := cr.Read()
+	if err == io.EOF {
+		return nil, map[LensABRowKey]bool{}, nil // tamamen boş dosya
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("lens-ab --resume: CSV başlığı okunamadı: %w", err)
+	}
+	if !lensABHeadersEqual(header, lensABCSVHeader) {
+		return nil, nil, fmt.Errorf("lens-ab --resume: CSV başlığı beklenenle uyuşmuyor:\n  geldi: %v\n  beklenen: %v", header, lensABCSVHeader)
+	}
+
+	type caseIdent struct {
+		id   int64
+		kind string
+		lens string
+	}
+	watchLookup := make(map[caseIdent]bool, len(set))
+	for _, gc := range set {
+		watchLookup[caseIdent{gc.ID, gc.Kind, gc.Lens}] = gc.Watch
+	}
+
+	var rows []LensABRow
+	skip := map[LensABRowKey]bool{}
+	for {
+		rec, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("lens-ab --resume: CSV satırı okunamadı: %w", err)
+		}
+		row, err := parseLensABCSVRow(rec)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lens-ab --resume: CSV satırı ayrıştırılamadı (%v): %w", rec, err)
+		}
+		row.Watch = watchLookup[caseIdent{row.ID, row.Kind, row.Lens}]
+		rows = append(rows, row)
+		if row.Verdict != "error" {
+			skip[LensABRowKey{ID: row.ID, Kind: row.Kind, Lens: row.Lens, PromptVersion: row.PromptVersion, Run: row.Run}] = true
+		}
+	}
+	return rows, skip, nil
+}
+
+// FormatLensABSummary, mercek başına uyum/tekrarlanabilirlik/token/model/
+// hata özetini + izleme listesini + bütçe durma notunu TR metin olarak
+// üretir (stderr'e basılır, CSV'ye karışmaz).
 func FormatLensABSummary(result LensABResult) string {
 	var sb strings.Builder
 	for _, s := range result.Summaries {
@@ -408,6 +790,12 @@ func FormatLensABSummary(result LensABResult) string {
 			fmt.Fprintf(&sb, ", tekrarlanabilirlik %d/%d (%.0f%%)", s.RepeatableCases, s.RepeatableTotal, s.RepeatablePct)
 		}
 		fmt.Fprintf(&sb, ", token %d", s.TotalTokens)
+		if s.Model != "" {
+			fmt.Fprintf(&sb, ", model %s", s.Model)
+		}
+		if s.ErrorRows > 0 {
+			fmt.Fprintf(&sb, ", hata %d satır", s.ErrorRows)
+		}
 		if s.WatchCases > 0 {
 			fmt.Fprintf(&sb, " — izleme %d/%d beklendiği gibi", s.WatchMatch, s.WatchCases)
 		}
