@@ -100,3 +100,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Pointerpro (Stefan Debois) — danışmanların kendi metodolojisini markalı, ücretli teşhis/değerlendirme raporuna dönüştürdüğü SaaS anket-değerlendirme motoru, $287K MRR, 65+ ülke (2026-09-20)
 - OpenStock (Open-Dev-Society) — pahalı borsa terminallerine açık kaynak alternatif, gerçek zamanlı fiyat takibi + AI özetli şirket profilleri, ★17K, ivme (2026-09-21)
 - GoMoon — makro/kazanç haberlerini AI etki-skoruyla işlem sinyaline çeviren ekonomik takvim SaaS'ı, $192K ARR / $230K'a satıldı (2026-09-22)
+- Lychee — Polymarket/Kalshi tahmin piyasası verisine no-code API/panel erişimi, 2 aydan kısa sürede 11K+ kullanıcı / $10K+ MRR (2026-09-23)
