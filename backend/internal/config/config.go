@@ -42,6 +42,15 @@ type Config struct {
 	DistinctivenessLLMModel   string // DISTINCTIVENESS_LLM_MODEL
 	DistinctivenessLLMAPIKey  string // DISTINCTIVENESS_LLM_API_KEY
 
+	// DistinctivenessVotes (#181, PO kararı 2026-09-23 "oybirliğiyle blok"):
+	// özgünlük merceğinin kaç kez oylanacağı — kart ANCAK TÜM oylar blok
+	// (fail K1|K2) derse bloklanır; oylar ayrışırsa kart YAZILIR ve
+	// "tartışmalı" işaretlenir (bkz. pipeline.voteDistinctiveness).
+	// Geçersiz/boş/<1 değer 1'e, >5 değer 5'e indirgenir (savunmacı — LLM
+	// maliyetini sınırsız büyütmesin). VARSAYILAN 1: merge sonrası davranış
+	// BUGÜNKÜYLE BİREBİR aynı kalır; lead ölçümden sonra Railway'de yükseltir.
+	DistinctivenessVotes int // DISTINCTIVENESS_VOTES (default: 1, üst sınır 5)
+
 	// Çıktı dili — üretilen kullanıcıya dönük metinler bu dilde (Rev 2: tr).
 	// EN'e geçiş = env değişikliği; tag'ler kanonik EN slug olduğu için
 	// gruplama bozulmaz.
@@ -95,6 +104,7 @@ func Load() (*Config, error) {
 	c.DistinctivenessLLMBaseURL = strings.TrimSuffix(os.Getenv("DISTINCTIVENESS_LLM_BASE_URL"), "/")
 	c.DistinctivenessLLMModel = os.Getenv("DISTINCTIVENESS_LLM_MODEL")
 	c.DistinctivenessLLMAPIKey = os.Getenv("DISTINCTIVENESS_LLM_API_KEY")
+	c.DistinctivenessVotes = loadDistinctivenessVotes()
 
 	var err error
 	if c.MinThemeEvidence, err = getenvInt("MIN_THEME_EVIDENCE", 3); err != nil {
@@ -149,6 +159,25 @@ func loadPreferPaymentSignal() (bool, error) {
 		return getenvBool("PREFER_PAYMENT_SIGNAL", true)
 	}
 	return getenvBool("REQUIRE_PAYMENT_SIGNAL", true)
+}
+
+// loadDistinctivenessVotes, DISTINCTIVENESS_VOTES'u okur (#181): boş/
+// ayrıştırılamayan/<1 değer sessizce 1'e (bugünkü davranış), >5 değer 5'e
+// indirgenir — getenvInt'in AKSİNE geçersiz değerde Load()'u DÜŞÜRMEZ, zira
+// bu ayar bir "maliyet kısıtı"dır, zorunlu bir bağlantı bilgisi değil.
+func loadDistinctivenessVotes() int {
+	v := strings.TrimSpace(os.Getenv("DISTINCTIVENESS_VOTES"))
+	if v == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 1
+	}
+	if n > 5 {
+		return 5
+	}
+	return n
 }
 
 // UseDistinctivenessLLM, özgünlük merceği için AYRI bir llm.Chat istemcisi

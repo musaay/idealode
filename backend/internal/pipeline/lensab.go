@@ -123,6 +123,15 @@ type LensABOptions struct {
 	// RateRetries: RateWait ile kaç kez daha denenir — tükenirse o (çift,
 	// koşu) için "error" satırı yazılır, koşu DEVAM EDER (bitmez).
 	RateRetries int
+	// Votes (#181, "--votes N"): distinctiveness satırlarında her "run"
+	// üretimdeki voteDistinctiveness çekirdeğiyle (gate.go) N oy çağrısı
+	// yapar — İKİ KOPYA KARAR MANTIĞI YOK. CSV satırı NİHAİ kararı taşır
+	// (verdict/criterion), tokens tüm oyların TOPLAMI, reason
+	// "oylar: v1,v2,... - karar gerekçesi" biçimindedir. <=1 ise (varsayılan)
+	// BUGÜNKÜ tek-çağrılık davranış BİREBİR korunur — hiçbir satır formatı
+	// değişmez. >1 iken Lens != "distinctiveness" HATA döner (bkz. RunLensAB
+	// başı) — bir oylama kararı yalnız özgünlük merceği için tanımlıdır.
+	Votes int
 	// ExistingRows: --resume'da VAR OLAN CSV'den okunmuş eski satırlar —
 	// bu koşuda YENİDEN ÜRETİLMEZ (SkipKeys zaten engeller), yalnız
 	// Summaries hesabına eski+yeni BİRLİKTE girsin diye taşınır (LensABResult.
@@ -175,6 +184,22 @@ type LensABLensSummary struct {
 	RepeatableCases int
 	RepeatablePct   float64
 	TotalTokens     int
+	// BlockRepeatableTotal/BlockRepeatableCases (#181): RepeatableXxx'ten
+	// FARKLI bir tekrarlanabilirlik — verdict/criterion BİREBİR AYNI olmak
+	// yerine yalnız "blok mu değil mi" kararının kart başına TÜM koşularda
+	// AYNI olup olmadığına bakar (blok = distinctiveness'ta fail&K1|K2,
+	// diğer merceklerde herhangi bir fail). K1 fail vs K2 fail FARKLI
+	// verdict/criterion'dır ama ikisi de "blok" — RepeatableCases'te
+	// tekrarlanamaz sayılır, BlockRepeatableCases'te sayılır. Aynı payda
+	// (Runs>=2, hata olmayan koşular) kullanılır.
+	BlockRepeatableTotal int
+	BlockRepeatableCases int
+	BlockRepeatablePct   float64
+	// UnexpectedBlocks (#181): "pass" BEKLENEN (Expect/ExpectAny "pass"
+	// içeren) kartlarda GERÇEKTE blok çıkan satır SAYISI — izleme VE error
+	// satırları HARİÇ. PO'nun tuttuğu kartlarda kaç run yanlışlıkla
+	// bloklamış — canlı/aday karşılaştırmasında kullanılır.
+	UnexpectedBlocks int
 	// WatchCases/WatchMatch: izleme satırları — uyuma girmez, ayrı raporlanır.
 	WatchCases int
 	WatchMatch int
@@ -277,6 +302,23 @@ func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []Golden
 		}
 	} else if opts.PromptVersion != "v1" && opts.PromptVersion != "v3" {
 		return LensABResult{}, fmt.Errorf("lens-ab: --prompt v1|v3 olmalı, geldi: %q", opts.PromptVersion)
+	}
+
+	// Votes (#181): bir oylama kararı yalnız özgünlük merceği için
+	// tanımlıdır — >1 iken --lens=distinctiveness DIŞINDA (özellikle "all")
+	// net hata döner, sessizce yok sayılmaz. <=1 BUGÜNKÜ tek-çağrılık
+	// davranışı DEĞİŞTİRMEZ (promptCol'a ek YAPILMAZ).
+	votes := opts.Votes
+	if votes <= 0 {
+		votes = 1
+	}
+	if votes > 1 {
+		if lensFilter != "distinctiveness" {
+			return LensABResult{}, fmt.Errorf("lens-ab: --votes >1 yalnız --lens=distinctiveness ile kullanılabilir (geldi: --lens=%q)", lensFilter)
+		}
+		// CSV prompt etiketine oy sayısı eklenir ("v1+oy3", "file:x+oy3")
+		// ki --resume farklı oy sayılarını karıştırmasın (#181).
+		promptCol = fmt.Sprintf("%s+oy%d", promptCol, votes)
 	}
 
 	var distinctOverride llm.Chat
@@ -383,47 +425,57 @@ outer:
 			stage := gc.Lens + "/" + promptCol
 			callCtx := llm.WithStage(baseCtx, stage)
 
-			var raw string
-			var callErr error
-			rateRetriesUsed := 0
-			for {
-				raw, callErr = activeChat.ChatJSONWithTemperature(callCtx, system, userPrompt, 0)
-				if sleepErr := lensABSleep(ctx, opts.SleepAfterCall); sleepErr != nil {
-					return result, sleepErr
-				}
-				if callErr == nil {
-					break
-				}
-				if !llm.IsRateLimited(callErr) || rateRetriesUsed >= opts.RateRetries {
-					break
-				}
-				rateRetriesUsed++
-				if waitErr := lensABSleep(ctx, opts.RateWait); waitErr != nil {
-					return result, waitErr
-				}
-			}
-
 			var row LensABRow
-			if callErr != nil {
-				// Oran sınırı DIŞI hata YA DA oran sınırı yeniden denemeleri
-				// tükendi: koşu BİTİRİLMEZ, "error" satırı yazılıp devam
-				// edilir (#175 madde A).
-				row = LensABRow{
-					ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
-					Verdict: "error", Expect: expectLabel(gc), Watch: gc.Watch,
-					Model: modelName, Reason: truncateReason(callErr.Error()),
+			if gc.Lens == "distinctiveness" && votes > 1 {
+				// #181: N-oy yolu — üretimdeki SAF voteDistinctiveness
+				// çekirdeğini (gate.go) KULLANIR, kopyalamaz.
+				r, verr := voteDistinctivenessLensABRow(ctx, callCtx, activeChat, system, userPrompt, votes, opts, meter, stage, prevStageTotal, gc, promptCol, modelName, run)
+				if verr != nil {
+					return result, verr
 				}
+				row = r
 			} else {
-				v := parseLensVerdict(raw)
-				snap := meter.Snapshot()[stage]
-				delta := snap.TotalTokens - prevStageTotal[stage]
-				prevStageTotal[stage] = snap.TotalTokens
+				var raw string
+				var callErr error
+				rateRetriesUsed := 0
+				for {
+					raw, callErr = activeChat.ChatJSONWithTemperature(callCtx, system, userPrompt, 0)
+					if sleepErr := lensABSleep(ctx, opts.SleepAfterCall); sleepErr != nil {
+						return result, sleepErr
+					}
+					if callErr == nil {
+						break
+					}
+					if !llm.IsRateLimited(callErr) || rateRetriesUsed >= opts.RateRetries {
+						break
+					}
+					rateRetriesUsed++
+					if waitErr := lensABSleep(ctx, opts.RateWait); waitErr != nil {
+						return result, waitErr
+					}
+				}
 
-				row = LensABRow{
-					ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
-					Verdict: v.Verdict, Criterion: v.Criterion, Expect: expectLabel(gc),
-					Match: matchGoldenCase(gc, v), Tokens: delta, Watch: gc.Watch,
-					Model: modelName, Reason: truncateReason(v.Reason),
+				if callErr != nil {
+					// Oran sınırı DIŞI hata YA DA oran sınırı yeniden
+					// denemeleri tükendi: koşu BİTİRİLMEZ, "error" satırı
+					// yazılıp devam edilir (#175 madde A).
+					row = LensABRow{
+						ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+						Verdict: "error", Expect: expectLabel(gc), Watch: gc.Watch,
+						Model: modelName, Reason: truncateReason(callErr.Error()),
+					}
+				} else {
+					v := parseLensVerdict(raw)
+					snap := meter.Snapshot()[stage]
+					delta := snap.TotalTokens - prevStageTotal[stage]
+					prevStageTotal[stage] = snap.TotalTokens
+
+					row = LensABRow{
+						ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+						Verdict: v.Verdict, Criterion: v.Criterion, Expect: expectLabel(gc),
+						Match: matchGoldenCase(gc, v), Tokens: delta, Watch: gc.Watch,
+						Model: modelName, Reason: truncateReason(v.Reason),
+					}
 				}
 			}
 
@@ -448,6 +500,85 @@ outer:
 	}
 	result.Summaries = buildLensSummaries(order, allRows)
 	return result, nil
+}
+
+// voteDistinctivenessLensABRow (#181), --votes>1 iken TEK (çift, koşu)
+// satırını üretir: n oy çağrısı yapılır (her biri kendi oran-sınırı
+// bekle-yeniden-dene döngüsünü ve --sleep-ms'i İZLER — tek-çağrılık yoldaki
+// döngünün AYNISI, oy başına tekrarlanır), sonra üretimdeki SAF çekirdek
+// (gate.go voteDistinctiveness) kararı verir — iki kopya karar mantığı YOK.
+// err yalnız GERÇEK bir ctx iptalinde (lensABSleep) dolu döner, RunLensAB'yi
+// durdurur; bir LLM/oran-sınırı hatası err DEĞİL, decision.Err'e ya da
+// (k>1'de) tartışmalı karara düşer — normal "error"/karar satırı üretir.
+func voteDistinctivenessLensABRow(ctx, callCtx context.Context, activeChat llm.Chat, system, userPrompt string, n int, opts LensABOptions, meter *llm.UsageMeter, stage string, prevStageTotal map[string]int, gc GoldenCase, promptCol, modelName string, run int) (LensABRow, error) {
+	tokens := 0
+	var abort error
+
+	call := func(vctx context.Context) (lensVerdict, string, error) {
+		var raw string
+		var callErr error
+		rateRetriesUsed := 0
+		for {
+			raw, callErr = activeChat.ChatJSONWithTemperature(vctx, system, userPrompt, 0)
+			if sleepErr := lensABSleep(ctx, opts.SleepAfterCall); sleepErr != nil {
+				abort = sleepErr
+				return lensVerdict{}, modelName, sleepErr
+			}
+			if callErr == nil {
+				break
+			}
+			if !llm.IsRateLimited(callErr) || rateRetriesUsed >= opts.RateRetries {
+				break
+			}
+			rateRetriesUsed++
+			if waitErr := lensABSleep(ctx, opts.RateWait); waitErr != nil {
+				abort = waitErr
+				return lensVerdict{}, modelName, waitErr
+			}
+		}
+		if callErr != nil {
+			return lensVerdict{}, modelName, callErr
+		}
+		snap := meter.Snapshot()[stage]
+		delta := snap.TotalTokens - prevStageTotal[stage]
+		prevStageTotal[stage] = snap.TotalTokens
+		tokens += delta
+		return parseLensVerdict(raw), modelName, nil
+	}
+
+	decision, voteRecords := voteDistinctiveness(callCtx, n, call)
+	if abort != nil {
+		return LensABRow{}, abort
+	}
+
+	voteStrs := make([]string, len(voteRecords))
+	for i, vr := range voteRecords {
+		if vr.Err != nil {
+			voteStrs[i] = "error"
+			continue
+		}
+		voteStrs[i] = vr.Verdict.Verdict
+	}
+	votesLabel := strings.Join(voteStrs, ",")
+
+	if decision.Err != nil {
+		// k==1 hata — üretimdeki kural: normal "error" satırı (koşu devam
+		// eder, bitmez, #175 madde A ile AYNI tutum).
+		return LensABRow{
+			ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+			Verdict: "error", Expect: expectLabel(gc), Watch: gc.Watch,
+			Model: modelName, Tokens: tokens,
+			Reason: truncateReason(fmt.Sprintf("oylar: %s — %v", votesLabel, decision.Err)),
+		}, nil
+	}
+
+	v := lensVerdict{Verdict: decision.Verdict, Criterion: decision.Criterion, Reason: decision.Reason}
+	return LensABRow{
+		ID: gc.ID, Kind: gc.Kind, Lens: gc.Lens, PromptVersion: promptCol, Run: run,
+		Verdict: v.Verdict, Criterion: v.Criterion, Expect: expectLabel(gc),
+		Match: matchGoldenCase(gc, v), Tokens: tokens, Watch: gc.Watch,
+		Model: modelName, Reason: truncateReason(fmt.Sprintf("oylar: %s — %s", votesLabel, decision.Reason)),
+	}, nil
 }
 
 // lensABUserPrompt, GoldenCase.Kind'e göre kullanıcı promptunu DB'den kurar.
@@ -542,6 +673,12 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 			if s.Model == "" && r.Model != "" {
 				s.Model = r.Model
 			}
+			// UnexpectedBlocks (#181): "pass" beklenen (PO'nun tuttuğu)
+			// kartlarda GERÇEKTE blok çıkan SATIR sayısı — izleme VE error
+			// satırları HARİÇ.
+			if !r.Watch && r.Verdict != "error" && expectsPass(r.Expect) && isBlockVerdict(r) {
+				s.UnexpectedBlocks++
+			}
 		}
 		k := key{r.Lens, r.ID, r.Kind}
 		if _, ok := groups[k]; !ok {
@@ -603,6 +740,23 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 			if allSame {
 				s.RepeatableCases++
 			}
+
+			// BlockRepeatableTotal/Cases (#181): AYNI payda (Runs>=2, hata
+			// olmayan koşular), ama "blok mu değil mi" kararı — K1 fail vs
+			// K2 fail FARKLI verdict/criterion (allSame=false olabilir) ama
+			// ikisi de "blok", burada AYNI sayılır.
+			blockSame := true
+			firstBlock := isBlockVerdict(nonError[0])
+			for i := 1; i < len(nonError); i++ {
+				if isBlockVerdict(nonError[i]) != firstBlock {
+					blockSame = false
+					break
+				}
+			}
+			s.BlockRepeatableTotal++
+			if blockSame {
+				s.BlockRepeatableCases++
+			}
 		}
 	}
 
@@ -615,9 +769,40 @@ func buildLensSummaries(order []string, rows []LensABRow) []LensABLensSummary {
 		if s.RepeatableTotal > 0 {
 			s.RepeatablePct = 100 * float64(s.RepeatableCases) / float64(s.RepeatableTotal)
 		}
+		if s.BlockRepeatableTotal > 0 {
+			s.BlockRepeatablePct = 100 * float64(s.BlockRepeatableCases) / float64(s.BlockRepeatableTotal)
+		}
 		out = append(out, *s)
 	}
 	return out
+}
+
+// isBlockVerdict, bir LensABRow'un "blok" sayılıp sayılmayacağını bildirir
+// (#181): distinctiveness'ta yalnız fail&(K1|K2) blok (K3/K4 fail blok
+// SAYILMAZ — voteDistinctiveness'in "blok oyu" tanımıyla AYNI, gate.go),
+// diğer merceklerde herhangi bir "fail" blok sayılır (tek bloklayıcı mercek
+// grubu, ilk/tüm-fail ayrımı önemsiz — burada yalnız SONUÇ karşılaştırılır).
+func isBlockVerdict(r LensABRow) bool {
+	if r.Verdict != "fail" {
+		return false
+	}
+	if r.Lens == "distinctiveness" {
+		return r.Criterion == "K1" || r.Criterion == "K2"
+	}
+	return true
+}
+
+// expectsPass, bir LensABRow.Expect etiketinin ("pass", "fail",
+// "pass|unsure" gibi expectLabel çıktıları) "pass"ı KABUL EDİLEBİLİR
+// bulup bulmadığını bildirir (#181: "pass beklenen kartlar" — ExpectAny
+// "pass" içeren satırlar da dahil).
+func expectsPass(expect string) bool {
+	for _, e := range strings.Split(expect, "|") {
+		if e == "pass" {
+			return true
+		}
+	}
+	return false
 }
 
 // lensABCSVHeader, WriteLensABCSV'nin ürettiği kolon sırası (#175: "kind" ve
@@ -789,12 +974,18 @@ func FormatLensABSummary(result LensABResult) string {
 		if s.RepeatableTotal > 0 {
 			fmt.Fprintf(&sb, ", tekrarlanabilirlik %d/%d (%.0f%%)", s.RepeatableCases, s.RepeatableTotal, s.RepeatablePct)
 		}
+		if s.BlockRepeatableTotal > 0 {
+			fmt.Fprintf(&sb, ", blok tekrarlanabilirliği %d/%d (%.0f%%)", s.BlockRepeatableCases, s.BlockRepeatableTotal, s.BlockRepeatablePct)
+		}
 		fmt.Fprintf(&sb, ", token %d", s.TotalTokens)
 		if s.Model != "" {
 			fmt.Fprintf(&sb, ", model %s", s.Model)
 		}
 		if s.ErrorRows > 0 {
 			fmt.Fprintf(&sb, ", hata %d satır", s.ErrorRows)
+		}
+		if s.UnexpectedBlocks > 0 {
+			fmt.Fprintf(&sb, ", pass beklenen kartlarda blok: %d satır", s.UnexpectedBlocks)
 		}
 		if s.WatchCases > 0 {
 			fmt.Fprintf(&sb, " — izleme %d/%d beklendiği gibi", s.WatchMatch, s.WatchCases)

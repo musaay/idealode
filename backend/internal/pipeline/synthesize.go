@@ -227,6 +227,14 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		log.Printf("synthesize: eşiği (%d) geçen yeni tema yok", cfg.MinThemeEvidence)
 		return 0, nil
 	}
+	// distinctVotes (#181): evaluateDistinctiveness'in içindeki <=0->1
+	// normalizasyonuyla AYNI — yalnız log satırlarında "(N/N oy)" yazarken
+	// cfg'nin ham (test config'lerinde çoğu zaman sıfır) değerini DEĞİL,
+	// GERÇEKTEN kullanılan oy sayısını göstermek için.
+	distinctVotes := cfg.DistinctivenessVotes
+	if distinctVotes <= 0 {
+		distinctVotes = 1
+	}
 	// #135: kümelenmiş (gerçek dert) temalar artık her zaman eski etiket
 	// temalarının önüne alınıyor — kaç temanın kümelemeden doğduğunu
 	// ölçülebilirlik için logla (preferPayment'tan bağımsız, koşulsuz).
@@ -387,10 +395,16 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// yalnız kaydedilir, tema İŞARETLENMEZ, kart yine yazılır. Mercek
 		// çağrısı hata verirse alanlar NULL kalır, kart yine de yazılır,
 		// tema İŞARETLENMEZ (bloklama YOK ilkesi hata durumunda da geçerli).
-		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctChat...)
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctVotes, distinctChat...)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("synthesize: tema %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", th.Name, distinctOutcome.Err)
+		} else if distinctOutcome.Disputed {
+			// #181: oylar ayrıştı (en az bir blok oy, sonra blok olmayan bir
+			// oy/hata) — kart YAZILIR (tema damgalanmaz, eliminations'a
+			// KAYIT YOK), yalnız "unsure" + kriter/gerekçeyle işaretlenir,
+			// PO incelemesi için loglanır.
+			log.Printf("synthesize: tema %q özgünlük tartışmalı (%s) — kart yazılıyor, işaretli: %s", th.Name, distinctOutcome.Criterion, distinctOutcome.Reason)
 		} else if distinctOutcome.Stage == "distinctiveness" {
 			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
 			// mercek çağrıları (3 bloklayıcı + özgünlük) TEK kalıcı yeri olan
@@ -405,7 +419,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			}
 			if distinctOutcome.Blocked {
 				blockedBySaturation++
-				log.Printf("synthesize: tema %q özgünlükten (%s) bloklandı — kart yazılmadı: %s", th.Name, distinctOutcome.Criterion, distinctOutcome.Reason)
+				log.Printf("synthesize: tema %q özgünlükten (%s) bloklandı (%d/%d oy) — kart yazılmadı: %s", th.Name, distinctOutcome.Criterion, distinctVotes, distinctVotes, distinctOutcome.Reason)
 				continue
 			}
 		}

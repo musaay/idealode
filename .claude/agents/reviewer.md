@@ -27,10 +27,15 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
    hangileri sapmış) bulunmalı. Altın set ya da sonuç raporu yoksa bulgu
    "DÜZELTME GEREKLİ"dir; prompt metni ne kadar makul görünürse görünsün
    kabul etme. Yargı testi sahte chat ile yapılamaz.
-   Sonuç en az 3 koşuluk olmalı (`lens-ab --runs 3`) ve tekrarlanabilirlik
-   ≥%95 göstermeli; tek koşuluk sonuç ya da %95 altı da "DÜZELTME
-   GEREKLİ"dir. Diff sağlayıcı/model seçimine (base URL, model adı,
-   varsayılanlar) dokunuyorsa prompt değişikliği gibi değerlendir.
+   Sonuç en az 3 koşuluk olmalı (`lens-ab --runs 3`) ve canlı ile adayı
+   yan yana göstermeli: aday blok kararı tekrarlanabilirliğinde canlıdan
+   kötü değil ve pass beklenen kartlarda canlıdan fazla blok üretmiyor;
+   tek koşuluk sonuç ya da bu iki koşuldan birinin tutmaması "DÜZELTME
+   GEREKLİ"dir. Diff sağlayıcı/model seçimine ya da karar toplama (oylama)
+   mantığına dokunuyorsa prompt değişikliği gibi değerlendir. Canlıya
+   çıkışı bir env bayrağına bağlı ve varsayılanı eski davranış olan
+   değişiklikte ölçüm, bayrak açılmadan önce lead tarafından yapılır;
+   PR'da varsayılanın gerçekten eski davranış olduğunu doğrula.
 
 İki kritik kural:
 - SPEKÜLATİF BULGU YASAK — her bulgu koda karşı doğrulanmış olmalı:

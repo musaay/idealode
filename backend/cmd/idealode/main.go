@@ -582,6 +582,7 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	rateWaitSec := fs.Int("rate-wait-sec", 65, "oran sınırı (429) sonrası bekleme (sn)")
 	rateRetries := fs.Int("rate-retries", 5, "oran sınırı sonrası yeniden deneme sayısı")
 	resume := fs.Bool("resume", false, "var olan --out CSV'sini tamamla (hatasız satırlar tekrar çağrılmaz)")
+	votes := fs.Int("votes", 1, "özgünlük mercek oylama sayısı (#181, yalnız --lens=distinctiveness ile >1)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -601,6 +602,12 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	}
 	if *resume && strings.TrimSpace(*outPath) == "" {
 		return fmt.Errorf("--resume için --out zorunlu")
+	}
+	// #181: bir oylama kararı yalnız özgünlük merceği için tanımlıdır —
+	// DB'ye/LLM'e gitmeden ÖNCE net hata (RunLensAB da aynı kısıtı
+	// tekrarlar, doğrudan çağrılan testler için).
+	if *votes > 1 && *lens != "distinctiveness" {
+		return fmt.Errorf("--votes >1 yalnız --lens=distinctiveness ile kullanılabilir")
 	}
 
 	raw, err := os.ReadFile(*setPath)
@@ -689,6 +696,7 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 		SleepAfterCall: time.Duration(*sleepMs) * time.Millisecond,
 		RateWait:       time.Duration(*rateWaitSec) * time.Second,
 		RateRetries:    *rateRetries,
+		Votes:          *votes,
 		ExistingRows:   existingRows,
 		SkipKeys:       skipKeys,
 		OnRow: func(r pipeline.LensABRow) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/musaay/idealode/backend/internal/store"
@@ -149,7 +150,7 @@ func TestEvaluateDistinctivenessK1Blocks(t *testing.T) {
 	chat := &distinctChat{verdict: "fail", criterion: "K1"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 1)
 
 	if !outcome.Blocked {
 		t.Error("K1 fail Blocked=true döndürmeli")
@@ -172,7 +173,7 @@ func TestEvaluateDistinctivenessK2Blocks(t *testing.T) {
 	chat := &distinctChat{verdict: "fail", criterion: "K2"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 1)
 
 	if !outcome.Blocked {
 		t.Error("K2 fail Blocked=true döndürmeli (#166)")
@@ -195,7 +196,7 @@ func TestEvaluateDistinctivenessK3RecordsButDoesNotBlock(t *testing.T) {
 	chat := &distinctChat{verdict: "fail", criterion: "K3"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 1)
 
 	if outcome.Blocked {
 		t.Error("K3 fail Blocked=false olmalı (bloklamayan kriter)")
@@ -215,7 +216,7 @@ func TestEvaluateDistinctivenessK4RecordsButDoesNotBlock(t *testing.T) {
 	chat := &distinctChat{verdict: "fail", criterion: "K4"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 1)
 
 	if outcome.Blocked {
 		t.Error("K4 fail Blocked=false olmalı (bloklamayan kriter)")
@@ -235,7 +236,7 @@ func TestEvaluateDistinctivenessErrorPasses(t *testing.T) {
 	chat := &distinctChat{err: true}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), chat, idea)
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 1)
 
 	if outcome.Err == nil {
 		t.Fatal("outcome.Err dolu olmalı")
@@ -260,7 +261,7 @@ func TestEvaluateDistinctivenessUsesDistinctChatWhenProvided(t *testing.T) {
 	distinct := &namedDistinctChat{distinctChat: distinctChat{verdict: "fail", criterion: "K1"}, model: "gemini-3.5-flash-lite"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, 1, distinct)
 
 	if !outcome.Blocked {
 		t.Fatal("ayrı istemcinin K1 fail kararı bloklamalı (varsayılan çağrılsaydı pass dönerdi)")
@@ -285,7 +286,7 @@ func TestEvaluateDistinctivenessFallsBackToDefaultOnDistinctChatError(t *testing
 	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, 1, distinct)
 
 	if outcome.Err != nil {
 		t.Fatalf("yedek deneme başarılıyken outcome.Err nil olmalı, geldi: %v", outcome.Err)
@@ -312,7 +313,7 @@ func TestEvaluateDistinctivenessBothClientsErrorNoBlock(t *testing.T) {
 	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
 	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
-	outcome := evaluateDistinctiveness(context.Background(), def, idea, distinct)
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, 1, distinct)
 
 	if outcome.Err == nil {
 		t.Fatal("ikisi de hata verince outcome.Err dolu olmalı")
@@ -343,7 +344,7 @@ func TestEvaluateDistinctivenessSkipsFallbackWhenContextCancelled(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	outcome := evaluateDistinctiveness(ctx, def, idea, distinct)
+	outcome := evaluateDistinctiveness(ctx, def, idea, 1, distinct)
 
 	if outcome.Err == nil {
 		t.Fatal("ayrı istemci hatası ctx iptaliyle birlikte outcome.Err'e yansımalı")
@@ -411,5 +412,336 @@ func TestApplyGateOutcomeReturnsHoldError(t *testing.T) {
 	err := applyGateOutcome(context.Background(), nil, gateOutcome{Blocked: true, Stage: "blocking_lens"}, "s", "d", hold)
 	if !errors.Is(err, wantErr) {
 		t.Errorf("hold hatası aynen dönmeli, geldi: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------
+// voteDistinctiveness (#181, PO kararı 2026-09-23 "oybirliğiyle blok") —
+// SAF çekirdeğin tablo testleri. seqVoteCall, önceden tanımlı bir
+// (verdict,criterion,reason) dizisini SIRAYLA döner; errAt (-1 = hiç hata
+// yok) o INDEXTEKİ (0-tabanlı) çağrıda hata döner.
+
+func seqVoteCall(votes []lensVerdict, errAt int) (voteDistinctivenessCall, *int) {
+	calls := new(int)
+	fn := func(ctx context.Context) (lensVerdict, string, error) {
+		idx := *calls
+		*calls++
+		if errAt >= 0 && idx == errAt {
+			return lensVerdict{}, "m", errors.New("simulated oy hatası")
+		}
+		if idx < len(votes) {
+			return votes[idx], "m", nil
+		}
+		return lensVerdict{Verdict: "pass", Criterion: "none", Reason: "fazla çağrı"}, "m", nil
+	}
+	return fn, calls
+}
+
+// TestVoteDistinctivenessN1IdenticalToToday: N=1 (üretim varsayılanı) her
+// verdict/kriter için BUGÜNKÜ tek-çağrı davranışıyla birebir olmalı — 1
+// çağrı, aynı alanlar, aynı blok kararı.
+func TestVoteDistinctivenessN1IdenticalToToday(t *testing.T) {
+	cases := []struct {
+		name        string
+		v           lensVerdict
+		wantBlocked bool
+	}{
+		{"pass", lensVerdict{Verdict: "pass", Criterion: "none", Reason: "temiz"}, false},
+		{"fail K1 (blok)", lensVerdict{Verdict: "fail", Criterion: "K1", Reason: "doygun"}, true},
+		{"fail K2 (blok)", lensVerdict{Verdict: "fail", Criterion: "K2", Reason: "yerleşik"}, true},
+		{"fail K3 (blok değil, kayıt)", lensVerdict{Verdict: "fail", Criterion: "K3", Reason: "talep yok"}, false},
+		{"unsure", lensVerdict{Verdict: "unsure", Criterion: "none", Reason: "emin değilim"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			call, calls := seqVoteCall([]lensVerdict{tc.v}, -1)
+			decision, votes := voteDistinctiveness(context.Background(), 1, call)
+			if *calls != 1 {
+				t.Errorf("N=1: 1 çağrı beklenirdi, geldi %d", *calls)
+			}
+			if decision.Err != nil {
+				t.Fatalf("N=1: Err olmamalı, geldi %v", decision.Err)
+			}
+			if decision.Disputed {
+				t.Error("N=1: Disputed asla true olmamalı (tartışma için en az 2 oy gerekir)")
+			}
+			if decision.Blocked != tc.wantBlocked {
+				t.Errorf("Blocked=%v beklenirdi, geldi %v", tc.wantBlocked, decision.Blocked)
+			}
+			if decision.Verdict != tc.v.Verdict || decision.Criterion != tc.v.Criterion || decision.Reason != tc.v.Reason {
+				t.Errorf("N=1 alanlar bugünküyle BİREBİR olmalı: istenen %+v, geldi %+v", tc.v, decision)
+			}
+			if len(votes) != 1 {
+				t.Fatalf("1 oy kaydı beklenirdi, geldi %d", len(votes))
+			}
+		})
+	}
+}
+
+// TestVoteDistinctivenessN3PassStopsAtFirstVote: N=3'te ilk oy pass (blok
+// DEĞİL) ise tek çağrıda durulur, blok yok, tartışma yok.
+func TestVoteDistinctivenessN3PassStopsAtFirstVote(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{{Verdict: "pass", Criterion: "none", Reason: "temiz"}}, -1)
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 1 {
+		t.Errorf("pass ilk oyda durmalı: 1 çağrı beklenirdi, geldi %d", *calls)
+	}
+	if decision.Blocked || decision.Disputed {
+		t.Errorf("pass blok/tartışmalı OLMAMALI: %+v", decision)
+	}
+	if decision.Verdict != "pass" {
+		t.Errorf("Verdict=pass beklenirdi, geldi %q", decision.Verdict)
+	}
+	if len(votes) != 1 {
+		t.Errorf("1 oy kaydı beklenirdi, geldi %d", len(votes))
+	}
+}
+
+// TestVoteDistinctivenessBlockThenPassIsDisputed: blok,pass -> 2 çağrı,
+// TARTIŞMALI (unsure + K1 + "tartışmalı: 1/2 oy blok — ..." gerekçesi),
+// blok YOK.
+func TestVoteDistinctivenessBlockThenPassIsDisputed(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "doygun"},
+		{Verdict: "pass", Criterion: "none", Reason: "temiz"},
+	}, -1)
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 2 {
+		t.Fatalf("2 çağrı beklenirdi (3.'sü çağrılmamalı), geldi %d", *calls)
+	}
+	if decision.Blocked {
+		t.Error("tartışmalı durumda Blocked=false olmalı")
+	}
+	if !decision.Disputed {
+		t.Fatal("Disputed=true olmalı")
+	}
+	if decision.Verdict != "unsure" || decision.Criterion != "K1" {
+		t.Errorf("tartışmalı karar yanlış: %+v", decision)
+	}
+	wantReason := "tartışmalı: 1/2 oy blok — doygun"
+	if decision.Reason != wantReason {
+		t.Errorf("tartışmalı gerekçe: %q beklenirdi, geldi %q", wantReason, decision.Reason)
+	}
+	if len(votes) != 2 {
+		t.Errorf("2 oy kaydı beklenirdi, geldi %d", len(votes))
+	}
+}
+
+// TestVoteDistinctivenessAllBlockBlocks: blok,blok,blok -> 3 çağrı, BLOKLA
+// — Criterion/Reason İLK oyunkiler.
+func TestVoteDistinctivenessAllBlockBlocks(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "ilk gerekçe"},
+		{Verdict: "fail", Criterion: "K1", Reason: "ikinci gerekçe"},
+		{Verdict: "fail", Criterion: "K1", Reason: "üçüncü gerekçe"},
+	}, -1)
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 3 {
+		t.Fatalf("3 çağrı beklenirdi, geldi %d", *calls)
+	}
+	if !decision.Blocked || decision.Disputed {
+		t.Errorf("TÜM oylar blokken Blocked=true Disputed=false olmalı: %+v", decision)
+	}
+	if decision.Verdict != "fail" || decision.Criterion != "K1" {
+		t.Errorf("Verdict/Criterion yanlış: %+v", decision)
+	}
+	if decision.Reason != "ilk gerekçe" {
+		t.Errorf("Reason İLK oyunki olmalı, istenen %q geldi %q", "ilk gerekçe", decision.Reason)
+	}
+	if len(votes) != 3 {
+		t.Errorf("3 oy kaydı beklenirdi, geldi %d", len(votes))
+	}
+}
+
+// TestVoteDistinctivenessBlockBlockFailK3IsDisputed: blok,blok,fail-K3 ->
+// TARTIŞMALI (K3 blok oyu SAYILMAZ, üçüncü oy "blok değil" sayılır).
+func TestVoteDistinctivenessBlockBlockFailK3IsDisputed(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "ilk"},
+		{Verdict: "fail", Criterion: "K2", Reason: "ikinci"},
+		{Verdict: "fail", Criterion: "K3", Reason: "üçüncü"},
+	}, -1)
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 3 {
+		t.Fatalf("3 çağrı beklenirdi, geldi %d", *calls)
+	}
+	if decision.Blocked || !decision.Disputed {
+		t.Errorf("K3 blok OYU DEĞİL, tartışmalı olmalı: %+v", decision)
+	}
+	if decision.Criterion != "K1" {
+		t.Errorf("kriter İLK blok oyunun (K1) olmalı, geldi %q", decision.Criterion)
+	}
+	if len(votes) != 3 {
+		t.Errorf("3 oy kaydı beklenirdi, geldi %d", len(votes))
+	}
+}
+
+// TestVoteDistinctivenessK2CountsAsBlock: K2 (yerleşik çözüm) de K1 gibi
+// blok oyu SAYILIR (#166 ile AYNI ikili).
+func TestVoteDistinctivenessK2CountsAsBlock(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{{Verdict: "fail", Criterion: "K2", Reason: "yerleşik"}}, -1)
+	decision, _ := voteDistinctiveness(context.Background(), 1, call)
+	if *calls != 1 || !decision.Blocked || decision.Criterion != "K2" {
+		t.Errorf("K2 tek oyla (N=1) bloklamalı: çağrı=%d karar=%+v", *calls, decision)
+	}
+}
+
+// TestVoteDistinctivenessFirstVoteErrorReturnsErr: k==1'İN KENDİSİ hata
+// verirse bugünkü tek-çağrı davranışı birebir — Decision.Err dolu, kalan
+// oylar ÇAĞRILMAZ.
+func TestVoteDistinctivenessFirstVoteErrorReturnsErr(t *testing.T) {
+	call, calls := seqVoteCall(nil, 0)
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 1 {
+		t.Fatalf("k=1 hatasında durulmalı, 1 çağrı beklenirdi, geldi %d", *calls)
+	}
+	if decision.Err == nil {
+		t.Fatal("k==1 hatasında Err dolu olmalı")
+	}
+	if decision.Blocked || decision.Disputed {
+		t.Errorf("k==1 hatasında Blocked/Disputed olmamalı: %+v", decision)
+	}
+	if len(votes) != 1 || votes[0].Err == nil {
+		t.Errorf("hata oyu kaydı beklenirdi: %+v", votes)
+	}
+}
+
+// TestVoteDistinctivenessSecondVoteErrorIsDisputed: k>1 hatası (yedek
+// denemeden sonra çağırana ulaşan hata) oybirliği kurulamadı sayılır —
+// TARTIŞMALI (Err YOK, bloklama YOK), hata oyu da kayda girer.
+func TestVoteDistinctivenessSecondVoteErrorIsDisputed(t *testing.T) {
+	call, calls := seqVoteCall([]lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "ilk"},
+	}, 1) // idx=1 (2. çağrı) hata verir
+	decision, votes := voteDistinctiveness(context.Background(), 3, call)
+	if *calls != 2 {
+		t.Fatalf("2 çağrı beklenirdi (3.'sü çağrılmamalı), geldi %d", *calls)
+	}
+	if decision.Err != nil {
+		t.Errorf("k>1 hatasında Err DOLU OLMAMALI (tartışmalı sayılır), geldi %v", decision.Err)
+	}
+	if decision.Blocked || !decision.Disputed {
+		t.Errorf("k>1 hatasında tartışmalı olmalı: %+v", decision)
+	}
+	if decision.Verdict != "unsure" || decision.Criterion != "K1" {
+		t.Errorf("tartışmalı karar alanları yanlış: %+v", decision)
+	}
+	if len(votes) != 2 || votes[1].Err == nil {
+		t.Errorf("hata oyu kaydı beklenirdi: %+v", votes)
+	}
+}
+
+// ---------------------------------------------------------------------
+// evaluateDistinctiveness'in N-oy KABLOLAMASI (call closure + kayıt +
+// idea alanları) — voteDistinctiveness'in kendisi yukarıda AYRI sınandı.
+
+// seqDistinctChat, evaluateDistinctiveness'in N-oy testleri için SIRAYLA
+// farklı verdict/criterion/reason döner (üstteki distinctChat'in AKSİNE
+// SABİT değil, dizi bazlı — gerçek bir llm.Chat üzerinden voteDistinctiveness
+// entegrasyonunu sınamak için).
+type seqDistinctChat struct {
+	votes []lensVerdict
+	idx   int
+}
+
+func (c *seqDistinctChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *seqDistinctChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	v := c.votes[c.idx]
+	c.idx++
+	return fmt.Sprintf(`{"verdict":%q,"criterion":%q,"reason":%q}`, v.Verdict, v.Criterion, v.Reason), nil
+}
+
+// TestEvaluateDistinctivenessVotesDisputedWritesUnsure: N=3, blok+pass ->
+// oylar ayrışır; idea alanları "unsure"+ilk blok kriteri ile YAZILIR
+// (kart bloklanmaz), gateOutcome.Stage="" (eliminations'a KAYIT YOK),
+// Disputed=true.
+func TestEvaluateDistinctivenessVotesDisputedWritesUnsure(t *testing.T) {
+	chat := &seqDistinctChat{votes: []lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "doygun"},
+		{Verdict: "pass", Criterion: "none", Reason: "temiz"},
+	}}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 3)
+
+	if outcome.Blocked {
+		t.Error("tartışmalı kart bloklanmamalı")
+	}
+	if outcome.Stage != "" {
+		t.Errorf("tartışmalıda Stage boş olmalı (eliminations'a YAZILMAZ), geldi %q", outcome.Stage)
+	}
+	if !outcome.Disputed {
+		t.Error("outcome.Disputed=true olmalı")
+	}
+	if idea.DistinctivenessVerdict == nil || *idea.DistinctivenessVerdict != "unsure" {
+		t.Errorf("kart alanı verdict=unsure olmalı, geldi %v", idea.DistinctivenessVerdict)
+	}
+	if idea.DistinctivenessCriterion == nil || *idea.DistinctivenessCriterion != "K1" {
+		t.Errorf("kart alanı criterion=K1 (ilk blok oyu) olmalı, geldi %v", idea.DistinctivenessCriterion)
+	}
+	if len(outcome.Verdicts) != 2 {
+		t.Fatalf("2 store.LensVerdict kaydı beklenirdi, geldi %d", len(outcome.Verdicts))
+	}
+	for i, v := range outcome.Verdicts {
+		wantPrefix := fmt.Sprintf("oy %d/3: ", i+1)
+		if !strings.HasPrefix(v.Reason, wantPrefix) {
+			t.Errorf("kayıt %d %q öneki taşımalı, geldi %q", i, wantPrefix, v.Reason)
+		}
+	}
+}
+
+// TestEvaluateDistinctivenessVotesAllBlockBlocks: N=3, blok,blok,blok ->
+// kart bloklanır, gateOutcome.Blocked=true, Stage="distinctiveness".
+func TestEvaluateDistinctivenessVotesAllBlockBlocks(t *testing.T) {
+	chat := &seqDistinctChat{votes: []lensVerdict{
+		{Verdict: "fail", Criterion: "K1", Reason: "ilk"},
+		{Verdict: "fail", Criterion: "K1", Reason: "ikinci"},
+		{Verdict: "fail", Criterion: "K1", Reason: "üçüncü"},
+	}}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), chat, idea, 3)
+
+	if !outcome.Blocked || outcome.Stage != "distinctiveness" || outcome.Criterion != "K1" {
+		t.Errorf("N/N blokta Blocked=true Stage=distinctiveness Criterion=K1 beklenirdi: %+v", outcome)
+	}
+	if outcome.Disputed {
+		t.Error("N/N blokta Disputed=false olmalı")
+	}
+	if len(outcome.Verdicts) != 3 {
+		t.Errorf("3 store.LensVerdict kaydı beklenirdi, geldi %d", len(outcome.Verdicts))
+	}
+}
+
+// TestEvaluateDistinctivenessVotesFallbackPerVote (#181): ayrı istemci
+// (distinctChat) HER OYDA hata verirse, o oy İÇİN AYRI AYRI (tek seferlik)
+// varsayılan istemciye yedek düşülür — "yedek istemci kuralı her oy için
+// aynı".
+func TestEvaluateDistinctivenessVotesFallbackPerVote(t *testing.T) {
+	def := &namedDistinctChat{distinctChat: distinctChat{verdict: "fail", criterion: "K1"}, model: "default-model"}
+	distinct := &namedDistinctChat{distinctChat: distinctChat{err: true}, model: "gemini-3.5-flash-lite"}
+	idea := &store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
+
+	outcome := evaluateDistinctiveness(context.Background(), def, idea, 2, distinct)
+
+	if distinct.calls != 2 {
+		t.Errorf("ayrı istemci HER oyda 1 kez (toplam 2) denenmeli, geldi %d", distinct.calls)
+	}
+	if def.calls != 2 {
+		t.Errorf("varsayılan istemci HER oyda yedek olarak 1 kez (toplam 2) çağrılmalı, geldi %d", def.calls)
+	}
+	if !outcome.Blocked {
+		t.Errorf("iki oy da (yedekle) K1 fail dönünce bloklamalı: %+v", outcome)
+	}
+	if len(outcome.Verdicts) != 2 {
+		t.Fatalf("2 store.LensVerdict kaydı beklenirdi, geldi %d", len(outcome.Verdicts))
+	}
+	for _, v := range outcome.Verdicts {
+		if v.Model != "default-model" {
+			t.Errorf("kayıttaki Model yedeğe düşülen istemcininki (default-model) olmalı, geldi %q", v.Model)
+		}
 	}
 }

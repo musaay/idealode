@@ -57,11 +57,14 @@ LLM prompt'una dokunan her iş (mercek, sentez, kümeleme, tohum kartı) spec'te
 ALTIN SET taşır: gerçek kart/tohum id'leri + beklenen verdict; lead bu
 set üzerindeki canlı sonucu issue/PR'a ekler, reviewer set yoksa işi keser
 (reviewer.md madde 6). Sahte chat testi tesisatı sınar, yargıyı sınamaz.
-Altın set EN AZ 3 koşu ölçülür (`idealode lens-ab --runs 3`); kart başına
-tüm koşularda aynı verdict (tekrarlanabilirlik) ≥%95 değilse değişiklik
-canlıya çıkmaz — tek koşuluk ölçüm kabul edilmez (#166 dersi, #182).
-Sağlayıcı/model değişikliği de prompt değişikliği sayılır. Canlı ölçümü
-lead koşar (developer canlı LLM'e dokunmaz), sonucu issue/PR'a ekler.
+Altın set EN AZ 3 koşu ölçülür (`idealode lens-ab --runs 3`); canlı sürüm
+ve aday aynı sette, en fazla 48 saat arayla ölçülür. Aday (a) blok kararı
+tekrarlanabilirliğinde canlıdan kötü olamaz, (b) pass beklenen kartlarda
+(PO'nun tuttukları) canlıdan fazla blok üretemez; tek koşuluk ölçüm kabul
+edilmez (#166 dersi, #182). Mutlak %95 eşiği canlının kendisi %90 ölçüldüğü
+için göreliye çevrildi (#181). Sağlayıcı/model/oylama değişikliği de prompt
+değişikliği sayılır. Canlı ölçümü lead koşar (developer canlı LLM'e
+dokunmaz), sonucu issue/PR'a ekler.
 Mercek/prompt denetimi her ayın 1'i ve 15'inde otomatik issue ile takvime
 bağlıdır (.github/workflows/lens-audit.yml).
 

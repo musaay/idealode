@@ -182,6 +182,36 @@ func TestUseDistinctivenessLLM(t *testing.T) {
 	})
 }
 
+// TestDistinctivenessVotesEnv, DISTINCTIVENESS_VOTES ayrıştırmasını
+// doğrular (#181): boş->1, geçerli sayı->kendisi, geçersiz/<1->1, üst
+// sınırın (5) üstü->5.
+func TestDistinctivenessVotesEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"", 1},
+		{"3", 3},
+		{"0", 1},
+		{"x", 1},
+		{"9", 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("DISTINCTIVENESS_VOTES", tc.env)
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.DistinctivenessVotes != tc.want {
+				t.Errorf("DISTINCTIVENESS_VOTES=%q: %d beklenirdi, geldi %d", tc.env, tc.want, c.DistinctivenessVotes)
+			}
+		})
+	}
+}
+
 func TestRequireLLM(t *testing.T) {
 	c := &Config{}
 	if err := c.RequireLLM(); err == nil || !strings.Contains(err.Error(), "LLM_API_KEY") {

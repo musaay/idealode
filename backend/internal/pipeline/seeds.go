@@ -262,17 +262,33 @@ func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
 // döner — çağıran loglar, kartı yine de yazar (bloklama YOK ilkesi hata
 // durumunda da geçerli).
 func distinctivenessCheck(ctx context.Context, chat llm.Chat, idea *store.Idea) error {
-	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
-	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
-		ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
+	v, err := distinctivenessRaw(ctx, chat, idea)
 	if err != nil {
 		return err
 	}
-	v := parseLensVerdict(raw)
 	idea.DistinctivenessVerdict = &v.Verdict
 	idea.DistinctivenessCriterion = &v.Criterion
 	idea.DistinctivenessReason = &v.Reason
 	return nil
+}
+
+// distinctivenessRaw (#181), özgünlük merceğinin TEK bir HAM çağrısıdır —
+// distinctivenessCheck'in ALT-katmanı: idea alanlarını MUTASYONA UĞRATMAZ,
+// yalnız ayrıştırılmış lensVerdict döner. gate.go'daki voteDistinctiveness
+// N-oy çekirdeği HER OYDA bunu çağırır (aynı idea'nın Title/Problem/
+// Solution/TargetUser'ı oylar arasında DEĞİŞMEZ, yalnız LLM cevabı
+// değişebilir); distinctivenessCheck (üstte, N=1 yolunda dışarıdan
+// doğrudan çağrılan eski imza — usage_stage_test.go/synthesize_test.go)
+// bunun ÜZERİNE mutasyonu ekleyen İNCE bir sarmalayıcıdır — iki kopya LLM
+// çağrısı YOK.
+func distinctivenessRaw(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensVerdict, error) {
+	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
+	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
+		ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
+	if err != nil {
+		return lensVerdict{}, err
+	}
+	return parseLensVerdict(raw), nil
 }
 
 // distinctivenessCriteriaDesc, K1-K4 özgünlük kriterlerinin TR açıklaması —
@@ -539,6 +555,15 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		return 0, nil
 	}
 
+	// distinctVotes (#181): evaluateDistinctiveness'in içindeki <=0->1
+	// normalizasyonuyla AYNI — yalnız log satırlarında "(N/N oy)" yazarken
+	// cfg'nin ham (test config'lerinde çoğu zaman sıfır) değerini DEĞİL,
+	// GERÇEKTEN kullanılan oy sayısını göstermek için.
+	distinctVotes := cfg.DistinctivenessVotes
+	if distinctVotes <= 0 {
+		distinctVotes = 1
+	}
+
 	created := 0
 	for i, seed := range seeds {
 		if ctx.Err() != nil {
@@ -696,10 +721,16 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// subject="card" (#164): özgünlük kart üretildikten SONRA, kart
 		// alanları üzerinde çalışır — evaluateDistinctiveness bunu kendi
 		// içinde Subject="card" ile kaydeder.
-		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctChat...)
+		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctVotes, distinctChat...)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)
+		} else if distinctOutcome.Disputed {
+			// #181: oylar ayrıştı (en az bir blok oy, sonra blok olmayan bir
+			// oy/hata) — kart YAZILIR (bloklanmaz, eliminations'a KAYIT
+			// YOK), yalnız "unsure" + kriter/gerekçeyle işaretlenir, PO
+			// incelemesi için loglanır.
+			log.Printf("seeds: %q özgünlük tartışmalı (%s) — kart yazılıyor, işaretli: %s", idea.Title, distinctOutcome.Criterion, distinctOutcome.Reason)
 		} else if distinctOutcome.Stage == "distinctiveness" {
 			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
 			// mercek çağrıları (3(-4) bloklayıcı + özgünlük) TEK kalıcı yeri
@@ -711,7 +742,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 				return created, err
 			}
 			if distinctOutcome.Blocked {
-				log.Printf("seeds: %q özgünlükten (%s) bloklandı — kart yazılmadı: %s", idea.Title, distinctOutcome.Criterion, distinctOutcome.Reason)
+				log.Printf("seeds: %q özgünlükten (%s) bloklandı (%d/%d oy) — kart yazılmadı: %s", idea.Title, distinctOutcome.Criterion, distinctVotes, distinctVotes, distinctOutcome.Reason)
 				continue
 			}
 		}
