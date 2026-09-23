@@ -110,6 +110,95 @@ func TestBuildLensSummaries(t *testing.T) {
 	}
 }
 
+// TestBuildLensSummariesBlockRepeatableAndUnexpectedBlocks (#181):
+// BlockRepeatable* (verdict-düzeyi RepeatableXxx'ten FARKLI: K1 vs K4 fail
+// "aynı verdict" ("fail") ama FARKLI blok durumu; pass vs K4-fail FARKLI
+// verdict ama AYNI blok durumu — ikisi zıt yönde ayrışsın diye seçildi) ve
+// UnexpectedBlocks (pass beklenen kartta GERÇEK blok, izleme HARİÇ)
+// alanlarını sahte satırlar üzerinden (LLM/DB YOK) doğrular.
+func TestBuildLensSummariesBlockRepeatableAndUnexpectedBlocks(t *testing.T) {
+	rows := []LensABRow{
+		// Kart A: verdict FARKLI (pass vs fail/K4) -> verdict-düzeyi
+		// tekrarlanamaz; ama K4 blok SAYILMADIĞI için blok-düzeyinde İKİSİ
+		// DE "blok değil" -> blok-tekrarlanabilir. K4 fail "beklenmeyen
+		// blok" DEĞİL (blok sayılmıyor).
+		{ID: 10, Kind: "idea", Lens: "distinctiveness", Run: 1, Verdict: "pass", Criterion: "none", Expect: "pass", Match: true},
+		{ID: 10, Kind: "idea", Lens: "distinctiveness", Run: 2, Verdict: "fail", Criterion: "K4", Expect: "pass", Match: false},
+		// Kart B: verdict AYNI ("fail"=="fail") -> verdict-düzeyi
+		// tekrarlanabilir; K1 blok olduğu için HER İKİ satır da "pass
+		// beklenen kartta beklenmeyen blok" (2 satır).
+		{ID: 11, Kind: "idea", Lens: "distinctiveness", Run: 1, Verdict: "fail", Criterion: "K1", Expect: "pass", Match: false},
+		{ID: 11, Kind: "idea", Lens: "distinctiveness", Run: 2, Verdict: "fail", Criterion: "K1", Expect: "pass", Match: false},
+		// Kart C: İZLEME — bloklasa bile Repeatable*/UnexpectedBlocks HİÇ
+		// SAYILMAMALI (yalnız WatchCases).
+		{ID: 12, Kind: "idea", Lens: "distinctiveness", Run: 1, Verdict: "fail", Criterion: "K1", Expect: "pass", Match: false, Watch: true},
+		{ID: 12, Kind: "idea", Lens: "distinctiveness", Run: 2, Verdict: "fail", Criterion: "K1", Expect: "pass", Match: false, Watch: true},
+	}
+
+	summaries := buildLensSummaries([]string{"distinctiveness"}, rows)
+	if len(summaries) != 1 {
+		t.Fatalf("1 mercek özeti beklenirdi, geldi: %d", len(summaries))
+	}
+	d := summaries[0]
+
+	if d.Cases != 2 || d.Matches != 1 {
+		t.Errorf("Cases/Matches yanlış (C izlemeden hariç): %+v", d)
+	}
+	if d.RepeatableTotal != 2 || d.RepeatableCases != 1 {
+		t.Errorf("verdict-düzeyi tekrarlanabilirlik yanlış (yalnız B): %+v", d)
+	}
+	if d.BlockRepeatableTotal != 2 || d.BlockRepeatableCases != 2 {
+		t.Errorf("blok-düzeyi tekrarlanabilirlik yanlış (A VE B ikisi de): %+v", d)
+	}
+	if d.BlockRepeatablePct != 100 {
+		t.Errorf("blok-düzeyi tekrarlanabilirlik yüzdesi: %.1f, istenen 100", d.BlockRepeatablePct)
+	}
+	if d.UnexpectedBlocks != 2 {
+		t.Errorf("pass beklenen kartlarda blok satır sayısı: %d, istenen 2 (B'nin 2 satırı; A'nın K4'ü blok DEĞİL, C izleme)", d.UnexpectedBlocks)
+	}
+	if d.WatchCases != 1 {
+		t.Errorf("WatchCases: %d, istenen 1 (C)", d.WatchCases)
+	}
+}
+
+// TestIsBlockVerdictAndExpectsPass (#181): yardımcı saf fonksiyonların
+// sınır davranışları.
+func TestIsBlockVerdictAndExpectsPass(t *testing.T) {
+	cases := []struct {
+		name string
+		row  LensABRow
+		want bool
+	}{
+		{"distinctiveness K1 fail -> blok", LensABRow{Lens: "distinctiveness", Verdict: "fail", Criterion: "K1"}, true},
+		{"distinctiveness K2 fail -> blok", LensABRow{Lens: "distinctiveness", Verdict: "fail", Criterion: "K2"}, true},
+		{"distinctiveness K3 fail -> blok DEĞİL", LensABRow{Lens: "distinctiveness", Verdict: "fail", Criterion: "K3"}, false},
+		{"distinctiveness K4 fail -> blok DEĞİL", LensABRow{Lens: "distinctiveness", Verdict: "fail", Criterion: "K4"}, false},
+		{"distinctiveness pass -> blok DEĞİL", LensABRow{Lens: "distinctiveness", Verdict: "pass", Criterion: "none"}, false},
+		{"third_party fail -> blok", LensABRow{Lens: "third_party", Verdict: "fail"}, true},
+		{"third_party pass -> blok DEĞİL", LensABRow{Lens: "third_party", Verdict: "pass"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isBlockVerdict(tc.row); got != tc.want {
+				t.Errorf("isBlockVerdict(%+v) = %v, istenen %v", tc.row, got, tc.want)
+			}
+		})
+	}
+
+	if !expectsPass("pass") {
+		t.Error(`expectsPass("pass") true olmalı`)
+	}
+	if !expectsPass("pass|unsure") {
+		t.Error(`expectsPass("pass|unsure") true olmalı`)
+	}
+	if expectsPass("fail") {
+		t.Error(`expectsPass("fail") false olmalı`)
+	}
+	if expectsPass("") {
+		t.Error(`expectsPass("") false olmalı`)
+	}
+}
+
 // TestWriteLensABCSV, YENİ başlığı (#175 madde C: kind + model eklendi,
 // reason en sonda) ve satır sırasını doğrular.
 func TestWriteLensABCSV(t *testing.T) {
@@ -190,11 +279,12 @@ func TestGoldenSetFile(t *testing.T) {
 }
 
 // TestGoldenSetRelabeling2026_09, #175 madde F'teki PO yeniden
-// etiketlemesinin altın sette uygulandığını doğrular (toplam 158 SABİT —
-// yalnız expect/criterion/watch değişti):
-//   - distinctiveness: 22/81/84 pass (izlemesiz, kriter yok); 82 + arşiv 8
-//     kartı (20,23,85,89,92,93,103,113) fail/K1 (izlemesiz); kalan arşiv 8
-//     kartı (34,74,75,80,83,87,91,123) watch=true (expect pass kalır).
+// etiketlemesinin ve #181'in (PO 2026-09-23: "84 de elenmeliymiş") altın
+// sette uygulandığını doğrular (toplam 158 SABİT — yalnız expect/criterion/
+// watch değişti):
+//   - distinctiveness: 22/81 pass (izlemesiz, kriter yok); 82+84 (#181) +
+//     arşiv 8 kartı (20,23,85,89,92,93,103,113) fail/K1 (izlemesiz); kalan
+//     arşiv 8 kartı (34,74,75,80,83,87,91,123) watch=true (expect pass kalır).
 //   - third_party/data_access/market_viability: arşivlenen 16 kartın "pass"
 //     satırlarına watch=true; 22/81/82/84 DOKUNULMAMIŞ (mevcut
 //     expect/expect_any/watch aynen).
@@ -224,18 +314,20 @@ func TestGoldenSetRelabeling2026_09(t *testing.T) {
 		return gc
 	}
 
-	// distinctiveness: 22/81/84 -> pass, izlemesiz, kriter yok (PO 2026-09-22:
+	// distinctiveness: 22/81 -> pass, izlemesiz, kriter yok (PO 2026-09-22:
 	// yayında kalanlar).
-	for _, id := range []int64{22, 81, 84} {
+	for _, id := range []int64{22, 81} {
 		gc := get(id, "distinctiveness")
 		if gc.Expect != "pass" || gc.Watch || gc.Criterion != "" {
 			t.Errorf("distinctiveness id=%d: %+v, istenen expect=pass watch=false criterion=''", id, gc)
 		}
 	}
 
-	// distinctiveness: 82 (PO 2026-09-22: özgünlük elemesi DOĞRU) + arşivlenen
-	// 8 kart -> fail/K1, izlemesiz.
-	failK1 := []int64{82, 20, 23, 85, 89, 92, 93, 103, 113}
+	// distinctiveness: 82 (PO 2026-09-22: özgünlük elemesi DOĞRU) + 84 (PO
+	// 2026-09-23, #181: "bu elenmeliymiş") + arşivlenen 8 kart -> fail/K1,
+	// izlemesiz. 82/84 en başta tutulur ki archived16 hesabı (aşağıda,
+	// failK1[2:]) ikisini de dışarıda bıraksın.
+	failK1 := []int64{82, 84, 20, 23, 85, 89, 92, 93, 103, 113}
 	for _, id := range failK1 {
 		gc := get(id, "distinctiveness")
 		if gc.Expect != "fail" || gc.Criterion != "K1" || gc.Watch {
@@ -253,9 +345,9 @@ func TestGoldenSetRelabeling2026_09(t *testing.T) {
 	}
 
 	// third_party/data_access/market_viability: arşivlenen 16 kartın (failK1
-	// listesindeki 82 HARİÇ 8'i + watchOnly'nin 8'i) "pass" satırlarına
+	// listesindeki 82/84 HARİÇ 8'i + watchOnly'nin 8'i) "pass" satırlarına
 	// watch=true eklendi.
-	archived16 := append(append([]int64{}, failK1[1:]...), watchOnly...)
+	archived16 := append(append([]int64{}, failK1[2:]...), watchOnly...)
 	for _, lens := range []string{"third_party", "data_access", "market_viability"} {
 		for _, id := range archived16 {
 			gc := get(id, lens)
@@ -303,6 +395,28 @@ func TestRunLensABPromptFileRequiresSingleLens(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "prompt-file") {
 		t.Errorf("hata mesajı --prompt-file'a değinmeli, geldi: %v", err)
+	}
+}
+
+// TestRunLensABVotesRequiresDistinctivenessLens (#181): --votes >1 yalnız
+// --lens=distinctiveness ile geçerlidir — DB/LLM'e HİÇ gitmeden (en erken
+// adımda) reddedilir, st/chat nil geçilebilir (TestRunLensABPromptFileRequiresSingleLens
+// ile AYNI desen). Votes<=1 (varsayılan) HERHANGİ bir lens ile sorunsuz.
+func TestRunLensABVotesRequiresDistinctivenessLens(t *testing.T) {
+	set := []GoldenCase{{ID: 1, Kind: "idea", Lens: "third_party", Expect: "pass"}}
+
+	if _, err := RunLensAB(context.Background(), nil, nil, set, LensABOptions{
+		Lens: "all", PromptVersion: "v1", Votes: 3,
+	}); err == nil {
+		t.Fatal("--votes=3 --lens=all hata vermeli")
+	} else if !strings.Contains(err.Error(), "votes") {
+		t.Errorf("hata mesajı --votes'a değinmeli, geldi: %v", err)
+	}
+
+	if _, err := RunLensAB(context.Background(), nil, nil, set, LensABOptions{
+		Lens: "third_party", PromptVersion: "v1", Votes: 3,
+	}); err == nil {
+		t.Fatal("--votes=3 --lens=third_party hata vermeli")
 	}
 }
 
@@ -557,6 +671,83 @@ func TestRunLensABEndToEnd(t *testing.T) {
 	}
 	if da.Cases != 1 || da.Matches != 1 || da.RepeatableCases != 0 {
 		t.Errorf("data_access özet: %+v", *da)
+	}
+}
+
+// TestRunLensABVotesEndToEnd (#181): --votes>1'in RunLensAB içinde
+// gate.go'daki SAF voteDistinctiveness çekirdeğini kullandığını, CSV
+// satırının NİHAİ kararı (verdict/criterion) taşıdığını, tokens'ın TÜM oy
+// çağrılarının TOPLAMI olduğunu, CSV prompt etiketine "+oy3" eklendiğini ve
+// özet raporundaki blok-tekrarlanabilirlik alanının dolduğunu doğrular.
+// TEST_DATABASE_URL yoksa atlanır (lensabTestStore deseni) — canlı DB/LLM'e
+// dokunmaz, yalnız yerel httptest sunucusuna.
+func TestRunLensABVotesEndToEnd(t *testing.T) {
+	st, ctx := lensabTestStore(t)
+
+	voteID, err := st.InsertIdea(ctx, store.Idea{
+		Title: "Vote Block Card AB Test", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", UrgencyScore: 3,
+	})
+	if err != nil {
+		t.Fatalf("InsertIdea: %v", err)
+	}
+	t.Cleanup(func() { st.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", voteID) })
+
+	// 2 koşu x 3 oy = 6 çağrı, HEPSİ K1 blok -> her koşu BLOKLAR (N/N oy).
+	chat := newLensABScriptedChat(t, []scriptedChatResponse{
+		{
+			contains:       "Vote Block Card AB Test",
+			verdictByRun:   []string{"fail", "fail", "fail", "fail", "fail", "fail"},
+			criterionByRun: []string{"K1", "K1", "K1", "K1", "K1", "K1"},
+			tokensPerCall:  10,
+		},
+	})
+
+	set := []GoldenCase{{ID: voteID, Kind: "idea", Lens: "distinctiveness", Expect: "fail", Criterion: "K1"}}
+
+	result, err := RunLensAB(ctx, st, chat, set, LensABOptions{
+		Lens: "distinctiveness", PromptVersion: "v1", Runs: 2, Votes: 3,
+	})
+	if err != nil {
+		t.Fatalf("RunLensAB: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("2 satır (1 çift x 2 koşu) beklenirdi, geldi: %d", len(result.Rows))
+	}
+	for i, row := range result.Rows {
+		if row.PromptVersion != "v1+oy3" {
+			t.Errorf("satır %d: PromptVersion=%q, istenen \"v1+oy3\" (--resume karışmasın)", i, row.PromptVersion)
+		}
+		if row.Verdict != "fail" || row.Criterion != "K1" {
+			t.Errorf("satır %d: nihai karar fail/K1 olmalı (3/3 oy blok), geldi verdict=%q criterion=%q", i, row.Verdict, row.Criterion)
+		}
+		if !row.Match {
+			t.Errorf("satır %d: Match=true olmalı (expect fail/K1 ile eşleşiyor)", i)
+		}
+		if row.Tokens != 30 {
+			t.Errorf("satır %d: tokens=%d, istenen 30 (3 oy x 10)", i, row.Tokens)
+		}
+		wantReason := "oylar: fail,fail,fail — test"
+		if row.Reason != wantReason {
+			t.Errorf("satır %d: reason=%q, istenen %q", i, row.Reason, wantReason)
+		}
+	}
+	if result.TotalTokens != 60 {
+		t.Errorf("toplam token: %d, istenen 60 (2 koşu x 30)", result.TotalTokens)
+	}
+
+	if len(result.Summaries) != 1 {
+		t.Fatalf("1 mercek özeti beklenirdi, geldi: %d", len(result.Summaries))
+	}
+	d := result.Summaries[0]
+	if d.Lens != "distinctiveness" || d.Cases != 1 || d.Matches != 1 {
+		t.Errorf("özet Cases/Matches yanlış: %+v", d)
+	}
+	if d.RepeatableTotal != 1 || d.RepeatableCases != 1 {
+		t.Errorf("verdict-düzeyi tekrarlanabilirlik yanlış (iki koşu da fail/K1): %+v", d)
+	}
+	if d.BlockRepeatableTotal != 1 || d.BlockRepeatableCases != 1 {
+		t.Errorf("blok-düzeyi tekrarlanabilirlik yanlış (iki koşu da blok): %+v", d)
 	}
 }
 

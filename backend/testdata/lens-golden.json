@@ -765,7 +765,8 @@
     "id": 84,
     "kind": "idea",
     "lens": "distinctiveness",
-    "expect": "pass"
+    "expect": "fail",
+    "criterion": "K1"
   },
   {
     "id": 85,
