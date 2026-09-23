@@ -54,11 +54,16 @@ salt araştırma/soru-cevap, takımın yapamayacağı infra/ops işleri (git,
 deploy, canlı DB/Groq işlemleri). 
 
 LLM prompt'una dokunan her iş (mercek, sentez, kümeleme, tohum kartı) spec'te
-ALTIN SET taşır: gerçek kart/tohum id'leri + beklenen verdict; developer bu
-set üzerindeki sonucu raporlar, reviewer set yoksa işi keser (reviewer.md
-madde 6). Sahte chat testi tesisatı sınar, yargıyı sınamaz. Mercek/prompt
-denetimi her ayın 1'i ve 15'inde otomatik issue ile takvime bağlıdır
-(.github/workflows/lens-audit.yml).
+ALTIN SET taşır: gerçek kart/tohum id'leri + beklenen verdict; lead bu
+set üzerindeki canlı sonucu issue/PR'a ekler, reviewer set yoksa işi keser
+(reviewer.md madde 6). Sahte chat testi tesisatı sınar, yargıyı sınamaz.
+Altın set EN AZ 3 koşu ölçülür (`idealode lens-ab --runs 3`); kart başına
+tüm koşularda aynı verdict (tekrarlanabilirlik) ≥%95 değilse değişiklik
+canlıya çıkmaz — tek koşuluk ölçüm kabul edilmez (#166 dersi, #182).
+Sağlayıcı/model değişikliği de prompt değişikliği sayılır. Canlı ölçümü
+lead koşar (developer canlı LLM'e dokunmaz), sonucu issue/PR'a ekler.
+Mercek/prompt denetimi her ayın 1'i ve 15'inde otomatik issue ile takvime
+bağlıdır (.github/workflows/lens-audit.yml).
 
 İş takibi: her iş (önemsiz tek satırlıklar hariç) önce GitHub issue olur,
 "IDEA LODE" project board'unda In progress'e çekilir (`gh project item-edit`),
