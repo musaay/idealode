@@ -23,10 +23,14 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
 6. LLM PROMPT değişikliği (sistem/mercek/sentez prompt sabitleri, kural
    cümleleri): diff prompt metnine dokunuyorsa spec'te (issue) ALTIN SET
    olmalı — gerçek kart/tohum id'leri + her biri için beklenen verdict —
-   ve developer raporu bu set üzerindeki sonuçları (kaç uyuştu, hangileri
-   sapmış) göstermeli. Altın set ya da sonuç raporu yoksa bulgu
+   ve issue/PR'da lead'in bu set üzerindeki canlı sonucu (kaç uyuştu,
+   hangileri sapmış) bulunmalı. Altın set ya da sonuç raporu yoksa bulgu
    "DÜZELTME GEREKLİ"dir; prompt metni ne kadar makul görünürse görünsün
    kabul etme. Yargı testi sahte chat ile yapılamaz.
+   Sonuç en az 3 koşuluk olmalı (`lens-ab --runs 3`) ve tekrarlanabilirlik
+   ≥%95 göstermeli; tek koşuluk sonuç ya da %95 altı da "DÜZELTME
+   GEREKLİ"dir. Diff sağlayıcı/model seçimine (base URL, model adı,
+   varsayılanlar) dokunuyorsa prompt değişikliği gibi değerlendir.
 
 İki kritik kural:
 - SPEKÜLATİF BULGU YASAK — her bulgu koda karşı doğrulanmış olmalı:
