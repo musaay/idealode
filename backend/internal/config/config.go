@@ -83,6 +83,12 @@ type Config struct {
 	// Faz 2 (auth) — şimdiden tanımlı, Faz 0/1'de boş kalabilir
 	AdminEmails []string // ADMIN_EMAILS — virgülle ayrık admin allowlist'i
 	JWTSecret   string   // JWT_SECRET — app-JWT imza anahtarı (7 gün, refresh yok)
+
+	// BlendEnabled (#186, PO kararı 2026-09-24): sohbetten kart türetme
+	// ("blend", ai_blended) özelliği şimdilik KAPALI — özellik SİLİNMEDİ,
+	// bayrakla kapatıldı. VARSAYILAN false: Railway'de değişken tanımsızsa
+	// (bugünkü hâl) özellik kapalı kalır.
+	BlendEnabled bool // BLEND_ENABLED (default: false)
 }
 
 // Load, env'den Config üretir. Zorunlu değişken eksikse hangi değişkenin
@@ -105,6 +111,7 @@ func Load() (*Config, error) {
 	c.DistinctivenessLLMModel = os.Getenv("DISTINCTIVENESS_LLM_MODEL")
 	c.DistinctivenessLLMAPIKey = os.Getenv("DISTINCTIVENESS_LLM_API_KEY")
 	c.DistinctivenessVotes = loadDistinctivenessVotes()
+	c.BlendEnabled = loadBlendEnabled()
 
 	var err error
 	if c.MinThemeEvidence, err = getenvInt("MIN_THEME_EVIDENCE", 3); err != nil {
@@ -178,6 +185,22 @@ func loadDistinctivenessVotes() int {
 		return 5
 	}
 	return n
+}
+
+// loadBlendEnabled, BLEND_ENABLED'ı okur (#186): "true"/"1"/"yes" (büyük/
+// küçük harf duyarsız, baştaki/sondaki boşluk kırpılır) özelliği açar; boş
+// ya da başka her değer KAPALI bırakır. strconv.ParseBool KULLANILMAZ —
+// "yes" kabul etmiyor ve boşluk kırpmıyor, spec'in kuralı bundan farklı.
+// Geçersiz değerde hata dönmez (getenvBool'un aksine): bu bir "özellik
+// anahtarı", zorunlu bağlantı bilgisi değil — yanlış yazılmış bir değer
+// sessizce kapalı kalır, Load() düşmez.
+func loadBlendEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BLEND_ENABLED"))) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // UseDistinctivenessLLM, özgünlük merceği için AYRI bir llm.Chat istemcisi

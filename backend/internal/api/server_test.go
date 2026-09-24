@@ -38,6 +38,7 @@ type fakeStore struct {
 	chatErr    error
 	appendErr  error
 	blendErr   error
+	blendCalls int // InsertBlendedIdea çağrı sayısı (#186 — blend kapalıyken 0 kalmalı)
 	nextMsgID  int64
 	nextIdeaID int64
 }
@@ -121,6 +122,7 @@ func (f *fakeStore) AppendChat(ctx context.Context, ideaID int64, sid, role, mes
 }
 
 func (f *fakeStore) InsertBlendedIdea(ctx context.Context, parent *store.Idea, draft store.BlendDraft, sid string) (*store.Idea, error) {
+	f.blendCalls++
 	if f.blendErr != nil {
 		return nil, f.blendErr
 	}
@@ -176,6 +178,7 @@ type fakeLLM struct {
 	response string
 	err      error
 	lastTemp float64 // son çağrının sıcaklığı (#106 doğrulaması için)
+	calls    int     // toplam çağrı sayısı (#186 — blend kapalıyken 0 kalmalı)
 }
 
 func (f *fakeLLM) ChatJSON(ctx context.Context, system, user string) (string, error) {
@@ -183,6 +186,7 @@ func (f *fakeLLM) ChatJSON(ctx context.Context, system, user string) (string, er
 }
 
 func (f *fakeLLM) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	f.calls++
 	f.lastTemp = temp
 	if f.err != nil {
 		return "", f.err
@@ -195,8 +199,15 @@ const fakeBlendOK = `{"title":"Türetilmiş Fikir Başlığı","problem_statemen
 	`"proposed_solution":"Bu da yeterince uzun bir çözüm tanımıdır ve kırk karakteri geçer.","target_user":"küçük işletmeler",` +
 	`"domain_tags":["kobi","saas"],"urgency_score":4,"monetization_signal":3}`
 
+// newTestServer, mevcut testlerin çoğunluğu için — blend AÇIK (bugünkü
+// davranışla birebir) kurar. Bayrak kapalı senaryoları
+// newTestServerBlend(..., false) kullanır (bkz. blend testleri).
 func newTestServer(ideas IdeaStore, chat *fakeLLM) *Server {
-	return NewServer(ideas, chat)
+	return newTestServerBlend(ideas, chat, true)
+}
+
+func newTestServerBlend(ideas IdeaStore, chat *fakeLLM, blendEnabled bool) *Server {
+	return NewServer(ideas, chat, blendEnabled)
 }
 
 func doReq(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
@@ -734,6 +745,60 @@ func TestPostBlend_CardNotFound(t *testing.T) {
 	}
 }
 
+// TestPostBlend_FlagDisabled, #186 (PO kararı 2026-09-24): BLEND_ENABLED
+// kapalıyken handlePostBlend EN BAŞTA 404 "blend_disabled" döner — gövde
+// okunmaz, sahte LLM/insert'e hiç gidilmez, rate limiter tüketilmez.
+func TestPostBlend_FlagDisabled(t *testing.T) {
+	fs := newFakeStore()
+	fs.chat = map[int64]map[string][]store.ChatMessage{
+		1: {testSID: {{ID: 1, Role: "user", Message: "merhaba", CreatedAt: time.Now()}}},
+	}
+	llm := &fakeLLM{response: fakeBlendOK}
+	s := newTestServerBlend(fs, llm, false)
+
+	// Bozuk JSON gövdesiyle bile — gövde hiç okunmadığı için bad_request
+	// DEĞİL, blend_disabled dönmeli.
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", testSID, []byte(`{bozuk-json`))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != `{"error":"blend_disabled"}`+"\n" {
+		t.Errorf("gövde: %s", rec.Body.String())
+	}
+
+	if llm.calls != 0 {
+		t.Errorf("LLM hiç çağrılmamalı, çağrı sayısı: %d", llm.calls)
+	}
+	if fs.blendCalls != 0 {
+		t.Errorf("InsertBlendedIdea hiç çağrılmamalı, çağrı sayısı: %d", fs.blendCalls)
+	}
+	if len(fs.ideas) != 3 {
+		t.Errorf("yeni kart YAZILMAMALI, idea sayısı: %d", len(fs.ideas))
+	}
+
+	// Limiter tüketilmediyse blendRateLimit kadar Allow çağrısı hâlâ true
+	// dönmeli (aynı sid için).
+	for i := 0; i < blendRateLimit; i++ {
+		if !s.blendLimiter.Allow(testSID) {
+			t.Fatalf("limiter tüketilmiş görünüyor (%d. çağrıda tükendi)", i+1)
+		}
+	}
+}
+
+// TestPostBlend_FlagDisabled_MissingSessionID, bayrak kapalıyken flag
+// kontrolünün requireSessionID'den de ÖNCE çalıştığını doğrular: session
+// ID olmasa bile 404 blend_disabled döner (400 DEĞİL).
+func TestPostBlend_FlagDisabled_MissingSessionID(t *testing.T) {
+	s := newTestServerBlend(newFakeStore(), &fakeLLM{response: fakeBlendOK}, false)
+	rec := doReqSID(t, s.Handler(), http.MethodPost, "/api/ideas/kart-1/blend", "", []byte(`{"lang":"tr"}`))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != `{"error":"blend_disabled"}`+"\n" {
+		t.Errorf("gövde: %s", rec.Body.String())
+	}
+}
+
 func assertContentType(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	got := rec.Header().Get("Content-Type")
@@ -750,7 +815,7 @@ func assertContentType(t *testing.T, rec *httptest.ResponseRecorder) {
 func TestTimeout_RealServer(t *testing.T) {
 	fs := newFakeStore()
 	fs.delay = 80 * time.Millisecond
-	s := newServer(fs, &fakeLLM{}, 10*time.Millisecond)
+	s := newServer(fs, &fakeLLM{}, 10*time.Millisecond, true)
 
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()

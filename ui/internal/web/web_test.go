@@ -30,6 +30,7 @@ type fakeStore struct {
 	sendErr     error
 	blendErr    error
 	blended     *Idea
+	blendCalls  int
 	sent        []string
 	langs       []string
 	sids        []string
@@ -129,6 +130,7 @@ func (f *fakeStore) SendChat(ctx context.Context, slug string, message, lang str
 }
 
 func (f *fakeStore) Blend(ctx context.Context, slug string, lang string) (*Idea, error) {
+	f.blendCalls++
 	f.sids = append(f.sids, SessionFromContext(ctx))
 	f.langs = append(f.langs, lang)
 	if _, ok := f.idFromSlug(slug); !ok {
@@ -194,7 +196,16 @@ func sampleStore() *fakeStore {
 	}
 }
 
+// newTestServer, bayrak AÇIK kurulum: mevcut testler sohbetten kart türetme
+// özelliği açıkken yazıldı ve öyle koşar (#186). Kapalı davranış
+// newTestServerBlendOff ile sınanır.
 func newTestServer(t *testing.T, fs *fakeStore) http.Handler {
+	t.Helper()
+	return NewServer(fs, WithBlend(true)).Handler()
+}
+
+// newTestServerBlendOff, üretim varsayılanı: opsiyon verilmez, özellik KAPALI.
+func newTestServerBlendOff(t *testing.T, fs *fakeStore) http.Handler {
 	t.Helper()
 	return NewServer(fs).Handler()
 }
@@ -1990,5 +2001,175 @@ func TestDoubtfulFilterEmptyState(t *testing.T) {
 	}
 	if !strings.Contains(body, "Filtreleri temizle") {
 		t.Error("filtre uygulanmışken temizleme bağlantısı yok")
+	}
+}
+
+// ---------------------------------------- BLEND_ENABLED bayrağı (#186)
+
+// TestBlendDisabledHidesForm: bayrak kapalıyken (varsayılan) kart detayında
+// "Kart olarak türet" formu hiç basılmaz; sohbet paneli, giriş kutusu ve
+// hızlı çipler aynen kalır. İki dilde sınanır.
+func TestBlendDisabledHidesForm(t *testing.T) {
+	for _, lang := range []string{"tr", "en"} {
+		rec := do(t, newTestServerBlendOff(t, chatStore()), http.MethodGet, "/ideas/kart-1?lang="+lang)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("[%s] durum = %d, beklenen 200", lang, rec.Code)
+		}
+		body := rec.Body.String()
+
+		for _, banned := range []string{
+			"chat-blend",
+			"data-chat-blend",
+			"/ideas/kart-1/blend",
+			translate(lang, "chat.blend"),
+			translate(lang, "chat.blend_note"),
+		} {
+			if strings.Contains(body, banned) {
+				t.Errorf("[%s] bayrak kapalıyken sayfada %q var", lang, banned)
+			}
+		}
+
+		for _, want := range []string{
+			`id="chat"`,
+			`data-chat-panel`,
+			`action="/ideas/kart-1/chat"`,
+			`class="chat-input"`,
+			`class="chat-send"`,
+			`type="submit" form="chat-form" name="message"`,
+			translate(lang, "chat.quick.arch"),
+			translate(lang, "chat.quick.market"),
+			translate(lang, "chat.quick.risks"),
+			translate(lang, "chat.placeholder"),
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("[%s] bayrak kapalıyken sohbet paneli %q içermiyor", lang, want)
+			}
+		}
+	}
+}
+
+// TestBlendDisabledPostNotFound: bayrak kapalıyken POST .../blend hem form
+// hem JSON yolunda 404 döner ve API istemcisinin Blend'i hiç çağrılmaz.
+func TestBlendDisabledPostNotFound(t *testing.T) {
+	fs := chatStore()
+	h := newTestServerBlendOff(t, fs)
+
+	rec := postForm(t, h, "/ideas/kart-1/blend", url.Values{}, "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("form durum = %d, beklenen 404", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Errorf("kapalı uç yönlendirmemeli, Location = %q", loc)
+	}
+
+	jrec := postForm(t, h, "/ideas/kart-1/blend", url.Values{}, "application/json")
+	if jrec.Code != http.StatusNotFound {
+		t.Errorf("JSON durum = %d, beklenen 404", jrec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(jrec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("JSON gövde çözülemedi: %v", err)
+	}
+	if body["error"] != "not_found" {
+		t.Errorf("JSON error = %v, beklenen not_found", body["error"])
+	}
+
+	// Origin'siz istek de 403 değil aynı 404'e düşer (uç yokmuş gibi).
+	if r := do(t, h, http.MethodPost, "/ideas/kart-1/blend"); r.Code != http.StatusNotFound {
+		t.Errorf("Origin'siz durum = %d, beklenen 404", r.Code)
+	}
+
+	if fs.blendCalls != 0 {
+		t.Errorf("bayrak kapalıyken Blend %d kez çağrıldı, beklenen 0", fs.blendCalls)
+	}
+}
+
+// TestBlendEnabledCallsStore: bayrak açıkken uç eskisi gibi Blend'i çağırır.
+func TestBlendEnabledCallsStore(t *testing.T) {
+	fs := chatStore()
+	rec := postForm(t, newTestServer(t, fs), "/ideas/kart-1/blend", url.Values{}, "")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("durum = %d, beklenen 303", rec.Code)
+	}
+	if fs.blendCalls != 1 {
+		t.Errorf("Blend %d kez çağrıldı, beklenen 1", fs.blendCalls)
+	}
+}
+
+// chipKinds, galeri gövdesindeki filtre çiplerinin türlerini sırasıyla döner.
+func chipKinds(body string) []string {
+	var out []string
+	const marker = `class="chip chip-`
+	for rest := body; ; {
+		i := strings.Index(rest, marker)
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+len(marker):]
+		end := strings.IndexAny(rest, ` "`)
+		if end < 0 {
+			return out
+		}
+		out = append(out, rest[:end])
+	}
+}
+
+// TestGalleryChipsFollowBlendFlag: bayrak kapalıyken "AI Karışım" çipi yok,
+// diğer çipler aynı sırada; açıkken çip eski yerinde (momentum'dan sonra).
+func TestGalleryChipsFollowBlendFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		h    http.Handler
+		want []string
+	}{
+		{
+			name: "kapalı",
+			h:    newTestServerBlendOff(t, sampleStore()),
+			want: []string{"all", "pain_point", "market_derived", "momentum_derived", "doubtful"},
+		},
+		{
+			name: "açık",
+			h:    newTestServer(t, sampleStore()),
+			want: []string{"all", "pain_point", "market_derived", "momentum_derived", "ai_blended", "doubtful"},
+		},
+	}
+	for _, tc := range cases {
+		for _, lang := range []string{"tr", "en"} {
+			rec := do(t, tc.h, http.MethodGet, "/?lang="+lang)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("[%s/%s] durum = %d", tc.name, lang, rec.Code)
+			}
+			body := rec.Body.String()
+			if got := chipKinds(body); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("[%s/%s] çipler = %v, beklenen %v", tc.name, lang, got, tc.want)
+			}
+			hasHref := strings.Contains(body, "source_type=ai_blended")
+			if tc.name == "kapalı" && hasHref {
+				t.Errorf("[%s/%s] ai_blended filtre bağlantısı basıldı", tc.name, lang)
+			}
+			if tc.name == "açık" && !hasHref {
+				t.Errorf("[%s/%s] ai_blended filtre bağlantısı yok", tc.name, lang)
+			}
+		}
+	}
+}
+
+// TestBuildChipsBlendFlag: görünüm modeli düzeyinde çip listesi — kapalıyken
+// yalnız ai_blended düşer, diğer çiplerin etiket/bağlantı/sırası aynen kalır.
+func TestBuildChipsBlendFlag(t *testing.T) {
+	on := buildChips("tr", "", "bot", "", true)
+	off := buildChips("tr", "", "bot", "", false)
+	if len(on) != len(off)+1 {
+		t.Fatalf("çip sayısı: açık %d, kapalı %d; fark 1 olmalı", len(on), len(off))
+	}
+	j := 0
+	for _, c := range on {
+		if c.Kind == "ai_blended" {
+			continue
+		}
+		if off[j] != c {
+			t.Errorf("çip %d farklı: kapalı %+v, açık %+v", j, off[j], c)
+		}
+		j++
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,7 +34,8 @@ func main() {
 }
 
 // run, adres PORT ortam değişkeninden (varsayılan 8080), API adresi
-// API_BASE_URL'den (zorunlu) okunur.
+// API_BASE_URL'den (zorunlu) okunur. BLEND_ENABLED, sohbetten kart türetme
+// özelliğini açar (#186); değişken yoksa özellik KAPALI.
 func run(ctx context.Context) error {
 	base := os.Getenv("API_BASE_URL")
 	if base == "" {
@@ -45,5 +47,24 @@ func run(ctx context.Context) error {
 	if port == "" {
 		port = "8080"
 	}
-	return web.NewServer(client).ListenAndServe(ctx, ":"+port)
+
+	blend := envEnabled(os.Getenv("BLEND_ENABLED"))
+	if blend {
+		log.Printf("sohbetten kart türetme açık (BLEND_ENABLED)")
+	} else {
+		log.Printf("sohbetten kart türetme kapalı (BLEND_ENABLED)")
+	}
+	return web.NewServer(client, web.WithBlend(blend)).ListenAndServe(ctx, ":"+port)
+}
+
+// envEnabled, açık/kapalı bayrak değerini yorumlar: "true", "1" ya da "yes"
+// (büyük-küçük harf duyarsız, baştaki/sondaki boşluk kırpılır) AÇIK; boş ya
+// da başka her değer KAPALI. Belirsiz değer özelliği asla açmaz.
+func envEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }

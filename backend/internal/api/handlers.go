@@ -357,6 +357,14 @@ func (s *Server) handlePostChat(w http.ResponseWriter, r *http.Request) {
 
 // handlePostBlend, `POST /api/ideas/{slug}/blend`.
 func (s *Server) handlePostBlend(w http.ResponseWriter, r *http.Request) {
+	// #186 (PO kararı 2026-09-24): blend özelliği bayrakla kapalı. Bayrak
+	// kapalıyken EN BAŞTA döner — gövde okunmaz, limiter tüketilmez, LLM'e
+	// (copilot.Blend) ve InsertBlendedIdea'ya hiç gidilmez.
+	if !s.blendEnabled {
+		writeError(w, http.StatusNotFound, "blend_disabled")
+		return
+	}
+
 	sid, ok := requireSessionID(w, r)
 	if !ok {
 		return

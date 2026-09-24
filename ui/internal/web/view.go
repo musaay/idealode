@@ -270,7 +270,8 @@ type QuickPrompt struct {
 type ChatPanel struct {
 	IdeaSlug     string
 	PostHref     string // POST hedefi (sohbet)
-	BlendHref    string // POST hedefi (kart olarak türet)
+	BlendEnabled bool   // "Kart olarak türet" formu basılsın mı (#186 bayrağı)
+	BlendHref    string // POST hedefi (kart olarak türet); bayrak kapalıyken boş
 	Title        string // "<kısaltılmış kart adı>… Copilot"
 	Messages     []ChatBubble
 	QuickPrompts []QuickPrompt
@@ -307,8 +308,9 @@ func messageBody(s string) template.HTML {
 // chatMaxLen, giriş alanının karakter tavanı (API sözleşmesiyle aynı).
 const chatMaxLen = 1000
 
-// buildChatPanel, geçmişi ve sabit çipleri panel modeline çevirir.
-func buildChatPanel(lang string, slug string, title string, msgs []ChatMessage, errMsg string) ChatPanel {
+// buildChatPanel, geçmişi ve sabit çipleri panel modeline çevirir. blend
+// kapalıyken türetme formu için hedef üretilmez (şablon formu hiç basmaz).
+func buildChatPanel(lang string, slug string, title string, msgs []ChatMessage, errMsg string, blend bool) ChatPanel {
 	bubbles := make([]ChatBubble, 0, len(msgs))
 	for _, m := range msgs {
 		bubbles = append(bubbles, ChatBubble{
@@ -318,12 +320,17 @@ func buildChatPanel(lang string, slug string, title string, msgs []ChatMessage, 
 		})
 	}
 	href := "/ideas/" + url.PathEscape(slug)
+	blendHref := ""
+	if blend {
+		blendHref = href + "/blend"
+	}
 	return ChatPanel{
-		IdeaSlug:  slug,
-		PostHref:  href + "/chat",
-		BlendHref: href + "/blend",
-		Title:     translate(lang, "chat.title", clipChatTitle(title)),
-		Messages:  bubbles,
+		IdeaSlug:     slug,
+		PostHref:     href + "/chat",
+		BlendEnabled: blend,
+		BlendHref:    blendHref,
+		Title:        translate(lang, "chat.title", clipChatTitle(title)),
+		Messages:     bubbles,
 		QuickPrompts: []QuickPrompt{
 			{Label: translate(lang, "chat.quick.arch"), Query: translate(lang, "chat.quick.arch_query")},
 			{Label: translate(lang, "chat.quick.market"), Query: translate(lang, "chat.quick.market_query")},
@@ -424,8 +431,9 @@ func hostOf(raw string) string {
 	return strings.TrimPrefix(u.Hostname(), "www.")
 }
 
-// buildGallery, store satırlarını galeri görünümüne çevirir.
-func buildGallery(base Page, ideas []Idea, sourceType, query, flag string) GalleryPage {
+// buildGallery, store satırlarını galeri görünümüne çevirir. blend, sohbetten
+// kart türetme özelliğinin açık olup olmadığı (çip listesini etkiler, #186).
+func buildGallery(base Page, ideas []Idea, sourceType, query, flag string, blend bool) GalleryPage {
 	cards := make([]IdeaCard, 0, len(ideas))
 	for _, i := range ideas {
 		cards = append(cards, IdeaCard{
@@ -444,7 +452,7 @@ func buildGallery(base Page, ideas []Idea, sourceType, query, flag string) Galle
 	return GalleryPage{
 		Page:       base,
 		Ideas:      cards,
-		Chips:      buildChips(base.Lang, sourceType, query, flag),
+		Chips:      buildChips(base.Lang, sourceType, query, flag, blend),
 		Query:      query,
 		SourceType: sourceType,
 		Flag:       flag,
@@ -461,9 +469,14 @@ var chipOrder = []string{"", "pain_point", "market_derived", "momentum_derived",
 // yürürlükteki türü ve aramayı korur. "Şüpheli" açık/kapa çalışır (etkinken
 // bağlantı filtreyi kaldırır) — bu yüzden aria-current basılmaz, bunun yerine
 // ne yapacağını söyleyen bir erişilebilir ad taşır.
-func buildChips(lang, active, query, flag string) []FilterChip {
+// blend kapalıyken (#186) "ai_blended" çipi atlanır; diğer çipler ve sıraları
+// aynen kalır.
+func buildChips(lang, active, query, flag string, blend bool) []FilterChip {
 	chips := make([]FilterChip, 0, len(chipOrder)+1)
 	for _, st := range chipOrder {
+		if st == "ai_blended" && !blend {
+			continue
+		}
 		label := translate(lang, "gallery.filter.all")
 		kind := "all"
 		if st != "" {
@@ -519,8 +532,9 @@ func galleryHref(v url.Values) string {
 }
 
 // buildIdea, tek kartı, kaynaklarını ve sohbet panelini görünüm modeline
-// çevirir. chatErr boş değilse panelde tasarlanmış hata satırı basılır.
-func buildIdea(base Page, idea *Idea, sources []IdeaSource, msgs []ChatMessage, chatErr string) IdeaPage {
+// çevirir. chatErr boş değilse panelde tasarlanmış hata satırı basılır;
+// blend kapalıyken panelde "Kart olarak türet" formu yoktur (#186).
+func buildIdea(base Page, idea *Idea, sources []IdeaSource, msgs []ChatMessage, chatErr string, blend bool) IdeaPage {
 	links := make([]SourceLink, 0, len(sources))
 	for _, s := range sources {
 		l := SourceLink{
@@ -566,6 +580,6 @@ func buildIdea(base Page, idea *Idea, sources []IdeaSource, msgs []ChatMessage, 
 		page.ParentHref = "/ideas/" + url.PathEscape(idea.ParentSlug)
 	}
 	page.Mine = idea.Mine
-	page.Chat = buildChatPanel(base.Lang, idea.Slug, idea.Title, msgs, chatErr)
+	page.Chat = buildChatPanel(base.Lang, idea.Slug, idea.Title, msgs, chatErr, blend)
 	return page
 }
