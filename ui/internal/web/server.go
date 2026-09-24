@@ -89,6 +89,23 @@ type Server struct {
 	assetVer string
 	static   http.Handler
 	mux      *http.ServeMux
+
+	// blend, sohbetten kart türetme ("Kart olarak türet", ai_blended)
+	// özelliğinin açık olup olmadığı. Varsayılan KAPALI (#186).
+	blend bool
+}
+
+// Option, NewServer'ın isteğe bağlı ayarı. Opsiyon verilmezse her özellik
+// kendi güvenli varsayılanıyla gelir.
+type Option func(*Server)
+
+// WithBlend, sohbetten kart türetme özelliğini açar/kapatır. PO kararı
+// (2026-09-24, #186): özellik şimdilik KAPALI — kod silinmez, bayrakla
+// kapatılır. Kapalıyken kart detayında "Kart olarak türet" formu basılmaz,
+// `POST /ideas/{slug}/blend` 404 döner (API'ye gidilmez) ve galeride
+// "AI Karışım" filtre çipi gösterilmez. Açıkken davranış öncekiyle birebir.
+func WithBlend(enabled bool) Option {
+	return func(s *Server) { s.blend = enabled }
 }
 
 // pageTemplates, sayfa adı -> şablon dosyası. Her sayfa layout ile birlikte
@@ -101,11 +118,14 @@ var pageTemplates = map[string]string{
 
 // NewServer, handler'ları kurar. Şablon hatası burada panic'e döner
 // (template.Must semantiği): bozuk şablonla ayağa kalkmak yerine erken çök.
-func NewServer(ideas IdeaStore) *Server {
+func NewServer(ideas IdeaStore, opts ...Option) *Server {
 	s := &Server{
 		ideas:    ideas,
 		tpl:      mustParseTemplates(),
 		assetVer: mustAssetVersion(),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	sub, err := fs.Sub(staticFS, "static")

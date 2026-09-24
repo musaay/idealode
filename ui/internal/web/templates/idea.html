@@ -299,6 +299,9 @@
         </button>
       </form>
 
+      {{/* Sohbetten kart türetme BLEND_ENABLED bayrağına bağlı (#186):
+           kapalıyken form hiç basılmaz. */}}
+      {{ if .BlendEnabled }}
       <form class="chat-blend" method="post" action="{{ .BlendHref }}" data-chat-blend>
         <button class="chat-blend-button" type="submit">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="m12 3 1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" fill="currentColor"/></svg>
@@ -306,6 +309,7 @@
         </button>
         <span class="chat-blend-note">{{ $.T "chat.blend_note" }}</span>
       </form>
+      {{ end }}
     </div>
 
   </section>

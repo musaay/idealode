@@ -31,6 +31,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !c.PreferPaymentSignal {
 		t.Error("PreferPaymentSignal default true olmalı (#125)")
 	}
+	if c.BlendEnabled {
+		t.Error("BlendEnabled default false olmalı (#186)")
+	}
 }
 
 // TestPreferPaymentSignalEnv, #125 sıralama sinyalinin env ile
@@ -207,6 +210,37 @@ func TestDistinctivenessVotesEnv(t *testing.T) {
 			}
 			if c.DistinctivenessVotes != tc.want {
 				t.Errorf("DISTINCTIVENESS_VOTES=%q: %d beklenirdi, geldi %d", tc.env, tc.want, c.DistinctivenessVotes)
+			}
+		})
+	}
+}
+
+// TestBlendEnabledEnv, BLEND_ENABLED ayrıştırmasını doğrular (#186): boş->
+// false, "true"/"1"/" TRUE " (boşluklu, büyük harf)->true, "0"/"x" gibi
+// başka her değer->false.
+func TestBlendEnabledEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env  string
+		want bool
+	}{
+		{"", false},
+		{"true", true},
+		{"1", true},
+		{" TRUE ", true},
+		{"0", false},
+		{"x", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("BLEND_ENABLED", tc.env)
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.BlendEnabled != tc.want {
+				t.Errorf("BLEND_ENABLED=%q: %v beklenirdi, geldi %v", tc.env, tc.want, c.BlendEnabled)
 			}
 		})
 	}

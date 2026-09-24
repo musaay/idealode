@@ -788,7 +788,7 @@ func cmdAPI(ctx context.Context, cfg *config.Config) error {
 	if port == "" {
 		port = "8080"
 	}
-	return api.NewServer(st, chat).ListenAndServe(ctx, ":"+port)
+	return api.NewServer(st, chat, cfg.BlendEnabled).ListenAndServe(ctx, ":"+port)
 }
 
 func cmdGenerate(ctx context.Context, cfg *config.Config) error {

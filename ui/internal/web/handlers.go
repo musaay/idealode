@@ -61,7 +61,7 @@ func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := buildGallery(base, ideas, sourceType, q, flag)
+	page := buildGallery(base, ideas, sourceType, q, flag, s.blend)
 	page.Title = page.T("gallery.title") + " — " + page.T("app.name")
 	page.MobileTitle = page.T("app.name")
 	page.NavCount = strconv.Itoa(page.Count)
@@ -116,7 +116,7 @@ func (s *Server) handleIdea(w http.ResponseWriter, r *http.Request) {
 		msgs = list
 	}
 
-	page := buildIdea(base, idea, sources, msgs, chatErr)
+	page := buildIdea(base, idea, sources, msgs, chatErr, s.blend)
 	page.Title = idea.Title + " — " + page.T("app.name")
 	page.MobileTitle = idea.Title
 	page.Breadcrumb = clipTitle(idea.Title)
@@ -216,9 +216,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 // handleBlend, `POST /ideas/{slug}/blend` — sohbetten yeni `ai_blended` kart
 // türetir ve yeni kartın detayına (kendi slug'ına) yönlendirir.
+// Özellik kapalıyken (#186) uç yokmuş gibi davranır: CSRF/slug
+// kontrolünden de önce 404 döner, API'ye hiç gidilmez.
 func (s *Server) handleBlend(w http.ResponseWriter, r *http.Request) {
 	base := s.newPage(w, r)
 	asJSON := wantsJSON(r)
+
+	if !s.blend {
+		s.chatNotFound(w, r, base, asJSON)
+		return
+	}
 
 	slug, ok := s.postIdea(w, r, base, asJSON)
 	if !ok {

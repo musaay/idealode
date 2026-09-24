@@ -49,22 +49,26 @@ type Server struct {
 
 	chatLimiter  *rateLimiter // oturum başına 30 mesaj/saat
 	blendLimiter *rateLimiter // oturum başına 5 blend/gün
+
+	blendEnabled bool // BLEND_ENABLED (#186, PO kararı 2026-09-24 — bkz. handlePostBlend)
 }
 
-// NewServer, handler'ları kurar.
-func NewServer(ideas IdeaStore, chat llm.Chat) *Server {
-	return newServer(ideas, chat, apiTimeout)
+// NewServer, handler'ları kurar. blendEnabled, cfg.BlendEnabled'dan gelir
+// (#186) — kapalıyken handlePostBlend LLM/DB'ye hiç dokunmadan 404 döner.
+func NewServer(ideas IdeaStore, chat llm.Chat, blendEnabled bool) *Server {
+	return newServer(ideas, chat, apiTimeout, blendEnabled)
 }
 
 // newServer, testlerin gerçek bir sunucuda (httptest.NewServer) kısa
 // zaman aşımıyla deneyebilmesi için NewServer'ın iç uygulaması.
-func newServer(ideas IdeaStore, chat llm.Chat, timeout time.Duration) *Server {
+func newServer(ideas IdeaStore, chat llm.Chat, timeout time.Duration, blendEnabled bool) *Server {
 	s := &Server{
 		ideas:        ideas,
 		chat:         chat,
 		timeout:      timeout,
 		chatLimiter:  newRateLimiter(chatRateLimit, time.Hour),
 		blendLimiter: newRateLimiter(blendRateLimit, 24*time.Hour),
+		blendEnabled: blendEnabled,
 	}
 
 	mux := http.NewServeMux()
