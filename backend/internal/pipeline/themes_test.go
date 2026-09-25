@@ -12,11 +12,17 @@ import (
 	"github.com/musaay/idealode/backend/internal/store"
 )
 
-// themeFallbackChat, tema kümeleme çağrısını HER ZAMAN hata ile başarısız
-// kılan sahte chat — GroupThemes'i eski (domain_tag'e bağlama) davranışına
-// zorlar. Kümeleme dışı testlerde (bu dosyadaki idempotency testi,
-// synthesize_test.go'daki sentez testleri) tema adının domain_tag ile
-// birebir aynı kalmasını garanti eder — mevcut assertion'lar bozulmaz.
+// themeFallbackChat, tema kümeleme çağrısını HER ZAMAN GEÇERLİ ama BOŞ
+// atama listesiyle (`{"assignments":[]}`) yanıtlayan sahte chat —
+// GroupThemes'i eski (domain_tag'e bağlama) davranışına zorlar. Kasıtlı
+// olarak bir HATA DÖNDÜRMEZ: #194 sonrası LLM HATASI artık eski davranışa
+// değil retry'e (bağlamama) düşürüyor (bkz. clusterResult) — bir hata
+// dönseydi bu sahte chat'i kurulum (fixture) olarak kullanan testlerde
+// postlar hiç bağlanmazdı. Kümeleme dışı testlerde (bu dosyadaki
+// idempotency testi, synthesize_test.go/retheme_test.go'daki kurulumlar)
+// tema adının domain_tag ile birebir aynı kalmasını garanti eder — mevcut
+// assertion'lar bozulmaz. Gerçek LLM HATASI/retry davranışını sınayan
+// sahte chat'ler için bkz. errClusterChat.
 type themeFallbackChat struct{}
 
 func (themeFallbackChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
@@ -24,7 +30,7 @@ func (themeFallbackChat) ChatJSON(ctx context.Context, system, user string) (str
 }
 
 func (themeFallbackChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
-	return "", fmt.Errorf("simulated: LLM kullanılamıyor")
+	return `{"assignments":[]}`, nil
 }
 
 // fakeClusterChat, tema kümeleme testleri için sabit bir cevap döner; çağrı
@@ -46,8 +52,9 @@ func (f *fakeClusterChat) ChatJSONWithTemperature(ctx context.Context, system, u
 	return f.response, nil
 }
 
-// errClusterChat, LLM hatası simülasyonu (429/ağ) — clusterBatch'ın geri
-// düşüş yolunu (nil harita) doğrulamak için.
+// errClusterChat, LLM hatası simülasyonu (429/ağ) — clusterBatch'ın madde
+// (c) retry yolunu (TÜM postlar retry kümesine girer, assignments boş
+// kalır — #194) doğrulamak için.
 type errClusterChat struct{ calls int }
 
 func (e *errClusterChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
@@ -123,6 +130,44 @@ func (c *jsonValidateFailedThenOKChat) ChatJSONWithTemperature(ctx context.Conte
 			sb.WriteString(",")
 		}
 		fmt.Fprintf(&sb, `{"post":%d,"theme":"theme-%d"}`, i, i)
+	}
+	sb.WriteString(`]}`)
+	return sb.String(), nil
+}
+
+// halfFailsChat, tooLargeThenOKChat'in bir yarısını KASITLI olarak kalıcı
+// bir genel hataya (madde c, 429/ağ benzeri) düşüren varyantı (#194) —
+// özyinelemeli 413 bölmesinde yalnız BİR yarının başarısız olduğu senaryoyu
+// kurmak için. Post sayısı splitThreshold'u aşarsa 413 döner (bölünsün
+// diye); aşmazsa ve prompt failMarker İÇERİYORSA kalıcı genel hata döner
+// (o yarı bir daha bölünemeyeceğinden retry'e düşer); aksi halde normal
+// başarılı atama döner.
+type halfFailsChat struct {
+	splitThreshold int
+	failMarker     string
+	calls          int
+}
+
+func (c *halfFailsChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *halfFailsChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.calls++
+	n := strings.Count(user, "] (tag:")
+	if n > c.splitThreshold {
+		return "", llm.NewRequestTooLargeError("test-host", "Request too large for model, please reduce your message size")
+	}
+	if strings.Contains(user, c.failMarker) {
+		return "", fmt.Errorf("simulated 429 (bu yarı kalıcı hata)")
+	}
+	var sb strings.Builder
+	sb.WriteString(`{"assignments":[`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"post":%d,"theme":"half-theme-%d"}`, i, i)
 	}
 	sb.WriteString(`]}`)
 	return sb.String(), nil
@@ -397,33 +442,52 @@ func TestClusterBatchSingleCallEvenAtBucketLimit(t *testing.T) {
 	}
 }
 
-func TestClusterBatchFallbackOnLLMError(t *testing.T) {
+// TestClusterBatchRetriesOnLLMError, madde (c) (#194) kabul kriteri: diğer
+// tüm LLM hatalarında (429/5xx/ağ — 413/json_validate_failed DIŞINDA)
+// parti eski davranışa DÜŞMEZ, tüm postlar retry kümesine girer (assignments
+// boş kalır) — çağıran GroupThemes bunları theme_posts'a hiç yazmaz, bir
+// sonraki koşuda yeniden dener.
+func TestClusterBatchRetriesOnLLMError(t *testing.T) {
 	chat := &errClusterChat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if assignments != nil {
-		t.Errorf("LLM hatasında nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if len(result.assignments) != 0 {
+		t.Errorf("LLM hatasında atama olmamalı, geldi: %v", result.assignments)
+	}
+	if !result.retry[0] {
+		t.Errorf("LLM hatasında post retry kümesinde olmalıydı, geldi: %v", result.retry)
 	}
 	if chat.calls != 1 {
 		t.Errorf("yine de TEK çağrı denenmeliydi, geldi: %d", chat.calls)
 	}
 }
 
-func TestClusterBatchFallbackOnGarbageJSON(t *testing.T) {
+// TestClusterBatchRetriesOnGarbageJSON, madde (d) (#194): cevap parse
+// edilemezse (bozuk JSON) parti eski davranışa DÜŞMEZ, tüm postlar retry
+// kümesine girer.
+func TestClusterBatchRetriesOnGarbageJSON(t *testing.T) {
 	chat := &fakeClusterChat{response: "not json"}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if assignments != nil {
-		t.Errorf("bozuk JSON'da nil harita beklenirdi, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if len(result.assignments) != 0 {
+		t.Errorf("bozuk JSON'da atama olmamalı, geldi: %v", result.assignments)
+	}
+	if !result.retry[0] {
+		t.Errorf("bozuk JSON'da post retry kümesinde olmalıydı, geldi: %v", result.retry)
 	}
 }
 
-func TestClusterBatchFallbackOnEmptyResponse(t *testing.T) {
+// TestClusterBatchRetriesOnEmptyResponse, boş cevabın da (üst seviye JSON
+// parse hatası) madde (d) yoluna girdiğini doğrular.
+func TestClusterBatchRetriesOnEmptyResponse(t *testing.T) {
 	chat := &fakeClusterChat{response: ""}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if assignments != nil {
-		t.Errorf("boş cevapta nil harita beklenirdi, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if len(result.assignments) != 0 {
+		t.Errorf("boş cevapta atama olmamalı, geldi: %v", result.assignments)
+	}
+	if !result.retry[0] {
+		t.Errorf("boş cevapta post retry kümesinde olmalıydı, geldi: %v", result.retry)
 	}
 }
 
@@ -431,9 +495,9 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	existingByTag := map[string][]store.Theme{"x": {{ID: 1, Name: "cannot export chat history"}}}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
-	if assignments[0] != "cannot export chat history" {
-		t.Errorf("mevcut temaya atama beklenirdi, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, existingByTag)
+	if result.assignments[0] != "cannot export chat history" {
+		t.Errorf("mevcut temaya atama beklenirdi, geldi: %v", result.assignments)
 	}
 }
 
@@ -443,24 +507,29 @@ func TestClusterBatchAssignsToExistingTheme(t *testing.T) {
 func TestClusterBatchGeneratesNewTheme(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"no bulk invoice download"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if assignments[0] != "no bulk invoice download" {
-		t.Errorf("yeni tema adı doğrudan kabul edilmeliydi, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.assignments[0] != "no bulk invoice download" {
+		t.Errorf("yeni tema adı doğrudan kabul edilmeliydi, geldi: %v", result.assignments)
 	}
 }
 
 // TestClusterBatchPartialAssignmentFallsBackPerPost, modelin bir postu
 // atlamasının YALNIZ o postu etkilediğini doğrular (#127: "model bir
 // gönderiyi atamazsa eski davranışa düşülür" — partinin tamamı değil).
+// Madde (e) (#194): atlanan post retry kümesine de GİRMEZ — bu KALICI bir
+// eski davranış geri düşüşüdür, LLM hatası retry'inden ayrıdır.
 func TestClusterBatchPartialAssignmentFallsBackPerPost(t *testing.T) {
 	chat := &fakeClusterChat{response: `{"assignments":[{"post":0,"theme":"cannot export chat history"}]}`}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if assignments[0] != "cannot export chat history" {
-		t.Errorf("post 0 atanmalıydı, geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.assignments[0] != "cannot export chat history" {
+		t.Errorf("post 0 atanmalıydı, geldi: %v", result.assignments)
 	}
-	if _, ok := assignments[1]; ok {
-		t.Errorf("post 1 atanmamalıydı (model atlamıştı), geldi: %v", assignments)
+	if _, ok := result.assignments[1]; ok {
+		t.Errorf("post 1 atanmamalıydı (model atlamıştı), geldi: %v", result.assignments)
+	}
+	if result.retry[1] {
+		t.Errorf("post 1 retry kümesinde OLMAMALIYDI (eski davranışa düşer, LLM hatası değil), geldi: %v", result.retry)
 	}
 }
 
@@ -486,9 +555,9 @@ func TestClusterBatchDoesNotFilterCrossTagAssignmentsInMemory(t *testing.T) {
 		posts:    []store.PostAnalysis{samplePost(1, "b-post")},
 		postTags: []string{"b"},
 	}
-	assignments, _, _ := clusterBatch(context.Background(), chat, batch, existingByTag)
-	if assignments[0] != "foo" {
-		t.Errorf("clusterBatch atamayı süzmemeli (DB sınırı bunu ele alır), geldi: %v", assignments)
+	result := clusterBatch(context.Background(), chat, batch, existingByTag)
+	if result.assignments[0] != "foo" {
+		t.Errorf("clusterBatch atamayı süzmemeli (DB sınırı bunu ele alır), geldi: %v", result.assignments)
 	}
 }
 
@@ -507,16 +576,60 @@ func TestClusterBatchSplitsOn413AndAssignsAllPosts(t *testing.T) {
 	// turu (10 -> 5+5 -> biri hâlâ >3 ise tekrar) gerektirir.
 	chat := &tooLargeThenOKChat{splitThreshold: 3}
 
-	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if splits == 0 {
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 == 0 {
 		t.Fatal("413 sonrası en az bir bölme+yeniden deneme beklenir")
 	}
-	if len(assignments) != len(posts) {
-		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(assignments), len(posts))
+	if len(result.assignments) != len(posts) {
+		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(result.assignments), len(posts))
 	}
 	for i := range posts {
-		if _, ok := assignments[i]; !ok {
+		if _, ok := result.assignments[i]; !ok {
 			t.Errorf("post %d atanmamış kalmış", i)
+		}
+		if result.retry[i] {
+			t.Errorf("post %d retry kümesinde olmamalıydı (başarıyla atandı), geldi: %v", i, result.retry)
+		}
+	}
+}
+
+// TestClusterBatchSplitOneHalfFailsOtherSucceeds, özyinelemeli bölmede
+// yarılardan BİRİNİN kalıcı bir LLM hatasına (madde c) takılması, DİĞER
+// yarının atamalarını ETKİLEMEMESİ gerektiğini doğrular (#194 kabul
+// kriteri): yalnız başarısız yarının postları retry kümesine girer,
+// başarılı yarının atamaları kullanılır. 8 post, splitThreshold=4: ilk
+// çağrı (n=8>4) 413 alır, tam ortadan (4+4) bölünür; her yarı (n=4, eşiğin
+// ÜSTÜNDE değil) tek çağrıda karara bağlanır — sol yarı normal atanır, sağ
+// yarı (başlığında failMarker geçen postlar) kalıcı bir genel hataya
+// (429 benzeri) takılır.
+func TestClusterBatchSplitOneHalfFailsOtherSucceeds(t *testing.T) {
+	posts := make([]store.PostAnalysis, 8)
+	for i := range posts {
+		posts[i] = samplePost(int64(i), fmt.Sprintf("post-%d", i))
+	}
+	batch := singleTagBatch("x", posts)
+	// post-4 sağ yarının (indeks 4-7) İLK başlığı — yalnız o yarının
+	// prompt'unda geçer, sol yarıda (post-0..post-3) hiç geçmez.
+	chat := &halfFailsChat{splitThreshold: 4, failMarker: "post-4"}
+
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 == 0 {
+		t.Fatal("413 sonrası en az bir bölme beklenir")
+	}
+	for i := 0; i < 4; i++ {
+		if _, ok := result.assignments[i]; !ok {
+			t.Errorf("post %d (sol/başarılı yarı) atanmalıydı, geldi: %v", i, result.assignments)
+		}
+		if result.retry[i] {
+			t.Errorf("post %d (sol/başarılı yarı) retry kümesinde OLMAMALIYDI, geldi: %v", i, result.retry)
+		}
+	}
+	for i := 4; i < 8; i++ {
+		if _, ok := result.assignments[i]; ok {
+			t.Errorf("post %d (sağ/başarısız yarı) atanmamalıydı, geldi: %v", i, result.assignments)
+		}
+		if !result.retry[i] {
+			t.Errorf("post %d (sağ/başarısız yarı) retry kümesinde olmalıydı, geldi: %v", i, result.retry)
 		}
 	}
 }
@@ -529,29 +642,36 @@ func TestClusterBatchSingleFallsBackOnPersistent413(t *testing.T) {
 	// splitThreshold=0: tek postluk parti bile 413 alır.
 	chat := &tooLargeThenOKChat{splitThreshold: 0}
 
-	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if splits != 0 {
-		t.Errorf("tek postluk parti daha fazla bölünemez, splits=0 beklenirdi, geldi: %d", splits)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 != 0 {
+		t.Errorf("tek postluk parti daha fazla bölünemez, splits413=0 beklenirdi, geldi: %d", result.splits413)
 	}
-	if assignments != nil {
-		t.Errorf("kalıcı 413'te nil harita (eski davranışa düşüş) beklenirdi, geldi: %v", assignments)
+	if len(result.assignments) != 0 {
+		t.Errorf("kalıcı 413'te atama olmamalı (eski davranışa düşüş), geldi: %v", result.assignments)
+	}
+	if result.retry[0] {
+		t.Errorf("kalıcı 413'te post retry kümesinde OLMAMALIYDI (eski davranışa düşer, madde b), geldi: %v", result.retry)
 	}
 }
 
-// TestClusterBatchDoesNotSplitOn429, #156 kabul kriteri: 413 DIŞINDAKİ LLM
-// hatalarında (429/ağ/vb.) parti BÖLÜNMEZ — tek çağrı denenir, doğrudan eski
-// davranışa düşülür. 429'un backoff/retry'si zaten llm paketinde; pipeline
-// bunun üstüne binmemeli.
+// TestClusterBatchDoesNotSplitOn429, #156/#194 kabul kriteri: 413 DIŞINDAKİ
+// LLM hatalarında (429/ağ/vb.) parti BÖLÜNMEZ — tek çağrı denenir, TÜM
+// postlar retry kümesine girer (madde c — eski davranışa DÜŞÜLMEZ, artık
+// bağlanmaz). 429'un backoff/retry'si zaten llm paketinde; pipeline bunun
+// üstüne binmemeli.
 func TestClusterBatchDoesNotSplitOn429(t *testing.T) {
 	chat := &errClusterChat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
 
-	assignments, splits, _ := clusterBatch(context.Background(), chat, batch, nil)
-	if splits != 0 {
-		t.Errorf("429/genel hatada bölme yapılmamalı, splits=%d", splits)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 != 0 {
+		t.Errorf("429/genel hatada bölme yapılmamalı, splits413=%d", result.splits413)
 	}
-	if assignments != nil {
-		t.Errorf("nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
+	if len(result.assignments) != 0 {
+		t.Errorf("atama olmamalı, geldi: %v", result.assignments)
+	}
+	if !result.retry[0] || !result.retry[1] {
+		t.Errorf("her iki post da retry kümesinde olmalıydı, geldi: %v", result.retry)
 	}
 	if chat.calls != 1 {
 		t.Errorf("TEK çağrı denenmeliydi (parti bölünmedi), geldi: %d", chat.calls)
@@ -574,18 +694,18 @@ func TestClusterBatchSplitsOnJSONValidateFailedAndAssignsAllPosts(t *testing.T) 
 	// en az iki bölme turu gerektirir.
 	chat := &jsonValidateFailedThenOKChat{splitThreshold: 3}
 
-	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
-	if splits413 != 0 {
-		t.Errorf("json_validate_failed bölünmesi 413 sayacını (splits413) artırmamalı, geldi: %d", splits413)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 != 0 {
+		t.Errorf("json_validate_failed bölünmesi 413 sayacını (splits413) artırmamalı, geldi: %d", result.splits413)
 	}
-	if splitsJSON == 0 {
+	if result.splitsJSON == 0 {
 		t.Fatal("json_validate_failed sonrası en az bir bölme+yeniden deneme (splitsJSON) beklenir")
 	}
-	if len(assignments) != len(posts) {
-		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(assignments), len(posts))
+	if len(result.assignments) != len(posts) {
+		t.Fatalf("tüm gönderiler LLM kümelemeyle bağlanmalıydı (eski davranışa düşülmeden), geldi: %d/%d", len(result.assignments), len(posts))
 	}
 	for i := range posts {
-		if _, ok := assignments[i]; !ok {
+		if _, ok := result.assignments[i]; !ok {
 			t.Errorf("post %d atanmamış kalmış", i)
 		}
 	}
@@ -600,28 +720,35 @@ func TestClusterBatchSingleFallsBackOnPersistentJSONValidateFailed(t *testing.T)
 	// splitThreshold=0: tek postluk parti bile json_validate_failed alır.
 	chat := &jsonValidateFailedThenOKChat{splitThreshold: 0}
 
-	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
-	if splits413 != 0 || splitsJSON != 0 {
-		t.Errorf("tek postluk parti daha fazla bölünemez, splits413=0 splitsJSON=0 beklenirdi, geldi: %d/%d", splits413, splitsJSON)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 != 0 || result.splitsJSON != 0 {
+		t.Errorf("tek postluk parti daha fazla bölünemez, splits413=0 splitsJSON=0 beklenirdi, geldi: %d/%d", result.splits413, result.splitsJSON)
 	}
-	if assignments != nil {
-		t.Errorf("kalıcı json_validate_failed'de nil harita (eski davranışa düşüş) beklenirdi, geldi: %v", assignments)
+	if len(result.assignments) != 0 {
+		t.Errorf("kalıcı json_validate_failed'de atama olmamalı (eski davranışa düşüş), geldi: %v", result.assignments)
+	}
+	if result.retry[0] {
+		t.Errorf("kalıcı json_validate_failed'de post retry kümesinde OLMAMALIYDI (eski davranışa düşer, madde b), geldi: %v", result.retry)
 	}
 }
 
-// TestClusterBatchDoesNotSplitOnOther400, #158 kabul kriteri:
+// TestClusterBatchDoesNotSplitOnOther400, #158/#194 kabul kriteri:
 // json_validate_failed DIŞINDAKİ 400 hatalarında parti BÖLÜNMEZ — tek çağrı
-// denenir, doğrudan eski davranışa düşülür.
+// denenir, tüm postlar retry kümesine girer (madde c — eski davranışa
+// DÜŞÜLMEZ).
 func TestClusterBatchDoesNotSplitOnOther400(t *testing.T) {
 	chat := &other400Chat{}
 	batch := singleTagBatch("x", []store.PostAnalysis{samplePost(1, "a"), samplePost(2, "b")})
 
-	assignments, splits413, splitsJSON := clusterBatch(context.Background(), chat, batch, nil)
-	if splits413 != 0 || splitsJSON != 0 {
-		t.Errorf("json_validate_failed DIŞINDAKİ 400'de bölme yapılmamalı, splits413=%d splitsJSON=%d", splits413, splitsJSON)
+	result := clusterBatch(context.Background(), chat, batch, nil)
+	if result.splits413 != 0 || result.splitsJSON != 0 {
+		t.Errorf("json_validate_failed DIŞINDAKİ 400'de bölme yapılmamalı, splits413=%d splitsJSON=%d", result.splits413, result.splitsJSON)
 	}
-	if assignments != nil {
-		t.Errorf("nil harita (tam geri düşüş) beklenirdi, geldi: %v", assignments)
+	if len(result.assignments) != 0 {
+		t.Errorf("atama olmamalı, geldi: %v", result.assignments)
+	}
+	if !result.retry[0] || !result.retry[1] {
+		t.Errorf("her iki post da retry kümesinde olmalıydı, geldi: %v", result.retry)
 	}
 	if chat.calls != 1 {
 		t.Errorf("TEK çağrı denenmeliydi (parti bölünmedi), geldi: %d", chat.calls)
@@ -1412,5 +1539,176 @@ func TestGroupThemesBucketLimitDefersRestToNextRun(t *testing.T) {
 	}
 	if linked2 != 5 {
 		t.Errorf("2. koşuda kalan 5 post bağlanmalıydı, geldi: %d", linked2)
+	}
+}
+
+// batchTagErrorChat, prompt'unda failMarker geçen partiye (tag başlığı
+// "[tag]" biçiminde) kalıcı bir genel LLM hatası (madde c) döndüren, DİĞER
+// partilere ise boş-ama-geçerli atama listesiyle (eski davranış, tag adı
+// tema olur) yanıt veren sahte chat — #194 kabul kriteri: BİR partinin LLM
+// hatası DİĞER partileri etkilememeli.
+type batchTagErrorChat struct {
+	failMarker string
+	calls      int
+}
+
+func (c *batchTagErrorChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return c.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (c *batchTagErrorChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	c.calls++
+	if strings.Contains(user, c.failMarker) {
+		return "", fmt.Errorf("simulated 500 (bu parti kalıcı hata)")
+	}
+	return `{"assignments":[]}`, nil
+}
+
+// TestGroupThemesBatchLLMErrorLeavesOnlyThatBatchUnlinked, #194'ün asıl
+// uçtan uca kabul kriteri: bir partinin (tagErr) LLM çağrısı kalıcı bir
+// hatayla (429/5xx/ağ benzeri) başarısız olursa YALNIZ o partinin postları
+// bağlanmaz (theme_posts'ta hiç satır açılmaz — bir sonraki koşuda
+// UnthemedAnalyses onları yeniden seçecek), DİĞER parti (tagOK) normal
+// şekilde bağlanır ve GroupThemes'in döndürdüğü sayaç (linked) yalnız
+// başarılı partiyi sayar. tagErr tam themeClusterBucketLimit (40) post
+// içerecek şekilde kurulur ki kendi partisini doldursun ve tagOK'la AYNI
+// partiye paketlenmesin (bkz. TestPackBucketsFullBucketDoesNotMergeWithNext).
+func TestGroupThemesBatchLLMErrorLeavesOnlyThatBatchUnlinked(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	const platform = "test-cluster-batcherr"
+	const tagErr = "test-cc-batcherr-a"
+	const tagOK = "test-cc-batcherr-b"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE domain_tag IN ($1, $2)", tagErr, tagOK)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	// tagErr İLK eklenir ve kovayı TAM doldurur (40) — kendi partisi olur.
+	for i := 0; i < themeClusterBucketLimit; i++ {
+		insertPost(t, ctx, st, platform, fmt.Sprintf("e%d", i), tagErr)
+	}
+	// tagOK dolu kovadan SONRA gelir — ayrı (2.) partiye düşer.
+	insertPost(t, ctx, st, platform, "ok1", tagOK)
+	insertPost(t, ctx, st, platform, "ok2", tagOK)
+
+	chat := &batchTagErrorChat{failMarker: "[" + tagErr + "]"}
+	linked, err := GroupThemes(ctx, st, chat)
+	if err != nil {
+		t.Fatalf("GroupThemes: %v", err)
+	}
+	if linked != 2 {
+		t.Errorf("yalnız tagOK'un 2 postu bağlanmalıydı, geldi: %d", linked)
+	}
+	if chat.calls != 2 {
+		t.Errorf("2 ayrı parti (tagErr dolu kova + tagOK) beklenirdi, geldi: %d çağrı", chat.calls)
+	}
+
+	var countErr int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM theme_posts tp JOIN themes t ON t.id = tp.theme_id WHERE t.domain_tag = $1", tagErr,
+	).Scan(&countErr); err != nil {
+		t.Fatal(err)
+	}
+	if countErr != 0 {
+		t.Errorf("tagErr'in postları BAĞLANMAMALIYDI (LLM hatası, retry), geldi: %d bağ", countErr)
+	}
+
+	var countOK int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM theme_posts tp JOIN themes t ON t.id = tp.theme_id WHERE t.domain_tag = $1", tagOK,
+	).Scan(&countOK); err != nil {
+		t.Fatal(err)
+	}
+	if countOK != 2 {
+		t.Errorf("tagOK'un 2 postu bağlanmalıydı, geldi: %d", countOK)
+	}
+}
+
+// TestGroupThemesRetriedPostsReclusterOnNextRun, #194'ün ana vaadinin uçtan
+// uca kanıtı: bir partide LLM kalıcı hatayla başarısız olunca postlar
+// theme_posts'a HİÇ yazılmaz (linked_at koruması, #189, devreye girmez);
+// hata ortadan kalktığında (bir sonraki GroupThemes koşusu) UnthemedAnalyses
+// AYNI postları yeniden seçer ve bu kez GERÇEK LLM kümelemesiyle
+// (eski davranışa düşmeden) temaya bağlanırlar.
+func TestGroupThemesRetriedPostsReclusterOnNextRun(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+	st, err := store.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	const platform = "test-cluster-retry-recluster"
+	const tag = "test-cc-retry-recluster"
+	const newThemeName = "recovered pain after retry"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = $1", platform)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE domain_tag = $1", tag)
+		st.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = $1", newThemeName)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	for i := 0; i < 3; i++ {
+		insertPost(t, ctx, st, platform, fmt.Sprintf("rr%d", i), tag)
+	}
+
+	// 1. koşu: LLM HER ZAMAN hata veriyor — hiçbir post bağlanmamalı.
+	errChat := &errClusterChat{}
+	linked1, err := GroupThemes(ctx, st, errChat)
+	if err != nil {
+		t.Fatalf("GroupThemes (1. koşu): %v", err)
+	}
+	if linked1 != 0 {
+		t.Errorf("1. koşuda LLM hatası nedeniyle 0 post bağlanmalıydı, geldi: %d", linked1)
+	}
+
+	var countAfterFirst int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT count(*) FROM theme_posts tp JOIN themes t ON t.id = tp.theme_id WHERE t.domain_tag = $1", tag,
+	).Scan(&countAfterFirst); err != nil {
+		t.Fatal(err)
+	}
+	if countAfterFirst != 0 {
+		t.Fatalf("1. koşu sonrası hiçbir bağ olmamalıydı, geldi: %d", countAfterFirst)
+	}
+
+	// 2. koşu: LLM artık başarılı — UnthemedAnalyses AYNI 3 postu (hiç
+	// bağlanmadıkları için) yeniden getirmeli ve bu kez kümelenmeliler.
+	chat := &fakeClusterChat{response: fmt.Sprintf(
+		`{"assignments":[{"post":0,"theme":%q},{"post":1,"theme":%q},{"post":2,"theme":%q}]}`,
+		newThemeName, newThemeName, newThemeName)}
+	linked2, err := GroupThemes(ctx, st, chat)
+	if err != nil {
+		t.Fatalf("GroupThemes (2. koşu): %v", err)
+	}
+	if linked2 != 3 {
+		t.Errorf("2. koşuda 3 post (hepsi retry'den kurtuldu) bağlanmalıydı, geldi: %d", linked2)
+	}
+
+	var freq int
+	if err := st.Pool.QueryRow(ctx,
+		"SELECT frequency FROM themes WHERE theme_name = $1", newThemeName,
+	).Scan(&freq); err != nil {
+		t.Fatalf("yeniden kümelenen tema oluşmamış: %v", err)
+	}
+	if freq != 3 {
+		t.Errorf("frequency 3 olmalıydı (3 post aynı yeni temada), geldi: %d", freq)
 	}
 }
