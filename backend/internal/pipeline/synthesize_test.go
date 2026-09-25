@@ -547,19 +547,19 @@ func TestSynthesizeIdeasDistinctivenessK1BlocksAndRecords(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
-	// #164: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
-	// kalıcı yeri eliminations.check/verdicts — check=özgünlük, verdicts 3
+	// #164, #169: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
+	// kalıcı yeri eliminations.check/verdicts — check=özgünlük, verdicts 2
 	// bloklayıcı mercek (subject=card — organik yol, fakeChat cevabı
 	// "verdict" alanı taşımadığından savunmacı "unsure"a düşer) + özgünlük
 	// (subject=card, fail) TÜMÜNÜ taşır.
 	if found.Check == nil || *found.Check != "özgünlük" {
 		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
 	}
-	if len(found.Verdicts) != 4 {
-		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	if len(found.Verdicts) != 3 {
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
-		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)
 	}
 
 	// #151: K1 (doygunluk) ile bloklanan tema da MarkThemeIncoherent ile
@@ -670,21 +670,21 @@ func TestSynthesizeIdeasDistinctivenessK2BlocksAndRecords(t *testing.T) {
 		t.Errorf("eliminations.criterion=K2 beklenirdi, geldi: %v", found.Criterion)
 	}
 
-	// #164, #166: K2 bloğunda da (K1 gibi) kart hiç yazılmadığından mercek
-	// kararlarının TEK kalıcı yeri eliminations.check/verdicts.
+	// #164, #166, #169: K2 bloğunda da (K1 gibi) kart hiç yazılmadığından
+	// mercek kararlarının TEK kalıcı yeri eliminations.check/verdicts.
 	if found.Check == nil || *found.Check != "özgünlük" {
 		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
 	}
-	if len(found.Verdicts) != 4 {
-		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	if len(found.Verdicts) != 3 {
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
-		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)
 	}
 	// prompt_version #164/#166: distinctiveness merceğinin v4 metnine
 	// geçtiği kalıcı kayda ("v4") yansımalı.
-	if last := found.Verdicts[3]; last.PromptVersion != "v4" {
-		t.Errorf("verdicts[3].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
+	if last := found.Verdicts[2]; last.PromptVersion != "v4" {
+		t.Errorf("verdicts[2].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
 	}
 
 	// #151: K2 ile bloklanan tema da (K1 gibi) MarkThemeIncoherent ile
@@ -917,18 +917,18 @@ func TestBlockedByIdeaLensFailBlocksAndStopsEarly(t *testing.T) {
 }
 
 // TestBlockedByIdeaLensUnsureDoesNotBlock, "unsure"ın BLOKLAMADIĞINI ve
-// tüm 3 merceğin çağrıldığını doğrular (yalnız "fail" bloklar). #131: veri-
+// tüm 2 merceğin çağrıldığını doğrular (yalnız "fail" bloklar). #131: veri-
 // erişimi merceğinin (seedLenses[1]) HAM kararı idea.DataAccessVerdict/
 // Reason'a yazılmalı — kart bloklanmadı, yani DB'ye yazılacak.
 func TestBlockedByIdeaLensUnsureDoesNotBlock(t *testing.T) {
-	chat := &lensSeqChat{verdicts: []string{"unsure", "unsure", "unsure"}, errAt: -1}
+	chat := &lensSeqChat{verdicts: []string{"unsure", "unsure"}, errAt: -1}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
 	if _, _, blocked := blockedByIdeaLens(context.Background(), chat, &idea); blocked {
 		t.Error("unsure bloklamamalı")
 	}
-	if chat.calls != 3 {
-		t.Errorf("3 mercek de çağrılmalı, geldi %d", chat.calls)
+	if chat.calls != 2 {
+		t.Errorf("2 mercek de çağrılmalı, geldi %d", chat.calls)
 	}
 	if idea.DataAccessVerdict == nil || *idea.DataAccessVerdict != "unsure" {
 		t.Errorf("data_access_verdict=unsure beklenirdi, geldi: %v", idea.DataAccessVerdict)
@@ -960,12 +960,12 @@ func TestBlockedByIdeaLensErrorDoesNotBlock(t *testing.T) {
 // TestBlockedByIdeaLensUsesTemperatureZero, bloklayıcı mercek çağrılarının
 // (#106) sıcaklık 0 ile gittiğini doğrular.
 func TestBlockedByIdeaLensUsesTemperatureZero(t *testing.T) {
-	chat := &lensSeqChat{verdicts: []string{"pass", "pass", "pass"}, errAt: -1}
+	chat := &lensSeqChat{verdicts: []string{"pass", "pass"}, errAt: -1}
 	idea := store.Idea{Title: "X", ProblemStatement: "p", ProposedSolution: "s", TargetUser: "u"}
 
 	blockedByIdeaLens(context.Background(), chat, &idea)
-	if len(chat.lastTemp) != 3 {
-		t.Fatalf("3 mercek çağrısı beklenirdi, geldi %d", len(chat.lastTemp))
+	if len(chat.lastTemp) != 2 {
+		t.Fatalf("2 mercek çağrısı beklenirdi, geldi %d", len(chat.lastTemp))
 	}
 	for i, temp := range chat.lastTemp {
 		if temp != 0 {
@@ -974,15 +974,15 @@ func TestBlockedByIdeaLensUsesTemperatureZero(t *testing.T) {
 	}
 }
 
-// synthLensChat: coherence/dedup normal davranır; 3 bloklayıcı mercek
-// (seedLenses sırasına göre) verdicts'teki değeri döner (boş = "pass");
+// synthLensChat: coherence/dedup normal davranır; 2 bloklayıcı mercek
+// (seedLenses sırasına göre, #169) verdicts'teki değeri döner (boş = "pass");
 // errPos'taki mercek çağrısı ise hata döner (-1 = hata yok). distinctCalls
-// ve lensCalls, özgünlük merceğinin ve bloklayıcı 3 merceğin kaç
+// ve lensCalls, özgünlük merceğinin ve bloklayıcı 2 merceğin kaç
 // kez çağrıldığını sayar — "mercek bloklarsa distinctivenessCheck
 // çağrılmaz" ve "ilk fail'de erken çıkış" doğrulamaları için (#123).
 type synthLensChat struct {
 	response string
-	verdicts [3]string
+	verdicts [2]string
 	errPos   int
 
 	distinctCalls int
@@ -1020,10 +1020,9 @@ func (f *synthLensChat) ChatJSONWithTemperature(ctx context.Context, system, use
 	return f.response, nil
 }
 
-// TestSynthesizeIdeasLensFailNotWritten: 3 bloklayıcı merceğin (#123)
-// ikincisi "fail" dönerse kart DB'ye YAZILMAZ, özgünlük merceği
-// hiç çağrılmaz (boşa token) ve kalan 3. mercek de çağrılmaz (erken çıkış,
-// çağrı sayısı doğrulanır). #151: tema da MarkThemeIncoherent ile damgalanır
+// TestSynthesizeIdeasLensFailNotWritten: 2 bloklayıcı merceğin (#123, #169)
+// ikincisi (son mercek) "fail" dönerse kart DB'ye YAZILMAZ, özgünlük merceği
+// hiç çağrılmaz (boşa token) — #151: tema da MarkThemeIncoherent ile damgalanır
 // — sonraki ThemesReadyForSynthesis çağrısında dönmez, yeni kanıt gelince
 // yeniden döner.
 func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
@@ -1057,7 +1056,7 @@ func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
 			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
 			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
-		verdicts: [3]string{"pass", "fail", "pass"},
+		verdicts: [2]string{"pass", "fail"},
 		errPos:   -1,
 	}
 
@@ -1077,7 +1076,7 @@ func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 		t.Error("mercekten elenen kart DB'ye yazılmamalı")
 	}
 	if chat.lensCalls != 2 {
-		t.Errorf("ilk fail'de erken çıkış: 2 mercek çağrısı beklenirdi (3.'sü çağrılmamalı), geldi %d", chat.lensCalls)
+		t.Errorf("iki mercek de (son mercek fail'e kadar) çağrılmalı, geldi %d", chat.lensCalls)
 	}
 	if chat.distinctCalls != 0 {
 		t.Errorf("mercek bloklarsa özgünlük merceği ÇAĞRILMAMALI, geldi %d çağrı", chat.distinctCalls)
@@ -1148,7 +1147,7 @@ func TestSynthesizeIdeasLensFailNotWritten(t *testing.T) {
 	}
 }
 
-// TestSynthesizeIdeasLensUnsureWrites: 3 mercek de "unsure" dönerse kart
+// TestSynthesizeIdeasLensUnsureWrites: 2 mercek de "unsure" dönerse kart
 // YAZILIR (yalnız "fail" bloklar) ve özgünlük merceği çağrılır.
 func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -1179,7 +1178,7 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 		response: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun",
 			"proposed_solution":"çözüm","target_user":"kullanıcı","example_quotes":["quote one"],
 			"urgency_score":4,"monetization_signal":2,"known_competitors_ai_guess":"","domain_tags":[%q]}`, title, tag),
-		verdicts: [3]string{"unsure", "unsure", "unsure"},
+		verdicts: [2]string{"unsure", "unsure"},
 		errPos:   -1,
 	}
 
@@ -1190,8 +1189,8 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("unsure bloklamamalı, n=1 beklenirdi, geldi: %d", n)
 	}
-	if chat.lensCalls != 3 {
-		t.Errorf("3 mercek de çağrılmalı, geldi %d", chat.lensCalls)
+	if chat.lensCalls != 2 {
+		t.Errorf("2 mercek de çağrılmalı, geldi %d", chat.lensCalls)
 	}
 	if chat.distinctCalls != 1 {
 		t.Errorf("kart bloklanmadığından özgünlük merceği çağrılmalı, geldi %d çağrı", chat.distinctCalls)
@@ -1205,19 +1204,22 @@ func TestSynthesizeIdeasLensUnsureWrites(t *testing.T) {
 		t.Error("unsure verdict kartı yazmalı")
 	}
 
-	// #164: lens_verdicts kalıcı kaydı — organik yolda TÜMÜ subject="card"
-	// (3 bloklayıcı mercek unsure + özgünlük pass).
+	// #164, #169: lens_verdicts kalıcı kaydı — organik yolda TÜMÜ subject="card"
+	// (2 bloklayıcı mercek unsure + özgünlük pass).
 	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
-	if len(lensVerdicts) != 4 {
-		t.Fatalf("lens_verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	if len(lensVerdicts) != 3 {
+		t.Fatalf("lens_verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
 	}
-	for i, lv := range lensVerdicts[:3] {
+	for i, lv := range lensVerdicts[:2] {
 		if lv.Subject != "card" || lv.Verdict != "unsure" {
 			t.Errorf("lens_verdicts[%d] card/unsure beklenirdi, geldi: %+v", i, lv)
 		}
+		if lv.Lens == "pazar-işlerliği" {
+			t.Errorf("lens_verdicts[%d] pazar-işlerliği İÇERMEMELİ (#169), geldi: %+v", i, lv)
+		}
 	}
-	if last := lensVerdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
-		t.Errorf("lens_verdicts[3] özgünlük/card/pass beklenirdi, geldi: %+v", last)
+	if last := lensVerdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
+		t.Errorf("lens_verdicts[2] özgünlük/card/pass beklenirdi, geldi: %+v", last)
 	}
 
 	// #131: veri-erişimi merceğinin "unsure" HAM kararı karta yazılmalı —
@@ -1302,10 +1304,10 @@ func TestSynthesizeIdeasLensErrorStillWrites(t *testing.T) {
 		t.Error("mercek hatasında kart yine de yazılmalı")
 	}
 
-	// #164: hata veren mercek çağrısı verdict="error" + hata metniyle kalıcı
-	// kaydedilir (NULL/hiç çağrılmadı ile karışmasın diye) — kalan 2 mercek
-	// hiç çağrılmadığından (erken çıkış) yalnız 1 "error" + özgünlüğün 1
-	// "pass"ı olmak üzere 2 eleman beklenir.
+	// #164, #169: hata veren mercek çağrısı verdict="error" + hata metniyle
+	// kalıcı kaydedilir (NULL/hiç çağrılmadı ile karışmasın diye) — kalan
+	// mercek (veri-erişimi) hiç çağrılmadığından (erken çıkış) yalnız 1
+	// "error" + özgünlüğün 1 "pass"ı olmak üzere 2 eleman beklenir.
 	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
 	if len(lensVerdicts) != 2 {
 		t.Fatalf("lens_verdicts 2 eleman beklenirdi (1 hata + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)

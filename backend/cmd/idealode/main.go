@@ -5,7 +5,7 @@
 //	ingest      aktif kaynaklardan yeni post'ları çek ve raw_posts'a yaz
 //	analyze     ön-filtre + LLM classification -> post_analysis
 //	synthesize  tema gruplama + idea synthesis -> themes/ideas
-//	seeds       pazar tohumlarını (radar-seeds.jsonl) 3 mercekten geçir -> market_derived kart
+//	seeds       pazar tohumlarını (radar-seeds.jsonl) 2 mercekten geçir -> market_derived kart
 //	generate    kullanıcı bazlı ai_generated üretim (Faz 2)
 //	run         ingest -> analyze -> synthesize sırayla
 //	retheme     eski tip temalardaki kartsız gönderileri temalarından çözer (elle, #136)
@@ -48,7 +48,7 @@ Komutlar:
   ingest      aktif kaynaklardan yeni post'ları çek (raw_posts)
   analyze     ön-filtre + LLM classification (post_analysis)
   synthesize  tema gruplama + idea synthesis (themes, ideas)
-  seeds       pazar tohumlarını 3 mercekten geçir (market_derived kart)
+  seeds       pazar tohumlarını 2 mercekten geçir (market_derived kart)
   generate    kullanıcı bazlı ai_generated üretim (Faz 2)
   run         ingest -> analyze -> synthesize -> fuse -> seeds sırayla çalıştırır
   retheme     eski tip temalardaki kartsız gönderileri temalarından çözer (elle tetiklenir, #136)
@@ -740,7 +740,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 }
 
 // cmdSeeds, elle küratörlüğü yapılan pazar tohumlarını (radar-seeds.jsonl)
-// 3 mercekten geçirip market_derived kart üretir (#56).
+// 2 mercekten geçirip market_derived kart üretir (#56).
 func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireLLM(); err != nil {
 		return err

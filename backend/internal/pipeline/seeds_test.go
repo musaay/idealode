@@ -32,7 +32,7 @@ func TestParseRadarSeedsSkipsMalformed(t *testing.T) {
 }
 
 // fakeSeedChat, ProcessSeeds entegrasyon testleri için sistem prompt'una
-// göre sabit cevap döner: 3 merceğe lensVerdict, kart üretimine
+// göre sabit cevap döner: 2 merceğe lensVerdict, kart üretimine
 // cardResponse, dedup hakemine (gerekirse) dupSame.
 type fakeSeedChat struct {
 	lensVerdict  string
@@ -136,14 +136,14 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		t.Errorf("example_quotes override edilmemiş (LLM'den değil, koddan gelmeli): %v", quotes)
 	}
 
-	// #164: lens_verdicts kalıcı kaydı — 3 bloklayıcı mercek subject="seed"
+	// #164, #169: lens_verdicts kalıcı kaydı — 2 bloklayıcı mercek subject="seed"
 	// (ham tohum alanları üzerinde çalıştı) + özgünlük subject="card" (kart
 	// üretildikten SONRA çalıştı), hepsi verdict="pass".
 	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
-	if len(lensVerdicts) != 4 {
-		t.Fatalf("lens_verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	if len(lensVerdicts) != 3 {
+		t.Fatalf("lens_verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
 	}
-	for i, lv := range lensVerdicts[:3] {
+	for i, lv := range lensVerdicts[:2] {
 		if lv.Subject != "seed" {
 			t.Errorf("lens_verdicts[%d].Subject=seed beklenirdi (bloklayıcı mercekler), geldi %q", i, lv.Subject)
 		}
@@ -153,10 +153,13 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		if lv.PromptVersion != "v1" {
 			t.Errorf("lens_verdicts[%d].PromptVersion=v1 beklenirdi, geldi %q", i, lv.PromptVersion)
 		}
+		if lv.Lens == "pazar-işlerliği" {
+			t.Errorf("lens_verdicts[%d] pazar-işlerliği İÇERMEMELİ (#169), geldi: %+v", i, lv)
+		}
 	}
-	last := lensVerdicts[3]
+	last := lensVerdicts[2]
 	if last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
-		t.Errorf("lens_verdicts[3] özgünlük/card/pass beklenirdi, geldi: %+v", last)
+		t.Errorf("lens_verdicts[2] özgünlük/card/pass beklenirdi, geldi: %+v", last)
 	}
 
 	var markCount int
@@ -169,10 +172,10 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		t.Errorf("raw_posts işaret satırı bulunamadı")
 	}
 
-	// Sıcaklık politikası (#106): 3 bloklayıcı mercek yargı=0, kart üretimi
+	// Sıcaklık politikası (#106): 2 bloklayıcı mercek yargı=0, kart üretimi
 	// (LLM sistem prompt'unda "market_derived" geçer) üretim=0.3.
 	if len(chat.lastTemp) < 4 {
-		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (3 mercek + kart üretimi): %d", len(chat.lastTemp))
+		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (2 mercek + özgünlük + kart üretimi): %d", len(chat.lastTemp))
 	}
 	for sys, temp := range chat.lastTemp {
 		if strings.Contains(sys, `"market_derived"`) {
@@ -268,20 +271,20 @@ func TestProcessSeedsFailMarksNoCard(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "özet" {
 		t.Errorf("eliminations.detail tohumun özeti olmalı (%q), geldi: %v", "özet", found.Detail)
 	}
-	// #164: 3 mercek de "fail" (fakeSeedChat hepsine fail döner, tohum
+	// #164, #169: 2 mercek de "fail" (fakeSeedChat hepsine fail döner, tohum
 	// yolunda stopOnFirstFail=false → TÜMÜ çağrılır) — check isimlerin ", "
-	// ile birleşimi (mevcut log biçimiyle birebir), verdicts 3 eleman,
+	// ile birleşimi (mevcut log biçimiyle birebir), verdicts 2 eleman,
 	// hepsi subject=seed verdict=fail.
 	if found.Check == nil {
 		t.Fatal("eliminations.check dolu olmalı (bloklayan mercek adları)")
 	}
-	for _, name := range []string{seedLenses[0].name, seedLenses[1].name, seedLenses[2].name} {
+	for _, name := range []string{seedLenses[0].name, seedLenses[1].name} {
 		if !strings.Contains(*found.Check, name) {
 			t.Errorf("eliminations.check %q içermeli, geldi: %q", name, *found.Check)
 		}
 	}
-	if len(found.Verdicts) != 3 {
-		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (3 bloklayıcı mercek), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	if len(found.Verdicts) != 2 {
+		t.Fatalf("eliminations.verdicts 2 eleman beklenirdi (2 bloklayıcı mercek), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
 	for i, lv := range found.Verdicts {
 		if lv.Subject != "seed" || lv.Verdict != "fail" {
@@ -318,7 +321,7 @@ func TestProcessSeedsUnsureCreatesCardAndMarksOnce(t *testing.T) {
 	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Unsure Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
 	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
 
-	// 3 mercek de "unsure" -> kart YİNE DE üretilmeli (bloklamıyor).
+	// 2 mercek de "unsure" -> kart YİNE DE üretilmeli (bloklamıyor).
 	chat := &fakeSeedChat{
 		lensVerdict: "unsure",
 		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
@@ -402,7 +405,7 @@ func (f *perLensSeedChat) ChatJSONWithTemperature(ctx context.Context, system, u
 }
 
 // TestProcessSeedsFailDominatesOverUnsureMarksProcessed: #131 edge case —
-// 3 mercekten biri "fail" biri "unsure" dönerse fail baskındır: tohum
+// 2 mercekten biri "fail" biri "unsure" dönerse fail baskındır: tohum
 // elenmiş SAYILIR ve markProcessed ÇAĞRILIR (unsure'un "kalıcı yakma YOK"
 // istisnası burada geçerli DEĞİL, çünkü aynı tohumda ayrıca bir "fail" var).
 func TestProcessSeedsFailDominatesOverUnsureMarksProcessed(t *testing.T) {
@@ -430,7 +433,6 @@ func TestProcessSeedsFailDominatesOverUnsureMarksProcessed(t *testing.T) {
 		verdicts: map[string]string{
 			lensThirdPartySystem: "unsure",
 			lensDataAccessSystem: "fail",
-			// pazar-işlerliği haritada yok -> varsayılan "pass".
 		},
 	}
 
@@ -664,7 +666,7 @@ func TestSeedLensesExcludeDistinctiveness(t *testing.T) {
 	}
 }
 
-// distinctSeedChat: 3 bloklayıcı mercek + kart üretimi + dedup normal
+// distinctSeedChat: 2 bloklayıcı mercek + kart üretimi + dedup normal
 // davranır (pass/cardResponse/same:false); kart-sonrası özgünlük
 // merceği (lensDistinctivenessSystem) ayrıca yapılandırılabilir bir cevap ya
 // da hata döner — #101 v3/#138/#166'nın "K1|K2 dışında kart her durumda
@@ -865,23 +867,23 @@ func TestProcessSeedsDistinctivenessK1BlocksCard(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
-	// #164: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
+	// #164, #169: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
 	// kalıcı yeri eliminations.check/verdicts — check=özgünlük (bloklayan
-	// mercek), verdicts 3 bloklayıcı mercek (subject=seed, pass) + özgünlük
+	// mercek), verdicts 2 bloklayıcı mercek (subject=seed, pass) + özgünlük
 	// (subject=card, fail) TÜMÜNÜ taşır.
 	if found.Check == nil || *found.Check != "özgünlük" {
 		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
 	}
-	if len(found.Verdicts) != 4 {
-		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	if len(found.Verdicts) != 3 {
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	for i, lv := range found.Verdicts[:3] {
+	for i, lv := range found.Verdicts[:2] {
 		if lv.Subject != "seed" || lv.Verdict != "pass" {
 			t.Errorf("verdicts[%d] seed/pass beklenirdi, geldi: %+v", i, lv)
 		}
 	}
-	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
-		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)
 	}
 }
 
@@ -960,16 +962,16 @@ func TestProcessSeedsDistinctivenessK2BlocksCard(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
-	if len(found.Verdicts) != 4 {
-		t.Fatalf("eliminations.verdicts 4 eleman beklenirdi (3 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+	if len(found.Verdicts) != 3 {
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	if last := found.Verdicts[3]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
-		t.Errorf("verdicts[3] özgünlük/card/fail beklenirdi, geldi: %+v", last)
+	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
+		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)
 	}
 	// prompt_version #164/#166: distinctiveness merceğinin v4 metnine
 	// geçtiği kalıcı kayda ("v4") yansımalı.
-	if last := found.Verdicts[3]; last.PromptVersion != "v4" {
-		t.Errorf("verdicts[3].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
+	if last := found.Verdicts[2]; last.PromptVersion != "v4" {
+		t.Errorf("verdicts[2].PromptVersion=v4 beklenirdi, geldi: %q", last.PromptVersion)
 	}
 }
 

@@ -113,8 +113,9 @@ type Idea struct {
 	DataAccessReason  *string `json:"data_access_reason,omitempty"`
 
 	// LensVerdicts (#164): kartı üreten/etkileyen TÜM mercek çağrılarının
-	// (üçüncü-taraf/veri-erişimi/pazar-işlerliği/özgünlük, ivme tohumunda +
-	// ürünleştirilebilirlik) kalıcı denetim kaydı — pass/fail/unsure/error
+	// (üçüncü-taraf/veri-erişimi/özgünlük, ivme tohumunda + ürünleştirilebilirlik
+	// — #169: pazar-işlerliği 2026-09-25'te kaldırıldı, yalnız o tarihten ÖNCEKİ
+	// satırlarda görülebilir) kalıcı denetim kaydı — pass/fail/unsure/error
 	// dahil HEPSİ (yalnız blocking "fail" değil). ai_blended kartlarda
 	// (kaynak karttan kopyalanmaz) ve bu alanı taşımayan eski satırlarda
 	// boş dizi ([]) — ASLA nil/NULL (NOT NULL DEFAULT '[]').
@@ -247,15 +248,16 @@ type Elimination struct {
 // çağrılmadı) ile karışmasın diye.
 type LensVerdict struct {
 	// Lens: merceğin Türkçe adı (seedLens.name ile birebir — "üçüncü-taraf
-	// inşa edilebilirlik", "veri-erişimi", "pazar-işlerliği", "özgünlük",
-	// "ürünleştirilebilirlik").
+	// inşa edilebilirlik", "veri-erişimi", "özgünlük", "ürünleştirilebilirlik";
+	// "pazar-işlerliği" #169 ile 2026-09-25'te kaldırıldı — yalnız o
+	// tarihten ÖNCEKİ satırlarda görülebilir).
 	Lens string `json:"lens"`
 	// PromptVersion: mercek sabitinin yanındaki lensXVersion (özgünlük #166
 	// ile "v4"e yükseldi, diğer mercekler hâlâ "v1" — #163 §6).
 	PromptVersion string `json:"prompt_version"`
 	// Subject: mercek HANGİ girdi üzerinde çalıştı — "card" (üretilmiş kart
 	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ
-	// "card"; tohum yolunda 3(-4) bloklayıcı mercek "seed", özgünlük "card".
+	// "card"; tohum yolunda 2(-3) bloklayıcı mercek "seed", özgünlük "card".
 	Subject string `json:"subject"`
 	// Verdict: pass | fail | unsure | error.
 	Verdict string    `json:"verdict"`

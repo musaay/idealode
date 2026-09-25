@@ -338,8 +338,9 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		// Bloklayıcı mercekler (#123, #153): seeds.go'daki 3 mercek
-		// (üçüncü-taraf inşa edilebilirlik / veri-erişimi / pazar-işlerliği)
+		// Bloklayıcı mercekler (#123, #153): seeds.go'daki 2 mercek
+		// (üçüncü-taraf inşa edilebilirlik / veri-erişimi — #169: pazar-
+		// işlerliği eşsiz katkısı 0 ölçüldüğünden kaldırıldı)
 		// organik yolda da SIRAYLA, runBlockingLenses(stopOnFirstFail=true)
 		// ile çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI. İlk "fail"de
 		// durur, kalan mercekler çağrılmaz; kart yazılmaz ve tema bir sonraki
@@ -407,7 +408,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			log.Printf("synthesize: tema %q özgünlük tartışmalı (%s) — kart yazılıyor, işaretli: %s", th.Name, distinctOutcome.Criterion, distinctOutcome.Reason)
 		} else if distinctOutcome.Stage == "distinctiveness" {
 			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
-			// mercek çağrıları (3 bloklayıcı + özgünlük) TEK kalıcı yeri olan
+			// mercek çağrıları (2 bloklayıcı + özgünlük) TEK kalıcı yeri olan
 			// eliminations.verdicts'e taşınır (K3-K4'te de aynısı zararsızca
 			// tekrarlanır, kart zaten idea.LensVerdicts ile de yazılacak).
 			distinctOutcome.Verdicts = allVerdicts
@@ -475,7 +476,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 // "unsure" BLOKLAMAZ — yalnız "fail" bloklar. Mercek çağrısı HATA verirse
 // kart DÜŞÜRÜLMEZ: hata loglanır, blok yokmuş gibi (false) dönülür.
 // Veri-erişimi merceğinin (#131) HAM kararı idea.DataAccessVerdict/Reason'a
-// yazılır — YALNIZ üç mercek de hatasız tamamlanıp sonuç bloklamadıysa.
+// yazılır — YALNIZ iki mercek de hatasız tamamlanıp sonuç bloklamadıysa.
 func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensName, reason string, blocked bool) {
 	prompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
 	outcome, verdicts := runBlockingLenses(ctx, chat, seedLenses, prompt, true, "card")

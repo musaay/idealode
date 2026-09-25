@@ -41,42 +41,46 @@ func (c *gateSeqChat) ChatJSONWithTemperature(ctx context.Context, system, user 
 
 // TestRunBlockingLensesStopOnFirstFailStopsEarly: stopOnFirstFail=true
 // modunda ilk "fail"de durulduğunu (kalan mercekler ÇAĞRILMAZ) çağrı
-// sayısıyla doğrular (#123'ün organik davranışı).
+// sayısıyla doğrular (#123'ün organik davranışı). #169: seedLenses artık
+// 2 mercek (üçüncü-taraf, veri-erişimi) — ilk mercek fail döner, ikincisi
+// (son mercek) hiç çağrılmaz.
 func TestRunBlockingLensesStopOnFirstFailStopsEarly(t *testing.T) {
-	chat := &gateSeqChat{verdicts: []string{"pass", "fail", "pass"}, errAt: -1}
+	chat := &gateSeqChat{verdicts: []string{"fail", "pass"}, errAt: -1}
 	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", true, "card")
 
 	if !outcome.Blocked {
-		t.Fatal("ikinci mercek fail dönünce Blocked=true olmalı")
+		t.Fatal("ilk mercek fail dönünce Blocked=true olmalı")
 	}
-	if outcome.Check != seedLenses[1].name {
-		t.Errorf("bloklayan mercek adı %q beklenirdi, geldi %q", seedLenses[1].name, outcome.Check)
+	if outcome.Check != seedLenses[0].name {
+		t.Errorf("bloklayan mercek adı %q beklenirdi, geldi %q", seedLenses[0].name, outcome.Check)
 	}
-	if chat.calls != 2 {
-		t.Errorf("ilk fail'de erken çıkış: 2 çağrı beklenirdi (3.'sü çağrılmamalı), geldi %d", chat.calls)
+	if chat.calls != 1 {
+		t.Errorf("ilk fail'de erken çıkış: 1 çağrı beklenirdi (2.'si çağrılmamalı), geldi %d", chat.calls)
 	}
-	if len(verdicts) != 2 {
-		t.Errorf("verdicts fail'e kadar (2 eleman) dönmeli, geldi %d", len(verdicts))
+	if len(verdicts) != 1 {
+		t.Errorf("verdicts fail'e kadar (1 eleman) dönmeli, geldi %d", len(verdicts))
 	}
 }
 
 // TestRunBlockingLensesStopOnFirstFailFalseRunsAll: stopOnFirstFail=false
 // modunda TÜM mercekler çağrıldığını ve birden fazla "fail" varsa
 // isim/sebeplerin birleştirildiğini doğrular (seeds.go'nun eski davranışı).
+// #169: seedLenses 2 mercek olduğundan "birden fazla fail" senaryosu ikisinin
+// de fail dönmesiyle kurulur.
 func TestRunBlockingLensesStopOnFirstFailFalseRunsAll(t *testing.T) {
-	chat := &gateSeqChat{verdicts: []string{"fail", "unsure", "fail"}, errAt: -1}
+	chat := &gateSeqChat{verdicts: []string{"fail", "fail"}, errAt: -1}
 	outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", false, "seed")
 
-	if chat.calls != 3 {
-		t.Fatalf("stopOnFirstFail=false TÜM mercekleri çağırmalı, 3 çağrı beklenirdi, geldi %d", chat.calls)
+	if chat.calls != 2 {
+		t.Fatalf("stopOnFirstFail=false TÜM mercekleri çağırmalı, 2 çağrı beklenirdi, geldi %d", chat.calls)
 	}
-	if len(verdicts) != 3 {
+	if len(verdicts) != 2 {
 		t.Fatalf("verdicts tüm mercekleri içermeli, geldi %d", len(verdicts))
 	}
 	if !outcome.Blocked {
-		t.Fatal("iki mercek fail dönünce Blocked=true olmalı (fail baskın)")
+		t.Fatal("iki mercek de fail dönünce Blocked=true olmalı (fail baskın)")
 	}
-	wantCheck := seedLenses[0].name + ", " + seedLenses[2].name
+	wantCheck := seedLenses[0].name + ", " + seedLenses[1].name
 	if outcome.Check != wantCheck {
 		t.Errorf("birleştirilmiş mercek isimleri %q beklenirdi, geldi %q", wantCheck, outcome.Check)
 	}
@@ -89,9 +93,10 @@ func TestRunBlockingLensesStopOnFirstFailFalseRunsAll(t *testing.T) {
 // TestRunBlockingLensesErrorStopsEarlyBothModes: mercek çağrısı HATA
 // verirse (ağ/kota) İKİ modda da ilk hatada durulduğunu, outcome.Err
 // dolduğunu ve Blocked=false kaldığını doğrular (bloklama YOK ilkesi).
+// #169: ilk (index 0) çağrı hata verir, ikinci (son) mercek hiç çağrılmaz.
 func TestRunBlockingLensesErrorStopsEarlyBothModes(t *testing.T) {
 	for _, stopOnFirstFail := range []bool{true, false} {
-		chat := &gateSeqChat{errAt: 1}
+		chat := &gateSeqChat{errAt: 0}
 		outcome, verdicts := runBlockingLenses(context.Background(), chat, seedLenses, "prompt", stopOnFirstFail, "card")
 
 		if outcome.Err == nil {
@@ -100,15 +105,49 @@ func TestRunBlockingLensesErrorStopsEarlyBothModes(t *testing.T) {
 		if outcome.Blocked {
 			t.Errorf("stopOnFirstFail=%v: mercek hatası BLOKLAMAMALI", stopOnFirstFail)
 		}
-		if outcome.Check != seedLenses[1].name {
-			t.Errorf("stopOnFirstFail=%v: hata veren mercek adı %q beklenirdi, geldi %q", stopOnFirstFail, seedLenses[1].name, outcome.Check)
+		if outcome.Check != seedLenses[0].name {
+			t.Errorf("stopOnFirstFail=%v: hata veren mercek adı %q beklenirdi, geldi %q", stopOnFirstFail, seedLenses[0].name, outcome.Check)
 		}
-		if chat.calls != 2 {
-			t.Errorf("stopOnFirstFail=%v: hatada durulmalı, 2 çağrı beklenirdi (3.'sü çağrılmamalı), geldi %d", stopOnFirstFail, chat.calls)
+		if chat.calls != 1 {
+			t.Errorf("stopOnFirstFail=%v: hatada durulmalı, 1 çağrı beklenirdi (2.'si çağrılmamalı), geldi %d", stopOnFirstFail, chat.calls)
 		}
-		if len(verdicts) != 1 {
-			t.Errorf("stopOnFirstFail=%v: verdicts hataya kadar (1 eleman) dönmeli, geldi %d", stopOnFirstFail, len(verdicts))
+		if len(verdicts) != 0 {
+			t.Errorf("stopOnFirstFail=%v: verdicts hataya kadar (0 eleman) dönmeli, geldi %d", stopOnFirstFail, len(verdicts))
 		}
+	}
+}
+
+// TestMarketViabilityLensRemoved (#169, PO kararı 2026-09-25): pazar-
+// işlerliği merceği, lead'in altın set ölçümünde (oybirliği, 3 koşu) eşsiz
+// katkısı 0 çıktığından seedLenses/trendingLenses'ten KALDIRILDI — organik
+// yol (synthesize.go, seedLenses'i kullanır) ve tohum yolu (seeds.go,
+// seedLenses/trendingLenses) artık lensMarketViabilitySystem'i HİÇ ÇAĞIRMAZ;
+// bu iki listenin dışında hiçbir çağrı yeri yok, dolayısıyla liste kontrolü
+// çağrının yapılmadığını kanıtlar. lensMarketViabilitySystem/
+// lensMarketViabilityVersion (ve lens_prompts_v3.go'daki V3 sabiti)
+// KALDI — lens-ab registry'si ("market_viability") bunları hâlâ kullanıyor.
+func TestMarketViabilityLensRemoved(t *testing.T) {
+	for _, l := range seedLenses {
+		if l.system == lensMarketViabilitySystem {
+			t.Error("seedLenses artık pazar-işlerliği merceğini İÇERMEMELİ (#169)")
+		}
+		if l.name == "pazar-işlerliği" {
+			t.Error("seedLenses'te 'pazar-işlerliği' adlı mercek KALMAMALI (#169)")
+		}
+	}
+	for _, l := range trendingLenses {
+		if l.system == lensMarketViabilitySystem {
+			t.Error("trendingLenses artık pazar-işlerliği merceğini İÇERMEMELİ (#169)")
+		}
+		if l.name == "pazar-işlerliği" {
+			t.Error("trendingLenses'te 'pazar-işlerliği' adlı mercek KALMAMALI (#169)")
+		}
+	}
+	if len(seedLenses) != 2 {
+		t.Errorf("seedLenses 2 mercek içermeli (üçüncü-taraf, veri-erişimi), geldi %d: %+v", len(seedLenses), seedLenses)
+	}
+	if len(trendingLenses) != 3 {
+		t.Errorf("trendingLenses 3 mercek içermeli (ürünleştirilebilirlik + 2), geldi %d: %+v", len(trendingLenses), trendingLenses)
 	}
 }
 

@@ -66,9 +66,9 @@ func parseRadarSeeds(jsonl string) []radarSeed {
 	return out
 }
 
-// Mercek (lens) sistem prompt'ları — üçü de "pass" değilse tohum/kart elenir,
-// kart üretilmez (ya da yazılmaz). Şema synthesize.go'daki savunmacı VERDICT
-// parse desenini izler; bu üç mercek + seedLenses listesi #123 ile
+// Mercek (lens) sistem prompt'ları — ikisi de "pass" değilse tohum/kart
+// elenir, kart üretilmez (ya da yazılmaz). Şema synthesize.go'daki savunmacı
+// VERDICT parse desenini izler; bu iki mercek + seedLenses listesi #123 ile
 // synthesize.go'nun organik yolunda (SynthesizeIdeas) da AYNI sabitlerle
 // bloklayıcı olarak kullanılır — kaynak-bağımsız yazıldıkları için tohum
 // (radarSeed) ya da kart (store.Idea) girdisi fark etmez. Özgünlük merceği
@@ -123,6 +123,15 @@ Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 // lensDataAccessVersion (#164): lensDataAccessSystem'in sürümü.
 const lensDataAccessVersion = "v1"
 
+// #169: pazar-işlerliği merceği 2026-09-25'te bloklayıcı listelerden
+// (seedLenses/trendingLenses) KALDIRILDI — lead ölçümü (altın set, oybirliği/
+// Gemini/3 koşu) eşsiz katkısının 0 olduğunu gösterdi: merceğin tek başına
+// eleyebildiği iki aday (#163 §6.6 golden set id 100/121) canlı v1'de
+// 1/3 ve 2/3 oranında yazı-tura sonuç verirken pazar v3'te 3/3 pass'tı, ve
+// üretim kaydında (09-21'den beri) bu mercek hiç eleme yapmadı (PO kararı,
+// #169). lensMarketViabilitySystem/lensMarketViabilityVersion (ve
+// lens_prompts_v3.go'daki V3 sabiti) SABİT KALIYOR — lens-ab registry'si
+// ("market_viability") bunları hâlâ kullanıyor, ileride yeniden ölçülebilsin.
 const lensMarketViabilitySystem = `You evaluate whether a proposed software product idea has REALISTIC monetization potential, either in Turkey (TR) or globally.
 
 PASS if there is a plausible path to real revenue: a market of paying users/businesses exists, similar products already charge for this, or the pain is acute enough that people would pay.
@@ -190,19 +199,20 @@ type seedLens struct {
 	version string
 }
 
-// seedLenses, üç merceğin adı+sistem prompt'u+sürümü (log/rapor için Türkçe
+// seedLenses, iki merceğin adı+sistem prompt'u+sürümü (log/rapor için Türkçe
 // ad). kind=="revenue" tohumlarda TEK BAŞINA, kind=="trending" tohumlarda
 // lensProductizableSystem'in ÖNÜNE eklenmiş biçimde kullanılır (bkz.
 // trendingLenses). #123: synthesize.go'nun organik yolu (SynthesizeIdeas)
-// da bu AYNI listeyi kullanır — iki kopya mercek/prompt YOK.
+// da bu AYNI listeyi kullanır — iki kopya mercek/prompt YOK. #169: üçüncü
+// mercek (pazar-işlerliği) eşsiz katkısı 0 ölçüldüğünden KALDIRILDI —
+// lensMarketViabilitySystem tanımının üstündeki nota bakın.
 var seedLenses = []seedLens{
 	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem, lensThirdPartyVersion},
 	{"veri-erişimi", lensDataAccessSystem, lensDataAccessVersion},
-	{"pazar-işlerliği", lensMarketViabilitySystem, lensMarketViabilityVersion},
 }
 
 // trendingLenses, ivme tohumlarının koştuğu tüm mercekler: 4. mercek
-// (ürünleştirilebilirlik) + mevcut 3 mercek AYNEN (#89 kapı madde 4-5).
+// (ürünleştirilebilirlik) + mevcut 2 mercek AYNEN (#89 kapı madde 4-5).
 var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem, lensProductizableVersion}}, seedLenses...)
 
 type lensVerdict struct {
@@ -471,7 +481,7 @@ func momentumEvidenceLine(stars, lastDelta, persistedDays int) string {
 
 // seedCardSystemTmpl: gelir kanıtlı bir emsalden + TR açısından market_derived
 // kart üretir. synthesizeSystemTmpl'den kasıtlı olarak farklı ve daha kısadır
-// — burada üçüncü-taraf/veri-erişimi elemesi zaten 3 mercekten geçti, LLM'e
+// — burada üçüncü-taraf/veri-erişimi elemesi zaten 2 mercekten geçti, LLM'e
 // yeniden skip kararı verdirilmez.
 const seedCardSystemTmpl = `You generate a concrete software product idea card ("market_derived") from a validated market seed — an existing product or trend with real revenue/traction evidence — adapted with a realistic localization angle.
 
@@ -527,7 +537,7 @@ func seedRawPost(s radarSeed) store.RawPost {
 	}
 }
 
-// ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 3
+// ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 2
 // mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir (eliminations'a
 // stage=blocking_lens kaydedilir, subject=seed.Name, detail=seed.Summary);
 // aksi halde (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri
@@ -618,7 +628,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// yazılabilmesi ve "unsure" mercek(ler)in loglanabilmesi için) — fail
 		// baskındır, birden fazla "fail" varsa outcome.Check/Reason ", "/"; "
 		// ile birleştirilmiş listedir (mevcut log biçimiyle birebir).
-		// subject="seed" (#164): bu 3(-4) mercek ham tohum alanları
+		// subject="seed" (#164): bu 2(-3) mercek ham tohum alanları
 		// (lensUserPrompt) üzerinde çalışır — kart henüz üretilmedi.
 		lensOutcome, verdicts := runBlockingLenses(ctx, chat, lenses, lensUserPrompt(seed), false, "seed")
 		if lensOutcome.Err != nil {
@@ -633,7 +643,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// tohum+prompt HER KOŞUDA AYNI "unsure" cevabını verir; bu, LLM
 		// hatasındaki GEÇİCİLİKTEN farklıdır (hata geçicidir, unsure
 		// deterministiktir) — unsure'u da "yeniden dene" sayıp imleçsiz
-		// atlasaydık tohum HİÇBİR ZAMAN ilerlemez, koşu başına 1-3 mercek
+		// atlasaydık tohum HİÇBİR ZAMAN ilerlemez, koşu başına 1-2 mercek
 		// çağrısını sonsuza dek boşa yakardı; üstelik yeni prompt bilerek
 		// "tanımadığın sağlayıcıda unsure de" diyor ve TR bizim ana alanımız
 		// — yani unsure SIKÇA dönecek. Kart normal üretilir; veri-erişimi
@@ -733,7 +743,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			log.Printf("seeds: %q özgünlük tartışmalı (%s) — kart yazılıyor, işaretli: %s", idea.Title, distinctOutcome.Criterion, distinctOutcome.Reason)
 		} else if distinctOutcome.Stage == "distinctiveness" {
 			// #164, #166: K1|K2 blokta kart hiç yazılmaz — o ana kadarki TÜM
-			// mercek çağrıları (3(-4) bloklayıcı + özgünlük) TEK kalıcı yeri
+			// mercek çağrıları (2(-3) bloklayıcı + özgünlük) TEK kalıcı yeri
 			// olan eliminations.verdicts'e taşınır (K3-K4'te de aynısı
 			// zararsızca tekrarlanır, kart zaten idea.LensVerdicts ile de
 			// yazılacak).
