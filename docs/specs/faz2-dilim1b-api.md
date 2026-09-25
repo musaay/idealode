@@ -11,7 +11,7 @@ UI DB'ye dokunmaz. Tek binary, üç süreç:
 - `serve` — HTML render; yalnız `API_BASE_URL` görür, DB bağlantısı açmaz.
 
 ## Sözleşme (her iki taraf buna göre yazar; değiştirmek lead onayı ister)
-Base: `API_BASE_URL` (ör. `http://idealode-api.railway.internal:8080`). Tüm yanıtlar
+Base: `API_BASE_URL` (ör. `http://<api-iç-adres>:8080`). Tüm yanıtlar
 `Content-Type: application/json; charset=utf-8`. Hata gövdesi: `{"error":"not_found"}`
 (`code` değerleri: `not_found`, `bad_request`, `internal`, `timeout` — 503). Tarihler RFC3339 UTC.
 
@@ -62,4 +62,4 @@ ui/internal/web/web_test.go          502 yolu testi
 
 ## Deploy (lead)
 Railway: yeni `idealode-api` servisi (start `/app/idealode api`, DATABASE_URL referans, public domain YOK);
-`idealode-web`: DATABASE_URL kaldır, `API_BASE_URL=http://idealode-api.railway.internal:8080`.
+`idealode-web`: DATABASE_URL kaldır, `API_BASE_URL=http://<api-iç-adres>:8080`.

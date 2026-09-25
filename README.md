@@ -111,7 +111,7 @@ giriş, tepki ve sohbet sonraki dilimlerde. Ayrı Go modülü — backend'i impo
 etmez, yalnız `apiclient` üzerinden HTTP ile konuşur.
 
 - **DB'ye bağlanmaz** — kartları `API_BASE_URL` üzerinden `idealode api`'den
-  okur (zorunlu ortam değişkeni; ör. `http://idealode-api.railway.internal:8080`).
+  okur (zorunlu ortam değişkeni; ör. `http://<api-iç-adres>:8080`).
   API kapalıyken/yanıt vermezken galeri ve kart sayfaları 502 şablonlu bir
   hata sayfası gösterir, süreç düşmez.
 - Adres: `PORT` ortam değişkeni, varsayılan `8080`. Sağlık kontrolü:
