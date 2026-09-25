@@ -108,9 +108,14 @@ type postBatch struct {
 //     çağrıda birleşir; bu, davranışı DEĞİŞTİRMEZ, yalnız çağrı sayısını
 //     düşürür (#149 — 51 gönderi için 50 çağrı sorunu).
 //
-// LLM hata verirse (429/ağ), bozuk/boş JSON dönerse ya da bir gönderiyi hiç
-// atamazsa, o gönderi ESKİ davranışa (domain_tag'i doğrudan tema adı sayma)
-// düşer — hiçbir gönderi temasız kalmaz.
+// LLM hata verirse (429/5xx/ağ/diğer 400'ler) ya da cevap bozuk/boş JSON'sa,
+// o partideki postlar bu koşuda HİÇ bağlanmaz — theme_posts'a yazılmadıkları
+// için UnthemedAnalyses onları bir sonraki koşuda yeniden seçer (#194;
+// theme_posts.linked_at, #189, geçici bir parti hatasını artık KALICI
+// kayba çevirmez). Yalnız modelin bir gönderiyi hiç ATAMAMASI (cevap
+// geçerliyse ama post listede yoksa) ESKİ davranışa (domain_tag'i doğrudan
+// tema adı sayma) düşürülür — bu DEĞİŞMEDİ. clusterBatch'in tam durum
+// ayrımı için bkz. clusterResult ve clusterBatch doc-yorumu.
 //
 // Etiketler arası isim çakışması (#149 review bulgusu): theme_name DB'de
 // GLOBAL UNIQUE'tir ve UpsertTheme çakışmada domain_tag'i GÜNCELLEMEZ.
@@ -166,19 +171,29 @@ func GroupThemes(ctx context.Context, st *store.Store, chat llm.Chat) (int, erro
 		}
 	}
 
-	linked, clustered, fallback, disambiguated, retrySplits, jsonRetrySplits := 0, 0, 0, 0, 0, 0
+	linked, clustered, fallback, disambiguated, retrySplits, jsonRetrySplits, retried := 0, 0, 0, 0, 0, 0, 0
 	for _, batch := range batches {
 		if ctx.Err() != nil {
 			return linked, ctx.Err()
 		}
 
-		assignments, splits, jsonSplits := clusterBatch(ctx, chat, batch, existingByTag)
-		retrySplits += splits
-		jsonRetrySplits += jsonSplits
+		result := clusterBatch(ctx, chat, batch, existingByTag)
+		retrySplits += result.splits413
+		jsonRetrySplits += result.splitsJSON
 
 		for i, a := range batch.posts {
+			if result.retry[i] {
+				// Madde (c)/(d) (#194): bu post LLM hatası ya da bozuk cevap
+				// yüzünden bu koşuda hiç bağlanmaz — theme_posts'a hiç
+				// yazılmadığından UnthemedAnalyses onu bir sonraki koşuda
+				// yeniden seçer (linked_at koruması, #189, burada devreye
+				// girmez çünkü satır hiç açılmadı).
+				retried++
+				continue
+			}
+
 			tag := batch.postTags[i]
-			themeName, ok := assignments[i]
+			themeName, ok := result.assignments[i]
 			if !ok || themeName == "" {
 				// Eski davranış: kova etiketi doğrudan tema adı.
 				themeName = tag
@@ -216,8 +231,8 @@ func GroupThemes(ctx context.Context, st *store.Store, chat llm.Chat) (int, erro
 	if err := st.RefreshThemeStats(ctx); err != nil {
 		return linked, err
 	}
-	log.Printf("themes: %d post temalara bağlandı (%d kova, %d parti, %d kova token sınırından bölündü, %d parti 413 nedeniyle bölünüp yeniden denendi, %d parti json_validate_failed nedeniyle bölünüp yeniden denendi, %d LLM kümeleme, %d eski davranış, %d ad çakışması ayrıştırıldı)",
-		linked, len(bucketOrder), len(batches), tokenSplitBuckets, retrySplits, jsonRetrySplits, clustered, fallback, disambiguated)
+	log.Printf("themes: %d post temalara bağlandı (%d kova, %d parti, %d kova token sınırından bölündü, %d parti 413 nedeniyle bölünüp yeniden denendi, %d parti json_validate_failed nedeniyle bölünüp yeniden denendi, %d LLM kümeleme, %d eski davranış, %d gönderi LLM hatası nedeniyle bağlanmadı (sonraki koşuda yeniden denenecek), %d ad çakışması ayrıştırıldı)",
+		linked, len(bucketOrder), len(batches), tokenSplitBuckets, retrySplits, jsonRetrySplits, clustered, fallback, retried, disambiguated)
 	return linked, nil
 }
 
@@ -379,38 +394,72 @@ func splitBucketByTokens(tag string, bucket []store.PostAnalysis) []bucketChunk 
 	return chunks
 }
 
+// clusterResult, clusterBatch'in TEK bir parti (ya da 413/json_validate_failed
+// sonrası özyinelemeli bölünen bir alt-parti) için sonucunu taşır (#194).
+// Her post-indeksi (parti-içi, 0-bazlı) üç durumdan TAM OLARAK BİRİNE düşer:
+//   - assignments'ta VAR: model başarıyla atadı, çağıran temaya bağlar.
+//   - retry'de VAR: LLM hatası ya da bozuk cevap yüzünden bu koşuda
+//     BAĞLANMAZ — theme_posts'a hiç yazılmaz, linked_at (#189) koruması
+//     devreye girmez, bir sonraki GroupThemes koşusunda UnthemedAnalyses
+//     onu yeniden seçer.
+//   - HİÇBİRİNDE YOK: model postu atlamış (assignments'ta yok) VE bir hata
+//     da yaşanmamış (retry'de de yok) — çağıran bunu ESKİ davranışa
+//     (domain_tag'i doğrudan tema adı sayma) düşürür; bu KALICIDIR.
+//
+// splits413/splitsJSON: yalnız log sayaçları (#156, #158), davranışı
+// etkilemez.
+type clusterResult struct {
+	assignments map[int]string
+	retry       map[int]bool
+	splits413   int
+	splitsJSON  int
+}
+
+// retryAll, bir partinin TÜM post indekslerini retry kümesi olarak döner —
+// parti tamamen bir LLM hatasına (madde c) ya da bozuk cevaba (madde d)
+// takıldığında kullanılır.
+func retryAll(n int) map[int]bool {
+	out := make(map[int]bool, n)
+	for i := 0; i < n; i++ {
+		out[i] = true
+	}
+	return out
+}
+
 // clusterBatch, packBuckets'ın ürettiği TEK parti için LLM çağrısı yapar ve
-// parti içindeki her post için (parti-içi 0-bazlı indeks -> tema adı)
-// haritasını + kaç kez 413 nedeniyle (splits413) ve kaç kez
-// json_validate_failed nedeniyle (splitsJSON) bölünüp yeniden denendiğini
-// (yalnız log için) döner (#149, #156, #158). LLM çağrısı hata verirse ya da
-// cevap bozuk/boş JSON'sa nil harita döner (tek satır TR log burada
-// basılır) — çağıran GroupThemes her postu ESKİ davranışa (domain_tag)
-// düşürür. Model bir postu hiç atamazsa o postun indeksi haritada yer almaz;
-// aynı geri düşüş yalnız o post için uygulanır.
+// sonucu clusterResult olarak döner (#149, #156, #158, #194). Davranış,
+// hatanın TÜRÜNE göre ayrışır:
 //
-// 413 (istek çok büyük — #156) VE json_validate_failed (modelin geçerli JSON
-// üretememesi, tipik olarak çok etiketli/büyük partide uzun çıktı — #158):
-// packBuckets tahmini bir bütçeyle paketler, gerçek tokenizer'la birebir
-// örtüşmeyebilir; ayrıca model büyük partide JSON'u bozabilir. Sağlayıcı bu
-// iki hatadan BİRİNİ döndürürse (llm.IsRequestTooLarge / IsJSONValidateFailed)
-// parti İKİYE bölünür, HER YARI ayrı ayrı (özyinelemeli) yeniden denenir; tek
-// gönderiye inince artık bölünemez, o post ESKİ davranışa düşer (sonsuz
-// özyineleme YOK — üst sınır post sayısı kadar derinlik). 429/5xx (kota) ve
-// DİĞER 400'ler (json_validate_failed DIŞINDAKİLER) BİLEREK bu yola GİRMEZ:
-// 429/5xx için llm paketi bunu zaten kendi içinde backoff ile yeniden dener,
-// tüm denemeler tükenirse buraya normal (bölünmeyen) hata olarak düşer;
-// diğer 400'ler bölmekle çözülecek bir istek boyutu/çıktı sorunu olmadığından
-// doğrudan eski davranışa düşülür.
+//	a) 413 (istek çok büyük — #156) VE json_validate_failed (modelin geçerli
+//	   JSON üretememesi — #158) VE parti birden fazla post içeriyor: parti
+//	   İKİYE bölünür, HER YARI ayrı ayrı (özyinelemeli) yeniden denenir —
+//	   davranış DEĞİŞMEDİ. Yarılardan biri (c)/(d)'ye takılırsa yalnız O
+//	   YARININ postları retry kümesine girer (offset'lenerek birleştirilir),
+//	   başarılı yarının atamaları KULLANILIR.
+//	b) 413/json_validate_failed VE tek gönderiye inmiş (daha fazla
+//	   bölünemez, sonsuz özyineleme YOK): davranış DEĞİŞMEDİ — o post ESKİ
+//	   davranışa düşer (assignments/retry boş döner).
+//	c) DİĞER tüm LLM hataları — 429/5xx (llm paketinin kendi backoff'lu
+//	   yeniden denemeleri tükendikten sonra buraya normal hata olarak
+//	   düşer), json_validate_failed DIŞINDAKİ 400'ler, ağ hataları: parti
+//	   BÖLÜNMEZ, TÜM postlar retry'e girer (#194 — önceden bunlar da eski
+//	   davranışa düşüyordu; theme_posts.linked_at, #189, yüzünden bu
+//	   KALICI bir kayıptı).
+//	d) Cevap parse edilemedi (parseThemeAssignments hatası, bozuk/boş
+//	   JSON): (c) ile aynı — TÜM postlar retry'e girer.
+//	e) Cevap GEÇERLİ parse edildi ama model bazı postları atlamış (prompt
+//	   "omit a post if unsure"): atlanan postlar ESKİ davranışa düşer —
+//	   DEĞİŞMEDİ, retry'e GİRMEZLER (assignments'ta da yoklar; çağıran bu
+//	   ayrımı retry haritasına bakarak yapar).
 //
-// NOT (#149 review bulgusu): burada BİLEREK etiketler arası bellek-içi bir
-// "themeOwner" kontrolü YOK — böyle bir kontrol yalnız BU PARTİDEKİ
-// etiketleri görebilir, partide olmayan bir etiketin mevcut temasıyla
-// çakışan bir adı KAÇIRIR (erken ret zararsız ama yanıltıcı bir güvenlik
-// hissi verir). Asıl garanti çağıran GroupThemes'te upsertThemeForPost ile
-// DB SINIRINDA uygulanır — tüm çakışma türlerini (partide olsun olmasın)
-// tek yerden yakalar.
-func clusterBatch(ctx context.Context, chat llm.Chat, batch postBatch, existingByTag map[string][]store.Theme) (assignments map[int]string, splits413, splitsJSON int) {
+// NOT (#149 review bulgusu, hâlâ geçerli): burada BİLEREK etiketler arası
+// bellek-içi bir "themeOwner" kontrolü YOK — böyle bir kontrol yalnız BU
+// PARTİDEKİ etiketleri görebilir, partide olmayan bir etiketin mevcut
+// temasıyla çakışan bir adı KAÇIRIR (erken ret zararsız ama yanıltıcı bir
+// güvenlik hissi verir). Asıl garanti çağıran GroupThemes'te
+// upsertThemeForPost ile DB SINIRINDA uygulanır — tüm çakışma türlerini
+// (partide olsun olmasın) tek yerden yakalar.
+func clusterBatch(ctx context.Context, chat llm.Chat, batch postBatch, existingByTag map[string][]store.Theme) clusterResult {
 	user := themeClusterUserPrompt(batch, existingByTag)
 	// Yargı çağrısı (tema kümeleme): sıcaklık 0 — tutarlı karar (#106).
 	raw, err := chat.ChatJSONWithTemperature(ctx, themeClusterSystem, user, 0)
@@ -418,6 +467,7 @@ func clusterBatch(ctx context.Context, chat llm.Chat, batch postBatch, existingB
 		tooLarge := llm.IsRequestTooLarge(err)
 		jsonFailed := llm.IsJSONValidateFailed(err)
 		if (tooLarge || jsonFailed) && len(batch.posts) > 1 {
+			// Madde (a): bölünebilir parti — davranış AYNEN korunur.
 			reason := "413"
 			if jsonFailed {
 				reason = "json_validate_failed"
@@ -425,35 +475,62 @@ func clusterBatch(ctx context.Context, chat llm.Chat, batch postBatch, existingB
 			left, right := splitPostBatch(batch)
 			log.Printf("temalar: parti (%s, %d gönderi) %s aldı — ikiye bölünüp (%d + %d gönderi) yeniden deneniyor",
 				strings.Join(batch.tags, ","), len(batch.posts), reason, len(left.posts), len(right.posts))
-			leftAssignments, leftSplits413, leftSplitsJSON := clusterBatch(ctx, chat, left, existingByTag)
-			rightAssignments, rightSplits413, rightSplitsJSON := clusterBatch(ctx, chat, right, existingByTag)
+			leftResult := clusterBatch(ctx, chat, left, existingByTag)
+			rightResult := clusterBatch(ctx, chat, right, existingByTag)
+
 			merged := map[int]string{}
-			for i, name := range leftAssignments {
+			for i, name := range leftResult.assignments {
 				merged[i] = name
 			}
+			retry := map[int]bool{}
+			for i := range leftResult.retry {
+				retry[i] = true
+			}
 			offset := len(left.posts)
-			for i, name := range rightAssignments {
+			for i, name := range rightResult.assignments {
 				merged[offset+i] = name
 			}
-			splits413 = leftSplits413 + rightSplits413
-			splitsJSON = leftSplitsJSON + rightSplitsJSON
+			for i := range rightResult.retry {
+				retry[offset+i] = true
+			}
+
+			splits413 := leftResult.splits413 + rightResult.splits413
+			splitsJSON := leftResult.splitsJSON + rightResult.splitsJSON
 			if jsonFailed {
 				splitsJSON++
 			} else {
 				splits413++
 			}
-			return merged, splits413, splitsJSON
+			return clusterResult{assignments: merged, retry: retry, splits413: splits413, splitsJSON: splitsJSON}
 		}
-		log.Printf("temalar: parti (%s) için LLM HATA: %v — eski davranışa düşülüyor", strings.Join(batch.tags, ","), err)
-		return nil, 0, 0
+		if tooLarge || jsonFailed {
+			// Madde (b): tek gönderiye inmiş, hâlâ 413/json_validate_failed —
+			// daha fazla bölünemez, davranış DEĞİŞMEDİ: eski davranışa düşülür.
+			reason := "413"
+			if jsonFailed {
+				reason = "json_validate_failed"
+			}
+			log.Printf("temalar: parti (%s) tek gönderiye indi, hâlâ %s alıyor — eski davranışa düşülüyor", strings.Join(batch.tags, ","), reason)
+			return clusterResult{}
+		}
+		// Madde (c): diğer tüm LLM hataları (429/5xx/ağ/diğer 400'ler) —
+		// parti BÖLÜNMEZ, tüm postlar retry'e girer (#194).
+		log.Printf("temalar: parti (%s) için LLM HATA: %v — bu partideki %d gönderi bağlanmadı, sonraki koşuda yeniden denenecek",
+			strings.Join(batch.tags, ","), err, len(batch.posts))
+		return clusterResult{retry: retryAll(len(batch.posts))}
 	}
 
-	assignments, err = parseThemeAssignments(raw, len(batch.posts))
+	assignments, err := parseThemeAssignments(raw, len(batch.posts))
 	if err != nil {
-		log.Printf("temalar: parti (%s) LLM cevabı bozuk: %v — eski davranışa düşülüyor", strings.Join(batch.tags, ","), err)
-		return nil, 0, 0
+		// Madde (d): cevap parse edilemedi — tüm postlar retry'e girer (#194).
+		log.Printf("temalar: parti (%s) LLM cevabı bozuk: %v — bu partideki %d gönderi bağlanmadı, sonraki koşuda yeniden denenecek",
+			strings.Join(batch.tags, ","), err, len(batch.posts))
+		return clusterResult{retry: retryAll(len(batch.posts))}
 	}
-	return assignments, 0, 0
+	// Madde (e): parse edildi, model bazı postları atlamış olabilir — o
+	// postlar assignments'ta yok, retry'de de yok; çağıran eski davranışa
+	// düşürür (DEĞİŞMEDİ).
+	return clusterResult{assignments: assignments}
 }
 
 // splitPostBatch, 413 sonrası yeniden deneme için bir partiyi post
