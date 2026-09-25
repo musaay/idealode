@@ -168,7 +168,7 @@ func TestFetchTrendingRepoMetaVarNotNilByDefault(t *testing.T) {
 // --- ProcessSeeds tam akış entegrasyonu (#89 AC2, AC3) — DB gerektirir,
 // TEST_DATABASE_URL yoksa atlanır (bkz. seedTestStore). ---
 
-// fakeMomentumChat: 4 mercek (ürünleştirilebilirlik + mevcut 3) + kart
+// fakeMomentumChat: 3 mercek (ürünleştirilebilirlik + mevcut 2, #169) + kart
 // üretimi için sabit cevap döner.
 type fakeMomentumChat struct {
 	lensVerdict  string

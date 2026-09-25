@@ -50,7 +50,8 @@ func TestStagePropagationCoherentSubset(t *testing.T) {
 
 // TestStagePropagationBlockedByIdeaLens, synthesize.go'daki
 // `blockedByIdeaLens(llm.WithStage(ctx, "mercek"), ...)` çağrı noktasının
-// üç mercek çağrısının TÜMÜNÜ "mercek" aşamasına yazdırdığını doğrular.
+// iki mercek çağrısının (#169) TÜMÜNÜ "mercek" aşamasına yazdırdığını
+// doğrular (len(seedLenses) kullanılır — sayı sabit KODLANMAZ).
 func TestStagePropagationBlockedByIdeaLens(t *testing.T) {
 	chat := newUsageProbeChat(t, `{"verdict":"pass","reason":"ok"}`)
 	meter := llm.NewUsageMeter()

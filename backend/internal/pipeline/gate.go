@@ -11,9 +11,10 @@ import (
 	"github.com/musaay/idealode/backend/internal/store"
 )
 
-// gate.go (#153): kart olup olmama kararını veren 4 kontrolün (3 bloklayıcı
-// mercek: üçüncü-taraf/veri-erişimi/pazar-işlerliği + özgünlük merceği)
-// SONUCUNU tek tipte taşıyan ve sonucuna göre yapılan yan etkileri (eleme
+// gate.go (#153): kart olup olmama kararını veren 3 kontrolün (2 bloklayıcı
+// mercek: üçüncü-taraf/veri-erişimi — #169: pazar-işlerliği eşsiz katkısı 0
+// ölçüldüğünden kaldırıldı + özgünlük merceği) SONUCUNU tek tipte taşıyan ve
+// sonucuna göre yapılan yan etkileri (eleme
 // kaydı, tema/tohum bekletme) TEK yerde uygulayan ortak katman. Organik yol
 // (synthesize.go) ve tohum yolu (seeds.go) bilinçli olarak FARKLI davranır
 // (mercek girdisi, zamanı, ilk fail'de durma politikası, hata sonrası
@@ -59,9 +60,9 @@ type gateOutcome struct {
 	Verdicts []store.LensVerdict
 }
 
-// runBlockingLenses, bloklayıcı mercekleri (üçüncü-taraf/veri-erişimi/
-// pazar-işlerliği — kind=="trending" tohumlarda +ürünleştirilebilirlik)
-// userPrompt üzerinde SIRAYLA çalıştırır (#123, #153 — organik ve tohum
+// runBlockingLenses, bloklayıcı mercekleri (üçüncü-taraf/veri-erişimi —
+// kind=="trending" tohumlarda +ürünleştirilebilirlik) userPrompt üzerinde
+// SIRAYLA çalıştırır (#123, #153 — organik ve tohum
 // yolunun TEK ortak uygulaması).
 //
 // stopOnFirstFail=true: organik yoldaki eski blockedByIdeaLens davranışı
@@ -85,7 +86,7 @@ type gateOutcome struct {
 //
 // subject (#164): bu çağrının hangi girdi üzerinde çalıştığını taşır —
 // "card" (üretilmiş kart alanları, organik yol) ya da "seed" (ham tohum
-// alanları, tohum yolunun 3(-4) bloklayıcı merceği) — dönen gateOutcome.
+// alanları, tohum yolunun 2(-3) bloklayıcı merceği) — dönen gateOutcome.
 // Verdicts'in her elemanına AYNEN yazılır (store.LensVerdict.Subject).
 //
 // llm.WithStage(ctx, "mercek") BURADA uygulanır.
