@@ -63,6 +63,16 @@ func RethemeDryRun(ctx context.Context, st *store.Store, minEvidence, limit int)
 	if err != nil {
 		return fmt.Errorf("hedef küme sayımı: %w", err)
 	}
+
+	// #189: eski tip temalardaki, ama artık GroupThemes'ten geçmiş (linked_at
+	// DOLU) bağların sayısı — kuyruğun neden sıfıra indiğini/inmediğini
+	// göstermek için hedef küme boş olsa bile raporlanır.
+	alreadyReclustered, err := st.RethemeAlreadyReclusteredCount(ctx, minEvidence)
+	if err != nil {
+		return fmt.Errorf("zaten kümelenmiş bağ sayımı: %w", err)
+	}
+	log.Printf("retheme (dry-run): %d gönderi LLM kümelemesinden zaten geçti, tekrar alınmaz", alreadyReclustered)
+
 	if total == 0 {
 		log.Printf("retheme (dry-run): hedef küme boş, çözülecek gönderi yok")
 		return nil
