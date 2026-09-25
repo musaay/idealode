@@ -339,6 +339,78 @@ func TestProcessSeedsTrendingPassCreatesMomentumCard(t *testing.T) {
 	}
 }
 
+// trackingMomentumChat (#167): fakeMomentumChat'in davranışını korur ve HER
+// ÇAĞRIYI sistem prompt'una göre sayar — ivme tohumunda üçüncü-taraf
+// merceğinin HÂLÂ çağrıldığını doğrulamak için (#167'nin ATLAMA davranışı
+// yalnız kind="revenue" içindir, kind="trending" ETKİLENMEZ).
+type trackingMomentumChat struct {
+	lensVerdict  string
+	cardResponse string
+	calls        map[string]int
+}
+
+func (f *trackingMomentumChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *trackingMomentumChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[system]++
+	if strings.Contains(system, `"momentum_derived"`) {
+		return f.cardResponse, nil
+	}
+	return fmt.Sprintf(`{"verdict":%q,"reason":"test-reason"}`, f.lensVerdict), nil
+}
+
+// TestProcessSeedsTrendingStillCallsThirdPartyLens (#167): ivme tohumunda
+// (kind="trending") üçüncü-taraf merceği DEĞİŞMEDEN çağrılır — gelir
+// tohumundaki atlama yalnız kind="revenue" içindir. Kartın lens_verdicts'inde
+// "skipped" verdict OLMAMALI.
+func TestProcessSeedsTrendingStillCallsThirdPartyLens(t *testing.T) {
+	st := seedTestStore(t)
+	repo := "acme/still-calls-thirdparty"
+	seedURL := "https://github.com/" + repo
+	title := "Ivme Ucuncu Taraf Cagrilir"
+	cleanupTrendingRepo(t, st, repo, seedURL, title)
+	t.Cleanup(func() { cleanupTrendingRepo(t, st, repo, seedURL, title) })
+
+	// 3 farklı gün -> kalıcılık şartı geçer.
+	seedTrendingRawPosts(t, st, repo, 3, 42)
+	withFakeRepoMeta(t, connector.RepoMeta{
+		CreatedAt: time.Now().Add(-60 * 24 * time.Hour), StargazersCount: 800, ForksCount: 80, OpenIssuesCount: 30,
+	}, nil)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":%q,"summary":"özet","evidence":"★800, +42/hafta (GitHub trending)","source_url":%q,"tr_angle":"t","kind":"trending"}`, title, seedURL)
+	chat := &trackingMomentumChat{
+		lensVerdict: "pass",
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":3,"monetization_signal":1,
+			"known_competitors_ai_guess":"","domain_tags":["test-momentum-tag"]}`, title),
+	}
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	n, err := ProcessSeeds(context.Background(), cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("1 idea beklenirdi, geldi: %d", n)
+	}
+
+	if chat.calls[lensThirdPartySystem] == 0 {
+		t.Error("üçüncü-taraf merceği ivme tohumunda HÂLÂ çağrılmalı (#167 yalnız gelir tohumunu etkiler)")
+	}
+
+	lensVerdicts := mustLensVerdicts(t, context.Background(), st, title)
+	for i, lv := range lensVerdicts {
+		if lv.Verdict == "skipped" {
+			t.Errorf("lens_verdicts[%d] ivme tohumunda skipped OLMAMALI, geldi: %+v", i, lv)
+		}
+	}
+}
+
 func TestProcessSeedsTrendingWeeklyCapSkipsSecondSeedNoCursor(t *testing.T) {
 	st := seedTestStore(t)
 	repoA := "acme/cap-a"

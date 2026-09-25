@@ -200,12 +200,14 @@ type seedLens struct {
 }
 
 // seedLenses, iki merceğin adı+sistem prompt'u+sürümü (log/rapor için Türkçe
-// ad). kind=="revenue" tohumlarda TEK BAŞINA, kind=="trending" tohumlarda
-// lensProductizableSystem'in ÖNÜNE eklenmiş biçimde kullanılır (bkz.
-// trendingLenses). #123: synthesize.go'nun organik yolu (SynthesizeIdeas)
-// da bu AYNI listeyi kullanır — iki kopya mercek/prompt YOK. #169: üçüncü
-// mercek (pazar-işlerliği) eşsiz katkısı 0 ölçüldüğünden KALDIRILDI —
-// lensMarketViabilitySystem tanımının üstündeki nota bakın.
+// ad) — organik yolda (synthesize.go'nun SynthesizeIdeas'ı, #123: bu AYNI
+// listeyi kullanır, iki kopya mercek/prompt YOK) VE trendingLenses'in
+// temelinde DEĞİŞMEDEN kullanılır. Tohum yolunun gelir dalı (kind=="revenue")
+// bu listeyi ARTIK DOĞRUDAN kullanmaz — üçüncü-taraf merceği çıkarılmış
+// revenueLenses'i kullanır (#167, aşağıda) — bu listenin KENDİSİ
+// DEĞİŞTİRİLMEZ. #169: üçüncü mercek (pazar-işlerliği) eşsiz katkısı 0
+// ölçüldüğünden KALDIRILDI — lensMarketViabilitySystem tanımının üstündeki
+// nota bakın.
 var seedLenses = []seedLens{
 	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem, lensThirdPartyVersion},
 	{"veri-erişimi", lensDataAccessSystem, lensDataAccessVersion},
@@ -213,7 +215,33 @@ var seedLenses = []seedLens{
 
 // trendingLenses, ivme tohumlarının koştuğu tüm mercekler: 4. mercek
 // (ürünleştirilebilirlik) + mevcut 2 mercek AYNEN (#89 kapı madde 4-5).
+// #167 revenueLenses'in AKSİNE bu liste DEĞİŞMEDİ — ivme tohumunun tanım
+// gereği bağımsız bir şirketçe zaten satılıyor olma kanıtı YOK, üçüncü-taraf
+// sorusu hâlâ açık.
 var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem, lensProductizableVersion}}, seedLenses...)
+
+// revenueLenses (#167, PO kararı 09-20, #163 §3.3): gelir tohumu yolunun
+// (kind=="revenue", boş kind de dahil — mevcut varsayılan korunur)
+// kullandığı FİLTRELENMİŞ dilim — seedLenses'ten üçüncü-taraf merceği
+// (lensThirdPartySystem) ÇIKARILMIŞ hali, yalnız veri-erişimi kalır.
+// Gerekçe: gelir kanıtlı bir tohum tanım gereği bağımsız bir şirket
+// tarafından ZATEN SATILAN bir üründür — üçüncü-tarafça inşa edilebilirlik
+// sorusu tohumun kendi kanıtıyla ÖNCEDEN YANITLANMIŞTIR (mercek tohum
+// yolunda 09-21'den beri 3/3 pass, #163 denetiminde 0/~6 fail). seedLenses'in
+// KENDİSİ DEĞİŞMEZ (organik yol ve trendingLenses hâlâ üçüncü-taraf
+// merceğini taşır) — bu yalnız tohum yoluna özel bir dilimdir, iki kopya
+// mercek TANIMI YOK (system prompt/sürüm seedLenses'ten AYNEN alınır).
+// Atlanan mercek için ProcessSeeds ayrıca kalıcı "skipped" bir
+// store.LensVerdict kaydı ekler (bkz. ProcessSeeds içindeki ekleme).
+var revenueLenses = func() []seedLens {
+	var out []seedLens
+	for _, l := range seedLenses {
+		if l.system != lensThirdPartySystem {
+			out = append(out, l)
+		}
+	}
+	return out
+}()
 
 type lensVerdict struct {
 	Verdict   string `json:"verdict"`
@@ -537,13 +565,18 @@ func seedRawPost(s radarSeed) store.RawPost {
 	}
 }
 
-// ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL) 2
-// mercekten geçirir. Herhangi biri "fail" dönerse tohum elenir (eliminations'a
-// stage=blocking_lens kaydedilir, subject=seed.Name, detail=seed.Summary);
-// aksi halde (tümü "pass" ya da bir kısmı "unsure" — unsure #131'den beri
-// BLOKLAMAZ, organik yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/
-// momentum_derived idea card üretilir, veri-erişimi merceğinin ham kararı
-// karta yazılır (bkz. aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
+// ProcessSeeds, elle küratörlüğü yapılan pazar tohumlarını (seedsJSONL)
+// bloklayıcı mercek(ler)den geçirir: gelir tohumunda (kind=="revenue", boş
+// kind dahil) yalnız veri-erişimi merceği çalışır — üçüncü-taraf merceği
+// tanım gereği ATLANIR (#167: revenueLenses, kalıcı kayıtta "skipped" iz
+// bırakır); ivme tohumunda (kind=="trending") liste DEĞİŞMEDEN 3 mercek
+// (ürünleştirilebilirlik + üçüncü-taraf + veri-erişimi, #89). Herhangi biri
+// "fail" dönerse tohum elenir (eliminations'a stage=blocking_lens
+// kaydedilir, subject=seed.Name, detail=seed.Summary); aksi halde (tümü
+// "pass" ya da bir kısmı "unsure" — unsure #131'den beri BLOKLAMAZ, organik
+// yoldaki blockedByIdeaLens ile AYNI ilke) market_derived/momentum_derived
+// idea card üretilir, veri-erişimi merceğinin ham kararı karta yazılır (bkz.
+// aşağıdaki dataAccessVerdict). Kart üretildikten SONRA
 // (dedup'tan önce) ayrıca özgünlük merceği çağrılır (bkz.
 // distinctivenessCheck, #101 v3): K1 (doygunluk) VE K2 (yerleşik çözüm)
 // fail'i kartı YAZDIRMAZ (eliminations'a stage=distinctiveness kaydedilir,
@@ -618,7 +651,10 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			}
 		}
 
-		lenses := seedLenses
+		// #167: gelir tohumunda (kind=="revenue", boş kind dahil) üçüncü-taraf
+		// merceği çıkarılmış revenueLenses kullanılır (yalnız veri-erişimi
+		// çağrılır); ivme tohumunda liste DEĞİŞMEZ (3 mercek, #89).
+		lenses := revenueLenses
 		if isTrending {
 			lenses = trendingLenses
 		}
@@ -628,12 +664,33 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// yazılabilmesi ve "unsure" mercek(ler)in loglanabilmesi için) — fail
 		// baskındır, birden fazla "fail" varsa outcome.Check/Reason ", "/"; "
 		// ile birleştirilmiş listedir (mevcut log biçimiyle birebir).
-		// subject="seed" (#164): bu 2(-3) mercek ham tohum alanları
+		// subject="seed" (#164): bu mercek(ler) ham tohum alanları
 		// (lensUserPrompt) üzerinde çalışır — kart henüz üretilmedi.
 		lensOutcome, verdicts := runBlockingLenses(ctx, chat, lenses, lensUserPrompt(seed), false, "seed")
 		if lensOutcome.Err != nil {
 			log.Printf("seeds: %q mercek %q HATA: %v — tohum atlandı (yeniden denenecek)", seed.Name, lensOutcome.Check, lensOutcome.Err)
 			continue
+		}
+
+		// #167: gelir tohumunda HİÇ ÇAĞRILMAYAN üçüncü-taraf merceği için
+		// kalıcı kayıtta bir İZ bırakılır — "hiç değerlendirilmedi" (eksik
+		// kayıt) ile "bilinçli atlandı" (Verdict="skipped") birbirine
+		// KARIŞMASIN diye. Sıra doğal yerinde: üçüncü-taraf seedLenses'te
+		// İLK sırada olduğundan bu girdi de diğer mercek kayıtlarından ÖNCE
+		// eklenir. runBlockingLenses'e HİÇ GİTMEZ, "verdicts" (yukarıda) bu
+		// girdiyi İÇERMEZ — "skipped" blok SAYILMAZ, aşağıdaki
+		// lensOutcome.Blocked kontrolü yalnız gerçekten çağrılan lenses'in
+		// "fail" sonucuna bakar (bu ekleme o kontrolden ÖNCE yapılır ama
+		// Blocked alanını ETKİLEMEZ, yalnız Verdicts alanına eklenir).
+		if !isTrending {
+			lensOutcome.Verdicts = append([]store.LensVerdict{{
+				Lens:          "üçüncü-taraf inşa edilebilirlik",
+				PromptVersion: lensThirdPartyVersion,
+				Subject:       "seed",
+				Verdict:       "skipped",
+				Reason:        "gelir tohumu: bağımsız bir şirket bu ürünü zaten satıyor, mercek atlandı (#167)",
+				At:            time.Now().UTC(),
+			}}, lensOutcome.Verdicts...)
 		}
 
 		// #131 PO düzeltmesi: yalnız "fail" tohumu eler ve kalıcı işaretler
@@ -676,10 +733,11 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 				seed.Name, strings.Join(unsureNames, ", "))
 		}
 
-		// #164: bloklayıcı mercek(ler)in kalıcı kaydı — özgünlük merceğinin
-		// kaydıyla aşağıda birleştirilip ya idea.LensVerdicts'e (kart
-		// yazılırsa) ya da eliminations.verdicts'e (K1|K2 ile bloklanırsa,
-		// #166) yazılır.
+		// #164: bloklayıcı mercek(ler)in kalıcı kaydı (gelir tohumunda #167'nin
+		// eklediği "skipped" üçüncü-taraf girdisi DAHİL, zaten yukarıda
+		// lensOutcome.Verdicts'e eklendi) — özgünlük merceğinin kaydıyla
+		// aşağıda birleştirilip ya idea.LensVerdicts'e (kart yazılırsa) ya da
+		// eliminations.verdicts'e (K1|K2 ile bloklanırsa, #166) yazılır.
 		allVerdicts := append([]store.LensVerdict{}, lensOutcome.Verdicts...)
 
 		var system, userPrompt string
