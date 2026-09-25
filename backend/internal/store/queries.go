@@ -509,6 +509,16 @@ func (s *Store) RefreshThemeStats(ctx context.Context) error {
 // koşuda UnthemedAnalyses ile bu gönderileri temasız bulup LLM
 // kümelemesinden geçirir. Eski tema satırı SİLİNMEZ (frekansı 0'a
 // düşebilir, zararsız, geri izlenebilir).
+//
+// #189 sonsuz döngü düzeltmesi: model emin olamayıp bir gönderiyi
+// atlarsa, GroupThemes gönderiyi ESKİ davranışa (domain_tag'i tema adı
+// sayma) düşürüp LinkThemePost ile AYNI eski temaya YENİ bir bağ olarak
+// geri bağlıyordu — bu bağ eski bağdan ayırt edilemediği için yine
+// retheme hedefi oluyor, kuyruk hiç sıfıra inmiyordu. theme_posts.linked_at
+// (021_theme_posts_linked_at.sql) bunu çözer: migration'dan önceki (ya da
+// hiç işlenmemiş) bağlar NULL kalır (= gerçek hedef); LinkThemePost'un
+// oluşturduğu HER yeni bağ (gerçek kümeleme ya da eski davranış fark
+// etmeksizin) now() alır (= GroupThemes'ten geçti, bir daha hedef değil).
 
 // RethemeTarget, retheme hedef kümesindeki TEK theme_posts bağı.
 type RethemeTarget struct {
@@ -523,10 +533,15 @@ type RethemeThemeSummary struct {
 	Frequency int
 }
 
-// rethemeTargetsWhere, hedef kümenin ortak WHERE koşulu: eski tip tema
+// rethemeThemeWhere, hedef kümenin TEMA DÜZEYİ WHERE koşulu: eski tip tema
 // (domain_tag NULL ya da theme_name == domain_tag) VE frequency eşiği VE
-// bu temaya bağlı idea YOK (kartlı temalar asla dokunulmaz).
-const rethemeTargetsWhere = `
+// bu temaya bağlı idea YOK (kartlı temalar asla dokunulmaz). BAĞ düzeyi
+// koşulu (tp.linked_at IS NULL — #189) BİLEREK BURADA DEĞİL: RethemeTopThemes
+// artık theme_posts'a JOIN olduğundan (unresolved bağ sayısını göstermek
+// için) bu koşulu da paylaşır, ama linked_at filtresini kendi sorgusunda
+// ayrıca ekler; RethemeAlreadyReclusteredCount ise TERS koşulu (IS NOT NULL)
+// kullanır — tek WHERE'e gömülseydi bu ikisi paylaşamazdı.
+const rethemeThemeWhere = `
 	(t.domain_tag IS NULL OR t.theme_name = t.domain_tag)
 	AND t.frequency >= $1
 	AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.source_theme_id = t.id)`
@@ -534,13 +549,20 @@ const rethemeTargetsWhere = `
 // rethemeTargets, hedef kümedeki theme_posts bağlarını (tema id, post id)
 // sırasıyla en fazla `limit` GÖNDERİ ile döner (#136) — seçim sırası
 // belirli/tekrarlanabilir. db, hem Pool (salt-okunur: dry-run/sayım) hem Tx
-// (yazan yol: RethemeResolve, atomiklik için) olabilir.
+// (yazan yol: RethemeResolve, atomiklik için) olabilir. tp.linked_at IS NULL
+// (#189): yalnız MIGRATION'DAN ÖNCEKİ (ya da hiç LinkThemePost'tan
+// geçmemiş) bağlar hedef — GroupThemes'in (gerçek kümeleme ya da eski
+// davranışa düşüş fark etmeksizin) LinkThemePost ile YENİ oluşturduğu her
+// bağ linked_at=now() alır ve bir daha hedef olmaz; aksi halde model emin
+// olamayıp aynı eski temaya geri düşen bir gönderi sonsuz retheme döngüsüne
+// girerdi (asıl bug, #189).
 func rethemeTargets(ctx context.Context, db dbExecutor, minEvidence, limit int) ([]RethemeTarget, error) {
 	rows, err := db.Query(ctx, `
 		SELECT tp.theme_id, t.theme_name, tp.post_id
 		FROM theme_posts tp
 		JOIN themes t ON t.id = tp.theme_id
-		WHERE `+rethemeTargetsWhere+`
+		WHERE `+rethemeThemeWhere+`
+		  AND tp.linked_at IS NULL
 		ORDER BY tp.theme_id, tp.post_id
 		LIMIT $2`, minEvidence, limit)
 	if err != nil {
@@ -567,24 +589,32 @@ func (s *Store) RethemeCandidates(ctx context.Context, minEvidence, limit int) (
 
 // RethemeCandidateCount, hedef kümedeki TOPLAM (limit'siz) theme_posts bağı
 // sayısını döner — "kalan" hesaplaması ve idempotent boş-küme kontrolü için.
+// rethemeTargets ile AYNI kümeden sayar (tp.linked_at IS NULL dahil, #189).
 func (s *Store) RethemeCandidateCount(ctx context.Context, minEvidence int) (int, error) {
 	var n int
 	err := s.Pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM theme_posts tp
 		JOIN themes t ON t.id = tp.theme_id
-		WHERE `+rethemeTargetsWhere, minEvidence).Scan(&n)
+		WHERE `+rethemeThemeWhere+`
+		  AND tp.linked_at IS NULL`, minEvidence).Scan(&n)
 	return n, err
 }
 
 // RethemeTopThemes, hedef kümedeki temalardan İLK n tanesini (tema id
-// sırasıyla — rethemeTargets'taki seçim sırasıyla aynı) ad + mevcut
-// frequency ile döner (dry-run raporu).
+// sırasıyla — rethemeTargets'taki seçim sırasıyla aynı) ad + o temanın
+// ÇÖZÜLMEMİŞ (tp.linked_at IS NULL) bağ sayısıyla döner (dry-run raporu,
+// #189) — t.frequency (TÜM bağlar) DEĞİL, yalnız en az bir NULL bağı olan
+// temalar listelenir; aksi halde "N gönderi" satırı zaten LLM
+// kümelemesinden geçmiş (artık hedef olmayan) bağları da sayardı.
 func (s *Store) RethemeTopThemes(ctx context.Context, minEvidence, n int) ([]RethemeThemeSummary, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT t.theme_name, t.frequency
-		FROM themes t
-		WHERE `+rethemeTargetsWhere+`
+		SELECT t.theme_name, count(*) AS unresolved
+		FROM theme_posts tp
+		JOIN themes t ON t.id = tp.theme_id
+		WHERE `+rethemeThemeWhere+`
+		  AND tp.linked_at IS NULL
+		GROUP BY t.id, t.theme_name
 		ORDER BY t.id
 		LIMIT $2`, minEvidence, n)
 	if err != nil {
@@ -601,6 +631,22 @@ func (s *Store) RethemeTopThemes(ctx context.Context, minEvidence, n int) ([]Ret
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// RethemeAlreadyReclusteredCount, eski tip temalardaki (tema düzeyi koşulu
+// rethemeThemeWhere ile aynı) ama linked_at DOLU — yani GroupThemes'ten
+// (gerçek kümeleme ya da eski davranışa düşüş, fark etmez) zaten geçmiş,
+// bu yüzden artık retheme hedefi OLMAYAN — theme_posts bağı sayısını döner
+// (#189, dry-run raporu: "zaten geçti, tekrar alınmaz").
+func (s *Store) RethemeAlreadyReclusteredCount(ctx context.Context, minEvidence int) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM theme_posts tp
+		JOIN themes t ON t.id = tp.theme_id
+		WHERE `+rethemeThemeWhere+`
+		  AND tp.linked_at IS NOT NULL`, minEvidence).Scan(&n)
+	return n, err
 }
 
 // RethemeWontReclusterCount, verilen post id'lerinden kaçının, temasından

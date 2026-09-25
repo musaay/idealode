@@ -26,6 +26,23 @@ func rethemeTestStore(t *testing.T) (*store.Store, context.Context) {
 	return st, ctx
 }
 
+// markTagLinksUnresolved, verilen domain_tag'e ait temaların TÜM
+// theme_posts bağlarını linked_at IS NULL'a çeker (#189) —
+// 021_theme_posts_linked_at.sql sonrası GroupThemes'in (gerçek kümeleme ya
+// da eski davranışa düşüş fark etmeksizin) LinkThemePost ile kurduğu HER
+// bağ linked_at DEFAULT now() alır (retheme hedefi DEĞİL); bu testlerin
+// kurduğu "eski bağ" senaryosu bunu AÇIKÇA NULL'a çekmek zorunda (spec:
+// "test verisi kurulurken eski bağ gerekiyorsa linked_at'i açıkça NULL
+// yaz").
+func markTagLinksUnresolved(t *testing.T, ctx context.Context, st *store.Store, tag string) {
+	t.Helper()
+	if _, err := st.Pool.Exec(ctx,
+		"UPDATE theme_posts SET linked_at = NULL WHERE theme_id IN (SELECT id FROM themes WHERE domain_tag = $1)", tag,
+	); err != nil {
+		t.Fatalf("markTagLinksUnresolved: %v", err)
+	}
+}
+
 // TestRethemeRejectsNonPositiveLimit, --limit ZORUNLU kuralını (0/negatif
 // hata) hem yazan (Retheme) hem salt-okunur (RethemeDryRun) yolda doğrular.
 func TestRethemeRejectsNonPositiveLimit(t *testing.T) {
@@ -61,6 +78,7 @@ func TestRethemeDryRunWritesNothing(t *testing.T) {
 	if _, err := GroupThemes(ctx, st, themeFallbackChat{}); err != nil {
 		t.Fatalf("GroupThemes (kurulum): %v", err)
 	}
+	markTagLinksUnresolved(t, ctx, st, tag)
 
 	var beforeLinks, beforeFreq int
 	st.Pool.QueryRow(ctx, "SELECT count(*) FROM theme_posts tp JOIN themes t ON t.id = tp.theme_id WHERE t.domain_tag = $1", tag).Scan(&beforeLinks)
@@ -103,6 +121,7 @@ func TestRethemeResolvesPostsAndReportsRemaining(t *testing.T) {
 	if _, err := GroupThemes(ctx, st, themeFallbackChat{}); err != nil {
 		t.Fatalf("GroupThemes (kurulum): %v", err)
 	}
+	markTagLinksUnresolved(t, ctx, st, tag)
 
 	result, err := Retheme(ctx, st, 1, 2)
 	if err != nil {
@@ -159,6 +178,7 @@ func TestRethemeResolvedPostsReclusterOnNextGroupThemes(t *testing.T) {
 	if _, err := GroupThemes(ctx, st, themeFallbackChat{}); err != nil {
 		t.Fatalf("GroupThemes (kurulum, eski tip tema): %v", err)
 	}
+	markTagLinksUnresolved(t, ctx, st, tag)
 
 	var linkedBefore bool
 	st.Pool.QueryRow(ctx,

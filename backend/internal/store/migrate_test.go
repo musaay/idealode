@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -188,5 +189,80 @@ func TestMigrateIdempotentWithAllSourceTypes(t *testing.T) {
 	// ideas_source_type_check ... violated by some row" ile patlardı.
 	if err := Migrate(ctx, url); err != nil {
 		t.Fatalf("ikinci Migrate (her source_type'tan satır varken idempotent olmalı): %v", err)
+	}
+}
+
+// TestMigrateThemePostsLinkedAtColumnAndDefault, 021_theme_posts_linked_at.sql
+// (#189) doğrular: Migrate iki kez art arda hatasız çalışır; linked_at
+// kolonu var ve DEFAULT'u now() (bir sonraki insert'i etkiler); LinkThemePost
+// ile eklenen YENİ bir bağ linked_at NOT NULL alır — ADD COLUMN + SET
+// DEFAULT'un iki ayrı ifade olarak (backfill YAPMADAN) uygulandığının
+// kanıtı, aksi halde mevcut satırlar da now() ile dolar, backlog kaybolurdu.
+func TestMigrateThemePostsLinkedAtColumnAndDefault(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL tanımlı değil")
+	}
+	ctx := context.Background()
+
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ilk Migrate: %v", err)
+	}
+	if err := Migrate(ctx, url); err != nil {
+		t.Fatalf("ikinci Migrate (idempotent olmalı): %v", err)
+	}
+
+	s, err := Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	// Kolon var mı, DEFAULT'u now() ifadesini mi taşıyor.
+	var columnDefault *string
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT column_default FROM information_schema.columns
+		WHERE table_schema = 'idealode' AND table_name = 'theme_posts' AND column_name = 'linked_at'`,
+	).Scan(&columnDefault); err != nil {
+		t.Fatalf("information_schema sorgusu: %v", err)
+	}
+	if columnDefault == nil || !strings.Contains(*columnDefault, "now()") {
+		t.Fatalf("linked_at DEFAULT'u now() içermeli, geldi: %v", columnDefault)
+	}
+
+	// LinkThemePost ile eklenen YENİ satırda linked_at NOT NULL olmalı
+	// (DEFAULT devreye girer).
+	themeID, _, err := s.UpsertTheme(ctx, "test-migrate-linked-at-tag", "test-migrate-linked-at-tag")
+	if err != nil {
+		t.Fatalf("UpsertTheme: %v", err)
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM themes WHERE theme_name = 'test-migrate-linked-at-tag'")
+	})
+
+	if _, err := s.InsertRawPosts(ctx, []RawPost{
+		{Platform: "test-migrate-linked-at", SourceRef: "p1", Community: "c", Title: "t"},
+	}); err != nil {
+		t.Fatalf("InsertRawPosts: %v", err)
+	}
+	t.Cleanup(func() {
+		s.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE platform = 'test-migrate-linked-at'")
+	})
+
+	var postID int64
+	if err := s.Pool.QueryRow(ctx, "SELECT id FROM raw_posts WHERE platform = 'test-migrate-linked-at'").Scan(&postID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.LinkThemePost(ctx, themeID, postID); err != nil {
+		t.Fatalf("LinkThemePost: %v", err)
+	}
+
+	var linkedAt *string
+	if err := s.Pool.QueryRow(ctx, "SELECT linked_at::text FROM theme_posts WHERE theme_id = $1 AND post_id = $2", themeID, postID).Scan(&linkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if linkedAt == nil {
+		t.Error("LinkThemePost ile eklenen satırda linked_at NOT NULL olmalıydı (DEFAULT now() devreye girmeli)")
 	}
 }
