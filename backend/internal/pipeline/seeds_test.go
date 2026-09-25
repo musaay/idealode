@@ -136,26 +136,33 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		t.Errorf("example_quotes override edilmemiş (LLM'den değil, koddan gelmeli): %v", quotes)
 	}
 
-	// #164, #169: lens_verdicts kalıcı kaydı — 2 bloklayıcı mercek subject="seed"
-	// (ham tohum alanları üzerinde çalıştı) + özgünlük subject="card" (kart
-	// üretildikten SONRA çalıştı), hepsi verdict="pass".
+	// #164, #167, #169: lens_verdicts kalıcı kaydı — gelir tohumunda ARTIK
+	// üçüncü-taraf merceği ÇAĞRILMAZ, yerine kalıcı "skipped" bir giriş
+	// bırakılır (doğal sırasında, diğer girdilerden ÖNCE) + veri-erişimi
+	// subject="seed" verdict="pass" + özgünlük subject="card" verdict="pass".
 	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
 	if len(lensVerdicts) != 3 {
-		t.Fatalf("lens_verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+		t.Fatalf("lens_verdicts 3 eleman beklenirdi (atlanan üçüncü-taraf + veri-erişimi + özgünlük), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
 	}
-	for i, lv := range lensVerdicts[:2] {
-		if lv.Subject != "seed" {
-			t.Errorf("lens_verdicts[%d].Subject=seed beklenirdi (bloklayıcı mercekler), geldi %q", i, lv.Subject)
-		}
-		if lv.Verdict != "pass" {
-			t.Errorf("lens_verdicts[%d].Verdict=pass beklenirdi, geldi %q", i, lv.Verdict)
-		}
-		if lv.PromptVersion != "v1" {
-			t.Errorf("lens_verdicts[%d].PromptVersion=v1 beklenirdi, geldi %q", i, lv.PromptVersion)
-		}
-		if lv.Lens == "pazar-işlerliği" {
-			t.Errorf("lens_verdicts[%d] pazar-işlerliği İÇERMEMELİ (#169), geldi: %+v", i, lv)
-		}
+	skipped := lensVerdicts[0]
+	if skipped.Lens != "üçüncü-taraf inşa edilebilirlik" || skipped.Verdict != "skipped" {
+		t.Errorf("lens_verdicts[0] üçüncü-taraf/skipped beklenirdi, geldi: %+v", skipped)
+	}
+	if skipped.Subject != "seed" {
+		t.Errorf("lens_verdicts[0].Subject=seed beklenirdi, geldi %q", skipped.Subject)
+	}
+	if skipped.PromptVersion != lensThirdPartyVersion {
+		t.Errorf("lens_verdicts[0].PromptVersion=%q beklenirdi, geldi %q", lensThirdPartyVersion, skipped.PromptVersion)
+	}
+	if skipped.Model != "" {
+		t.Errorf("lens_verdicts[0].Model boş beklenirdi (LLM çağrısı yok), geldi %q", skipped.Model)
+	}
+	dataAccess := lensVerdicts[1]
+	if dataAccess.Lens != "veri-erişimi" || dataAccess.Subject != "seed" || dataAccess.Verdict != "pass" {
+		t.Errorf("lens_verdicts[1] veri-erişimi/seed/pass beklenirdi, geldi: %+v", dataAccess)
+	}
+	if dataAccess.PromptVersion != "v1" {
+		t.Errorf("lens_verdicts[1].PromptVersion=v1 beklenirdi, geldi %q", dataAccess.PromptVersion)
 	}
 	last := lensVerdicts[2]
 	if last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "pass" {
@@ -172,10 +179,12 @@ func TestProcessSeedsPassCreatesCard(t *testing.T) {
 		t.Errorf("raw_posts işaret satırı bulunamadı")
 	}
 
-	// Sıcaklık politikası (#106): 2 bloklayıcı mercek yargı=0, kart üretimi
-	// (LLM sistem prompt'unda "market_derived" geçer) üretim=0.3.
-	if len(chat.lastTemp) < 4 {
-		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (2 mercek + özgünlük + kart üretimi): %d", len(chat.lastTemp))
+	// Sıcaklık politikası (#106): mercek(ler) yargı=0, kart üretimi (LLM
+	// sistem prompt'unda "market_derived" geçer) üretim=0.3. #167: gelir
+	// tohumunda üçüncü-taraf merceği çağrılmadığından beklenen benzersiz
+	// sistem prompt'u sayısı 4'ten 3'e düştü (veri-erişimi + özgünlük + kart).
+	if len(chat.lastTemp) < 3 {
+		t.Fatalf("beklenen çağrı sayısına ulaşılmadı (veri-erişimi + özgünlük + kart üretimi): %d", len(chat.lastTemp))
 	}
 	for sys, temp := range chat.lastTemp {
 		if strings.Contains(sys, `"market_derived"`) {
@@ -271,25 +280,30 @@ func TestProcessSeedsFailMarksNoCard(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "özet" {
 		t.Errorf("eliminations.detail tohumun özeti olmalı (%q), geldi: %v", "özet", found.Detail)
 	}
-	// #164, #169: 2 mercek de "fail" (fakeSeedChat hepsine fail döner, tohum
-	// yolunda stopOnFirstFail=false → TÜMÜ çağrılır) — check isimlerin ", "
-	// ile birleşimi (mevcut log biçimiyle birebir), verdicts 2 eleman,
-	// hepsi subject=seed verdict=fail.
+	// #164, #167, #169: gelir tohumunda ARTIK yalnız veri-erişimi merceği
+	// çağrılır (üçüncü-taraf atlanır) — fakeSeedChat ona "fail" döner, check
+	// yalnız "veri-erişimi" adını taşır (üçüncü-taraf hiç ÇAĞRILMADIĞINDAN
+	// "fail" DEĞİL, eliminations.check'e girmez). verdicts 2 eleman: [0]
+	// atlanan üçüncü-taraf (Verdict="skipped"), [1] veri-erişimi (fail).
 	if found.Check == nil {
 		t.Fatal("eliminations.check dolu olmalı (bloklayan mercek adları)")
 	}
-	for _, name := range []string{seedLenses[0].name, seedLenses[1].name} {
-		if !strings.Contains(*found.Check, name) {
-			t.Errorf("eliminations.check %q içermeli, geldi: %q", name, *found.Check)
-		}
+	if !strings.Contains(*found.Check, seedLenses[1].name) {
+		t.Errorf("eliminations.check %q içermeli, geldi: %q", seedLenses[1].name, *found.Check)
+	}
+	if strings.Contains(*found.Check, seedLenses[0].name) {
+		t.Errorf("eliminations.check üçüncü-taraf İÇERMEMELİ (atlandı, fail dönmedi), geldi: %q", *found.Check)
 	}
 	if len(found.Verdicts) != 2 {
-		t.Fatalf("eliminations.verdicts 2 eleman beklenirdi (2 bloklayıcı mercek), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+		t.Fatalf("eliminations.verdicts 2 eleman beklenirdi (atlanan üçüncü-taraf + veri-erişimi), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	for i, lv := range found.Verdicts {
-		if lv.Subject != "seed" || lv.Verdict != "fail" {
-			t.Errorf("verdicts[%d] seed/fail beklenirdi, geldi: %+v", i, lv)
-		}
+	skipped := found.Verdicts[0]
+	if skipped.Lens != "üçüncü-taraf inşa edilebilirlik" || skipped.Verdict != "skipped" || skipped.Subject != "seed" {
+		t.Errorf("verdicts[0] üçüncü-taraf/skipped/seed beklenirdi, geldi: %+v", skipped)
+	}
+	dataAccess := found.Verdicts[1]
+	if dataAccess.Lens != "veri-erişimi" || dataAccess.Subject != "seed" || dataAccess.Verdict != "fail" {
+		t.Errorf("verdicts[1] veri-erişimi/seed/fail beklenirdi, geldi: %+v", dataAccess)
 	}
 }
 
@@ -405,9 +419,13 @@ func (f *perLensSeedChat) ChatJSONWithTemperature(ctx context.Context, system, u
 }
 
 // TestProcessSeedsFailDominatesOverUnsureMarksProcessed: #131 edge case —
-// 2 mercekten biri "fail" biri "unsure" dönerse fail baskındır: tohum
-// elenmiş SAYILIR ve markProcessed ÇAĞRILIR (unsure'un "kalıcı yakma YOK"
-// istisnası burada geçerli DEĞİL, çünkü aynı tohumda ayrıca bir "fail" var).
+// bir mercek "fail" dönerse tohum elenmiş SAYILIR ve markProcessed ÇAĞRILIR
+// (unsure'un "kalıcı yakma YOK" istisnası geçerli DEĞİL). #167: gelir
+// tohumunda üçüncü-taraf merceği ARTIK ÇAĞRILMADIĞINDAN (chat.verdicts'teki
+// lensThirdPartySystem girdisi hiç kullanılmaz) bu senaryo fiilen tek
+// mercek (veri-erişimi) fail'ine indirgenir — "fail baskındır" ilkesi hâlâ
+// bu tek mercek için geçerli; asıl "birden fazla mercek arasında fail
+// baskındır" karışımı artık yalnız ivme tohumunda (3 mercek) mümkün.
 func TestProcessSeedsFailDominatesOverUnsureMarksProcessed(t *testing.T) {
 	st := seedTestStore(t)
 	ctx := context.Background()
@@ -664,6 +682,157 @@ func TestSeedLensesExcludeDistinctiveness(t *testing.T) {
 			t.Error("trendingLenses özgünlük merceğini İÇERMEMELİ (ayrı çağrılır)")
 		}
 	}
+	for _, l := range revenueLenses {
+		if l.system == lensDistinctivenessSystem {
+			t.Error("revenueLenses özgünlük merceğini İÇERMEMELİ (ayrı çağrılır)")
+		}
+	}
+}
+
+// TestRevenueLensesExcludeThirdParty (#167, birim testi — DB gerektirmez):
+// revenueLenses (gelir tohumu yolunun kullandığı FİLTRELENMİŞ dilim) üçüncü-
+// taraf merceğini İÇERMEMELİ, yalnız veri-erişimi kalmalı. seedLenses (organik
+// yol + trendingLenses'in temeli) VE trendingLenses (ivme tohumu) DEĞİŞMEMELİ
+// — ikisi de üçüncü-taraf merceğini hâlâ taşımalı.
+func TestRevenueLensesExcludeThirdParty(t *testing.T) {
+	if len(revenueLenses) != 1 {
+		t.Fatalf("revenueLenses 1 eleman (yalnız veri-erişimi) beklenirdi, geldi %d: %+v", len(revenueLenses), revenueLenses)
+	}
+	if revenueLenses[0].system != lensDataAccessSystem || revenueLenses[0].name != "veri-erişimi" {
+		t.Errorf("revenueLenses[0] veri-erişimi merceği olmalı, geldi: %+v", revenueLenses[0])
+	}
+	for _, l := range revenueLenses {
+		if l.system == lensThirdPartySystem {
+			t.Error("revenueLenses üçüncü-taraf merceğini İÇERMEMELİ (#167)")
+		}
+	}
+
+	if len(seedLenses) != 2 {
+		t.Fatalf("seedLenses DEĞİŞMEMELİ (organik yol hâlâ kullanıyor), 2 eleman beklenirdi, geldi: %d", len(seedLenses))
+	}
+	foundThirdParty := false
+	for _, l := range seedLenses {
+		if l.system == lensThirdPartySystem {
+			foundThirdParty = true
+		}
+	}
+	if !foundThirdParty {
+		t.Error("seedLenses üçüncü-taraf merceğini İÇERMELİ (organik yol/eski davranış DEĞİŞMEDİ)")
+	}
+
+	if len(trendingLenses) != 3 {
+		t.Fatalf("trendingLenses DEĞİŞMEMELİ, 3 eleman beklenirdi, geldi: %d", len(trendingLenses))
+	}
+	foundThirdPartyTrending := false
+	for _, l := range trendingLenses {
+		if l.system == lensThirdPartySystem {
+			foundThirdPartyTrending = true
+		}
+	}
+	if !foundThirdPartyTrending {
+		t.Error("trendingLenses üçüncü-taraf merceğini İÇERMELİ (#167 yalnız gelir tohumunu etkiler)")
+	}
+}
+
+// trackingSeedChat (#167): fakeSeedChat'in davranışını korur (mercek pass/
+// fail/unsure, kart cardResponse, dedup same:false) ve HER ÇAĞRIYI sistem
+// prompt'una göre sayar — üçüncü-taraf merceğinin gelir tohumunda hiç
+// çağrılmadığını doğrulamak için.
+type trackingSeedChat struct {
+	lensVerdict  string
+	cardResponse string
+	calls        map[string]int
+}
+
+func (f *trackingSeedChat) ChatJSON(ctx context.Context, system, user string) (string, error) {
+	return f.ChatJSONWithTemperature(ctx, system, user, 0.3)
+}
+
+func (f *trackingSeedChat) ChatJSONWithTemperature(ctx context.Context, system, user string, temp float64) (string, error) {
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[system]++
+	switch {
+	case system == dupJudgeSystem:
+		return `{"same": false}`, nil
+	case strings.Contains(system, `"market_derived"`):
+		return f.cardResponse, nil
+	default:
+		return fmt.Sprintf(`{"verdict":%q,"reason":"test-reason"}`, f.lensVerdict), nil
+	}
+}
+
+// TestProcessSeedsRevenueSkipsThirdPartyLens (#167): gelir tohumunda
+// (kind boş/"revenue") üçüncü-taraf merceği HİÇ ÇAĞRILMAZ — yalnız veri-
+// erişimi merceği çalışır; kalıcı kayıtta (lens_verdicts) atlanan mercek
+// için Verdict="skipped" bir giriş bulunur, doğal sırasında (diğer mercek
+// kayıtlarından ÖNCE), Model boş (LLM çağrısı yok).
+func TestProcessSeedsRevenueSkipsThirdPartyLens(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-skip-thirdparty"
+	title := "Test Ucuncu Taraf Atlanan Fikir"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Skip ThirdParty Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	chat := &trackingSeedChat{
+		lensVerdict: "pass",
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+	}
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("1 idea beklenirdi, geldi: %d", n)
+	}
+
+	if chat.calls[lensThirdPartySystem] != 0 {
+		t.Errorf("üçüncü-taraf sistem prompt'u gelir tohumunda ÇAĞRILMAMALI, geldi: %d çağrı", chat.calls[lensThirdPartySystem])
+	}
+	if chat.calls[lensDataAccessSystem] == 0 {
+		t.Error("veri-erişimi merceği çağrılmalı")
+	}
+
+	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
+	if len(lensVerdicts) < 2 {
+		t.Fatalf("en az 2 lens_verdicts elemanı beklenirdi (atlanan üçüncü-taraf + veri-erişimi), geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	}
+	skipped := lensVerdicts[0]
+	if skipped.Lens != "üçüncü-taraf inşa edilebilirlik" {
+		t.Errorf("lens_verdicts[0].Lens=üçüncü-taraf inşa edilebilirlik beklenirdi, geldi %q", skipped.Lens)
+	}
+	if skipped.Verdict != "skipped" {
+		t.Errorf("lens_verdicts[0].Verdict=skipped beklenirdi, geldi %q", skipped.Verdict)
+	}
+	if skipped.PromptVersion != lensThirdPartyVersion {
+		t.Errorf("lens_verdicts[0].PromptVersion=%q beklenirdi, geldi %q", lensThirdPartyVersion, skipped.PromptVersion)
+	}
+	if skipped.Subject != "seed" {
+		t.Errorf("lens_verdicts[0].Subject=seed beklenirdi, geldi %q", skipped.Subject)
+	}
+	if skipped.Model != "" {
+		t.Errorf("lens_verdicts[0].Model boş beklenirdi (LLM çağrısı yok), geldi %q", skipped.Model)
+	}
+	if !strings.Contains(skipped.Reason, "#167") {
+		t.Errorf("lens_verdicts[0].Reason #167 referansı içermeli, geldi %q", skipped.Reason)
+	}
+
+	dataAccess := lensVerdicts[1]
+	if dataAccess.Lens != "veri-erişimi" || dataAccess.Verdict != "pass" {
+		t.Errorf("lens_verdicts[1] veri-erişimi/pass beklenirdi, geldi: %+v", dataAccess)
+	}
 }
 
 // distinctSeedChat: 2 bloklayıcı mercek + kart üretimi + dedup normal
@@ -867,20 +1036,21 @@ func TestProcessSeedsDistinctivenessK1BlocksCard(t *testing.T) {
 	if found.Detail == nil || *found.Detail != "sorun" {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
-	// #164, #169: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının TEK
-	// kalıcı yeri eliminations.check/verdicts — check=özgünlük (bloklayan
-	// mercek), verdicts 2 bloklayıcı mercek (subject=seed, pass) + özgünlük
-	// (subject=card, fail) TÜMÜNÜ taşır.
+	// #164, #167, #169: kart hiç yazılmadığından (K1 bloğu) mercek kararlarının
+	// TEK kalıcı yeri eliminations.check/verdicts — check=özgünlük (bloklayan
+	// mercek), verdicts: [0] atlanan üçüncü-taraf (skipped) + [1] veri-erişimi
+	// (subject=seed, pass) + [2] özgünlük (subject=card, fail).
 	if found.Check == nil || *found.Check != "özgünlük" {
 		t.Errorf("eliminations.check=özgünlük beklenirdi, geldi: %v", found.Check)
 	}
 	if len(found.Verdicts) != 3 {
-		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (atlanan üçüncü-taraf + veri-erişimi + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
-	for i, lv := range found.Verdicts[:2] {
-		if lv.Subject != "seed" || lv.Verdict != "pass" {
-			t.Errorf("verdicts[%d] seed/pass beklenirdi, geldi: %+v", i, lv)
-		}
+	if skipped := found.Verdicts[0]; skipped.Lens != "üçüncü-taraf inşa edilebilirlik" || skipped.Verdict != "skipped" || skipped.Subject != "seed" {
+		t.Errorf("verdicts[0] üçüncü-taraf/skipped/seed beklenirdi, geldi: %+v", skipped)
+	}
+	if dataAccess := found.Verdicts[1]; dataAccess.Lens != "veri-erişimi" || dataAccess.Subject != "seed" || dataAccess.Verdict != "pass" {
+		t.Errorf("verdicts[1] veri-erişimi/seed/pass beklenirdi, geldi: %+v", dataAccess)
 	}
 	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
 		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)
@@ -963,7 +1133,7 @@ func TestProcessSeedsDistinctivenessK2BlocksCard(t *testing.T) {
 		t.Errorf("eliminations.detail kartın problem_statement'ı olmalı (%q), geldi: %v", "sorun", found.Detail)
 	}
 	if len(found.Verdicts) != 3 {
-		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (2 bloklayıcı + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
+		t.Fatalf("eliminations.verdicts 3 eleman beklenirdi (atlanan üçüncü-taraf + veri-erişimi + özgünlük), geldi %d: %+v", len(found.Verdicts), found.Verdicts)
 	}
 	if last := found.Verdicts[2]; last.Lens != "özgünlük" || last.Subject != "card" || last.Verdict != "fail" {
 		t.Errorf("verdicts[2] özgünlük/card/fail beklenirdi, geldi: %+v", last)

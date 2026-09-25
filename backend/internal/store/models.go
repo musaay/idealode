@@ -259,7 +259,7 @@ type LensVerdict struct {
 	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ
 	// "card"; tohum yolunda 2(-3) bloklayıcı mercek "seed", özgünlük "card".
 	Subject string `json:"subject"`
-	// Verdict: pass | fail | unsure | error.
+	// Verdict: pass | fail | unsure | error | skipped (#167: gelir tohumunda atlanan üçüncü-taraf).
 	Verdict string    `json:"verdict"`
 	Reason  string    `json:"reason"`
 	At      time.Time `json:"at"`
