@@ -102,3 +102,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - GoMoon — makro/kazanç haberlerini AI etki-skoruyla işlem sinyaline çeviren ekonomik takvim SaaS'ı, $192K ARR / $230K'a satıldı (2026-09-22)
 - Lychee — Polymarket/Kalshi tahmin piyasası verisine no-code API/panel erişimi, 2 aydan kısa sürede 11K+ kullanıcı / $10K+ MRR (2026-09-23)
 - BoredHumans (Nick Dobos) — tek alan adında 100+ ücretsiz mini AI aracını reklam+premium ile paraya çeviren SEO hacim platformu, $8.8M ARR / ~$733K MRR (2026-09-25)
+- WrumerSound (Jure Sotošek) — OBD2'den okuduğu gerçek motor/gaz verisiyle arabanın kendi hoparlöründen sahte spor egzoz sesi çalan donanım+app aksesuarı, $35K/ay (2026-09-26)
