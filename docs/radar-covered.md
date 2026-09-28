@@ -105,3 +105,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - WrumerSound (Jure Sotošek) — OBD2'den okuduğu gerçek motor/gaz verisiyle arabanın kendi hoparlöründen sahte spor egzoz sesi çalan donanım+app aksesuarı, $35K/ay (2026-09-26)
 - BridgeMind (Matthew Miller) — hiç kod yazmadan, AI agent'ların canlı yayında geliştirdiği "vibe coding" agentic geliştirme platformu, 165 günde $14.8K MRR (2026-09-27)
 - Paperclip (@dotta, paperclipai/paperclip) — AI ajan ekiplerini org şeması/bütçe/onay ile yöneten açık kaynak self-host uygulama, ★91K, ivme (2026-09-28)
+- TrustMRR (Marc Lou) — sahte MRR ekran görüntülerine karşı Stripe/LemonSqueezy ile doğrulanmış gelir dizini/lider tablosu, 48 saatte $13-18K MRR reklam/sponsorluk geliri (2026-09-28)
