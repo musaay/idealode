@@ -104,3 +104,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - BoredHumans (Nick Dobos) — tek alan adında 100+ ücretsiz mini AI aracını reklam+premium ile paraya çeviren SEO hacim platformu, $8.8M ARR / ~$733K MRR (2026-09-25)
 - WrumerSound (Jure Sotošek) — OBD2'den okuduğu gerçek motor/gaz verisiyle arabanın kendi hoparlöründen sahte spor egzoz sesi çalan donanım+app aksesuarı, $35K/ay (2026-09-26)
 - BridgeMind (Matthew Miller) — hiç kod yazmadan, AI agent'ların canlı yayında geliştirdiği "vibe coding" agentic geliştirme platformu, 165 günde $14.8K MRR (2026-09-27)
+- Paperclip (@dotta, paperclipai/paperclip) — AI ajan ekiplerini org şeması/bütçe/onay ile yöneten açık kaynak self-host uygulama, ★91K, ivme (2026-09-28)
