@@ -106,3 +106,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - BridgeMind (Matthew Miller) — hiç kod yazmadan, AI agent'ların canlı yayında geliştirdiği "vibe coding" agentic geliştirme platformu, 165 günde $14.8K MRR (2026-09-27)
 - Paperclip (@dotta, paperclipai/paperclip) — AI ajan ekiplerini org şeması/bütçe/onay ile yöneten açık kaynak self-host uygulama, ★91K, ivme (2026-09-28)
 - TrustMRR (Marc Lou) — sahte MRR ekran görüntülerine karşı Stripe/LemonSqueezy ile doğrulanmış gelir dizini/lider tablosu, 48 saatte $13-18K MRR reklam/sponsorluk geliri (2026-09-28)
+- Weight-Cut Combat Sports App (acquire.com ilanı) — güreş/MMA sporcuları için güvenli kilo kesimi takip uygulaması, 43K indirme, $80K/11 ay, $5K MRR (2026-09-28)
+- Autonomous AI Domain Investment Platform (acquire.com ilanı) — domain bulma/değerleme/teklif/satışı uçtan uca otonom yürüten AI SaaS'ı, ~$3.45K MRR (2026-09-28)
