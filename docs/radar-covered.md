@@ -108,3 +108,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - TrustMRR (Marc Lou) — sahte MRR ekran görüntülerine karşı Stripe/LemonSqueezy ile doğrulanmış gelir dizini/lider tablosu, 48 saatte $13-18K MRR reklam/sponsorluk geliri (2026-09-28)
 - Weight-Cut Combat Sports App (acquire.com ilanı) — güreş/MMA sporcuları için güvenli kilo kesimi takip uygulaması, 43K indirme, $80K/11 ay, $5K MRR (2026-09-28)
 - Autonomous AI Domain Investment Platform (acquire.com ilanı) — domain bulma/değerleme/teklif/satışı uçtan uca otonom yürüten AI SaaS'ı, ~$3.45K MRR (2026-09-28)
+- ParakeetAI (Jure Sotošek) — görüşme sırasında canlı dinleyip anlık cevap üreten "gerçek zamanlı AI görüşme suflörü", $1M MRR, 1.5M+ kullanıcı, 2 yılda (2026-09-29)
