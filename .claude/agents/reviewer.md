@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Salt-okunur kod incelemesi — diff'i proje tuzaklarına karşı doğrular, bulgularını lead'e raporlar.
-model: sonnet
+model: claude-sonnet-5-5
 tools: Read, Grep, Glob, Bash
 ---
 
