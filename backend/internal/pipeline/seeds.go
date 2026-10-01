@@ -90,6 +90,10 @@ Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 // yazılır, ileride prompt değişirse (#163 §6 v3 işleri) artar.
 const lensThirdPartyVersion = "v1"
 
+// lensThirdPartyName, üçüncü-taraf merceğinin Türkçe adıdır (log/rapor ve
+// store.LensVerdict.Lens — v1 ve v3 için AYNI, yalnız prompt sürümü değişir).
+const lensThirdPartyName = "üçüncü-taraf inşa edilebilirlik"
+
 // lensDataAccessSystem: veri-erişimi merceği (#131 v2) — kartın ÇEKİRDEK
 // işlevinin veriye HANGİ YÖNTEMLE eriştiğini değerlendirir; platformun
 // büyüklüğü/markası/"kapalılık algısı" ölçüt DEĞİLDİR. #131 öncesi metin
@@ -190,58 +194,133 @@ Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 // lensProductizableVersion (#164): lensProductizableSystem'in sürümü.
 const lensProductizableVersion = "v1"
 
-// seedLens, tek bir mercek: adı (log/rapor için Türkçe) + sistem prompt'u +
-// prompt sürümü (#164: ideas.lens_verdicts/eliminations.verdicts'e kalıcı
-// kayıtta prompt_version olarak yazılır).
+// Mercek kimlikleri (#197): seedLens.id — mercekleri system prompt METNİYLE
+// ayırt etmek (v3 seçilince metin değişir) yerine sabit bir kimlikle tanır.
+// lens-ab'nin lensRegistry anahtarlarıyla (lensab.go) aynı kökten.
+const (
+	lensIDThirdParty    = "third_party"
+	lensIDDataAccess    = "data_access"
+	lensIDProductizable = "productizable"
+)
+
+// seedLens, tek bir mercek: kimliği (id) + adı (log/rapor için Türkçe) +
+// sistem prompt'u + prompt sürümü (#164: ideas.lens_verdicts/
+// eliminations.verdicts'e kalıcı kayıtta prompt_version olarak yazılır) +
+// oy sayısı.
 type seedLens struct {
+	id      string
 	name    string
 	system  string
 	version string
+	// votes (#197): >1 ise runBlockingLenses bu merceği N kez oylatır (kart
+	// ANCAK TÜM oylar "fail" derse bloklanır — #181 özgünlük düzeniyle aynı,
+	// bkz. voteLens). <=1 (sıfır değer dahil) = tek çağrı, bugünkü davranış.
+	// Yalnız üçüncü-taraf merceği config'ten (THIRD_PARTY_VOTES) doldurulur.
+	votes int
 }
 
-// seedLenses, iki merceğin adı+sistem prompt'u+sürümü (log/rapor için Türkçe
-// ad) — organik yolda (synthesize.go'nun SynthesizeIdeas'ı, #123: bu AYNI
-// listeyi kullanır, iki kopya mercek/prompt YOK) VE trendingLenses'in
-// temelinde DEĞİŞMEDEN kullanılır. Tohum yolunun gelir dalı (kind=="revenue")
-// bu listeyi ARTIK DOĞRUDAN kullanmaz — üçüncü-taraf merceği çıkarılmış
-// revenueLenses'i kullanır (#167, aşağıda) — bu listenin KENDİSİ
-// DEĞİŞTİRİLMEZ. #169: üçüncü mercek (pazar-işlerliği) eşsiz katkısı 0
-// ölçüldüğünden KALDIRILDI — lensMarketViabilitySystem tanımının üstündeki
-// nota bakın.
-var seedLenses = []seedLens{
-	{"üçüncü-taraf inşa edilebilirlik", lensThirdPartySystem, lensThirdPartyVersion},
-	{"veri-erişimi", lensDataAccessSystem, lensDataAccessVersion},
+// lensSet, bir koşunun bloklayıcı mercek tanımlarının TEK kaynağıdır (#197):
+// organik yol (synthesize.go) ve tohum yolu (ProcessSeeds) AYNI newLensSet
+// sonucunu kullanır — iki kopya mercek TANIMI YOK (#123).
+type lensSet struct {
+	// organic: organik yolun (SynthesizeIdeas) merceği ve trending'in temeli —
+	// üçüncü-taraf + veri-erişimi. #169: pazar-işlerliği eşsiz katkısı 0
+	// ölçüldüğünden KALDIRILDI — lensMarketViabilitySystem tanımının üstündeki
+	// nota bakın.
+	organic []seedLens
+	// trending: ivme tohumlarının koştuğu tüm mercekler — ürünleştirilebilirlik
+	// (#89 kapı madde 4) + organic AYNEN. #167 revenue'nun AKSİNE üçüncü-taraf
+	// merceğini taşır: ivme tohumunun tanım gereği bağımsız bir şirketçe zaten
+	// satılıyor olma kanıtı YOK, üçüncü-taraf sorusu hâlâ açık.
+	trending []seedLens
+	// revenue (#167, PO kararı 09-20, #163 §3.3): gelir tohumu yolunun
+	// (kind=="revenue", boş kind de dahil) FİLTRELENMİŞ dilimi — organic'ten
+	// üçüncü-taraf merceği (kimlikle, system metniyle DEĞİL — v3 seçilince de
+	// atlanır) ÇIKARILMIŞ hali, yalnız veri-erişimi kalır. Gerekçe: gelir
+	// kanıtlı bir tohum tanım gereği bağımsız bir şirket tarafından ZATEN
+	// SATILAN bir üründür — üçüncü-tarafça inşa edilebilirlik sorusu tohumun
+	// kendi kanıtıyla ÖNCEDEN YANITLANMIŞTIR (mercek tohum yolunda 09-21'den
+	// beri 3/3 pass, #163 denetiminde 0/~6 fail). Atlanan mercek için
+	// ProcessSeeds ayrıca kalıcı "skipped" kaydı ekler (skippedThirdPartyVerdict).
+	revenue []seedLens
+	// thirdParty: seçili sürümün üçüncü-taraf merceği — revenue yolunun
+	// "skipped" kaydı adı + prompt sürümünü BURADAN alır (v3 seçiliyse "v3").
+	thirdParty seedLens
 }
 
-// trendingLenses, ivme tohumlarının koştuğu tüm mercekler: 4. mercek
-// (ürünleştirilebilirlik) + mevcut 2 mercek AYNEN (#89 kapı madde 4-5).
-// #167 revenueLenses'in AKSİNE bu liste DEĞİŞMEDİ — ivme tohumunun tanım
-// gereği bağımsız bir şirketçe zaten satılıyor olma kanıtı YOK, üçüncü-taraf
-// sorusu hâlâ açık.
-var trendingLenses = append([]seedLens{{"ürünleştirilebilirlik", lensProductizableSystem, lensProductizableVersion}}, seedLenses...)
+// thirdPartyLens, seçili üçüncü-taraf prompt sürümünün merceğini kurar (#197):
+// "v3" → lens_prompts_v3.go'daki lensThirdPartySystemV3 + "v3" etiketi; başka
+// her değer (boş dahil) → canlı v1 (lensThirdPartySystem, "v1") — savunmacı,
+// config.Load zaten yalnız "v1"/"v3" döner, test config'leri ise boş bırakır.
+func thirdPartyLens(promptVersion string, votes int) seedLens {
+	if votes < 1 {
+		votes = 1 // savunmacı: test config'leri 0 bırakır = tek çağrı
+	}
+	if promptVersion == "v3" {
+		return seedLens{id: lensIDThirdParty, name: lensThirdPartyName, system: lensThirdPartySystemV3, version: lensThirdPartyVersionV3, votes: votes}
+	}
+	return seedLens{id: lensIDThirdParty, name: lensThirdPartyName, system: lensThirdPartySystem, version: lensThirdPartyVersion, votes: votes}
+}
 
-// revenueLenses (#167, PO kararı 09-20, #163 §3.3): gelir tohumu yolunun
-// (kind=="revenue", boş kind de dahil — mevcut varsayılan korunur)
-// kullandığı FİLTRELENMİŞ dilim — seedLenses'ten üçüncü-taraf merceği
-// (lensThirdPartySystem) ÇIKARILMIŞ hali, yalnız veri-erişimi kalır.
-// Gerekçe: gelir kanıtlı bir tohum tanım gereği bağımsız bir şirket
-// tarafından ZATEN SATILAN bir üründür — üçüncü-tarafça inşa edilebilirlik
-// sorusu tohumun kendi kanıtıyla ÖNCEDEN YANITLANMIŞTIR (mercek tohum
-// yolunda 09-21'den beri 3/3 pass, #163 denetiminde 0/~6 fail). seedLenses'in
-// KENDİSİ DEĞİŞMEZ (organik yol ve trendingLenses hâlâ üçüncü-taraf
-// merceğini taşır) — bu yalnız tohum yoluna özel bir dilimdir, iki kopya
-// mercek TANIMI YOK (system prompt/sürüm seedLenses'ten AYNEN alınır).
-// Atlanan mercek için ProcessSeeds ayrıca kalıcı "skipped" bir
-// store.LensVerdict kaydı ekler (bkz. ProcessSeeds içindeki ekleme).
-var revenueLenses = func() []seedLens {
-	var out []seedLens
-	for _, l := range seedLenses {
-		if l.system != lensThirdPartySystem {
-			out = append(out, l)
+// newLensSet, bloklayıcı mercek setini üçüncü-taraf prompt sürümü ve oy
+// sayısıyla kurar (#197; config.Config.ThirdPartyPrompt/ThirdPartyVotes).
+// ("", 0) ve ("v1", 1) bugünkü tanımla BİREBİR aynıdır.
+func newLensSet(thirdPartyPrompt string, thirdPartyVotes int) lensSet {
+	tp := thirdPartyLens(thirdPartyPrompt, thirdPartyVotes)
+	organic := []seedLens{
+		tp,
+		{id: lensIDDataAccess, name: "veri-erişimi", system: lensDataAccessSystem, version: lensDataAccessVersion},
+	}
+	trending := append([]seedLens{{id: lensIDProductizable, name: "ürünleştirilebilirlik", system: lensProductizableSystem, version: lensProductizableVersion}}, organic...)
+	var revenue []seedLens
+	for _, l := range organic {
+		if l.id != lensIDThirdParty {
+			revenue = append(revenue, l)
 		}
 	}
-	return out
-}()
+	return lensSet{organic: organic, trending: trending, revenue: revenue, thirdParty: tp}
+}
+
+// lensSetFor, config'in üçüncü-taraf ayarlarından (THIRD_PARTY_PROMPT/
+// THIRD_PARTY_VOTES) bir koşunun mercek setini kurar (#197) — SynthesizeIdeas
+// ve ProcessSeeds koşu başında BİR kez çağırır.
+func lensSetFor(cfg *config.Config) lensSet {
+	return newLensSet(cfg.ThirdPartyPrompt, cfg.ThirdPartyVotes)
+}
+
+// defaultLensSet, env boşken (THIRD_PARTY_PROMPT=v1, THIRD_PARTY_VOTES=1)
+// bugünkü mercek tanımıdır. Aşağıdaki seedLenses/trendingLenses/revenueLenses
+// bunun görünümleridir — üretim yolları (SynthesizeIdeas/ProcessSeeds)
+// bunları DEĞİL lensSetFor(cfg) kullanır; bu değişkenler varsayılan (v1) tanımı
+// birim testlerine ve blockedByIdeaLens sarmalayıcısına sunar.
+var defaultLensSet = newLensSet("v1", 1)
+
+// seedLenses, organik yolun v1 varsayılan merceği (üçüncü-taraf + veri-erişimi;
+// #169: pazar-işlerliği kaldırıldı). Bkz. lensSet.organic.
+var seedLenses = defaultLensSet.organic
+
+// trendingLenses, ivme tohumlarının v1 varsayılan mercekleri. Bkz. lensSet.trending.
+var trendingLenses = defaultLensSet.trending
+
+// revenueLenses, gelir tohumu yolunun v1 varsayılan merceği (yalnız
+// veri-erişimi). Bkz. lensSet.revenue.
+var revenueLenses = defaultLensSet.revenue
+
+// skippedThirdPartyVerdict (#167, #197), gelir tohumunda HİÇ ÇAĞRILMAYAN
+// üçüncü-taraf merceği için kalıcı kayıtta bırakılan İZ: "hiç değerlendirilmedi"
+// (eksik kayıt) ile "bilinçli atlandı" (Verdict="skipped") birbirine
+// KARIŞMASIN diye. Ad + PromptVersion seçili sürümün merceğinden gelir (v3
+// seçiliyse "v3"). Blok SAYILMAZ — çağıran yalnızca Verdicts'e ekler.
+func skippedThirdPartyVerdict(l seedLens) store.LensVerdict {
+	return store.LensVerdict{
+		Lens:          l.name,
+		PromptVersion: l.version,
+		Subject:       "seed",
+		Verdict:       "skipped",
+		Reason:        "gelir tohumu: bağımsız bir şirket bu ürünü zaten satıyor, mercek atlandı (#167)",
+		At:            time.Now().UTC(),
+	}
+}
 
 type lensVerdict struct {
 	Verdict   string `json:"verdict"`
@@ -607,6 +686,10 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		distinctVotes = 1
 	}
 
+	// Bloklayıcı mercek seti (#197): üçüncü-taraf prompt sürümü/oy sayısı
+	// config'ten (organik yolla AYNI lensSetFor — iki kopya tanım YOK, #123).
+	lset := lensSetFor(cfg)
+
 	created := 0
 	for i, seed := range seeds {
 		if ctx.Err() != nil {
@@ -654,9 +737,9 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// #167: gelir tohumunda (kind=="revenue", boş kind dahil) üçüncü-taraf
 		// merceği çıkarılmış revenueLenses kullanılır (yalnız veri-erişimi
 		// çağrılır); ivme tohumunda liste DEĞİŞMEZ (3 mercek, #89).
-		lenses := revenueLenses
+		lenses := lset.revenue
 		if isTrending {
-			lenses = trendingLenses
+			lenses = lset.trending
 		}
 
 		// Bloklayıcı mercekler (#123, #153): runBlockingLenses(stopOnFirstFail=
@@ -673,24 +756,17 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		}
 
 		// #167: gelir tohumunda HİÇ ÇAĞRILMAYAN üçüncü-taraf merceği için
-		// kalıcı kayıtta bir İZ bırakılır — "hiç değerlendirilmedi" (eksik
-		// kayıt) ile "bilinçli atlandı" (Verdict="skipped") birbirine
-		// KARIŞMASIN diye. Sıra doğal yerinde: üçüncü-taraf seedLenses'te
-		// İLK sırada olduğundan bu girdi de diğer mercek kayıtlarından ÖNCE
-		// eklenir. runBlockingLenses'e HİÇ GİTMEZ, "verdicts" (yukarıda) bu
-		// girdiyi İÇERMEZ — "skipped" blok SAYILMAZ, aşağıdaki
-		// lensOutcome.Blocked kontrolü yalnız gerçekten çağrılan lenses'in
-		// "fail" sonucuna bakar (bu ekleme o kontrolden ÖNCE yapılır ama
-		// Blocked alanını ETKİLEMEZ, yalnız Verdicts alanına eklenir).
+		// kalıcı kayıtta bir İZ bırakılır (skippedThirdPartyVerdict — #197: ad
+		// ve PromptVersion SEÇİLİ sürümden, v3 seçiliyse "v3"). Sıra doğal
+		// yerinde: üçüncü-taraf organic'te İLK sırada olduğundan bu girdi de
+		// diğer mercek kayıtlarından ÖNCE eklenir. runBlockingLenses'e HİÇ
+		// GİTMEZ, "verdicts" (yukarıda) bu girdiyi İÇERMEZ — "skipped" blok
+		// SAYILMAZ, aşağıdaki lensOutcome.Blocked kontrolü yalnız gerçekten
+		// çağrılan lenses'in "fail" sonucuna bakar (bu ekleme o kontrolden
+		// ÖNCE yapılır ama Blocked alanını ETKİLEMEZ, yalnız Verdicts alanına
+		// eklenir).
 		if !isTrending {
-			lensOutcome.Verdicts = append([]store.LensVerdict{{
-				Lens:          "üçüncü-taraf inşa edilebilirlik",
-				PromptVersion: lensThirdPartyVersion,
-				Subject:       "seed",
-				Verdict:       "skipped",
-				Reason:        "gelir tohumu: bağımsız bir şirket bu ürünü zaten satıyor, mercek atlandı (#167)",
-				At:            time.Now().UTC(),
-			}}, lensOutcome.Verdicts...)
+			lensOutcome.Verdicts = append([]store.LensVerdict{skippedThirdPartyVerdict(lset.thirdParty)}, lensOutcome.Verdicts...)
 		}
 
 		// #131 PO düzeltmesi: yalnız "fail" tohumu eler ve kalıcı işaretler
@@ -721,7 +797,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		var unsureNames []string
 		var dataAccessVerdict lensVerdict
 		for li, v := range verdicts {
-			if lenses[li].system == lensDataAccessSystem {
+			if lenses[li].id == lensIDDataAccess {
 				dataAccessVerdict = v
 			}
 			if v.Verdict != "pass" {

@@ -80,9 +80,20 @@ type gateOutcome struct {
 // outcome.Err dolu döner, outcome.Check hata veren merceğin adıdır
 // (loglama için) — bloklama YOK, iki yolda da aynı.
 //
+// N-oy (#197, PO kararı: özgünlükteki #181 oybirliği düzeni üçüncü-taraf
+// merceğine de): lens.votes>1 olan mercek (yalnız üçüncü-taraf, config'ten —
+// bkz. newLensSet) N kez oylanır (voteLens çekirdeği, blok oyu = "fail").
+// Mercek ANCAK TÜM oylar "fail" derse "fail" sayılır (yukarıdaki iki mod
+// bunu tek bir "fail" kararı gibi işler); oylar ayrışırsa mercek kararı
+// "unsure" + "tartışmalı: ..." gerekçesidir ve BLOKLAMAZ; ilk oy hata verirse
+// yukarıdaki hata yolu AYNEN işler, sonraki oy hatası tartışmalı sayılır.
+// lens.votes<=1 ise (varsayılan, veri-erişimi/ürünleştirilebilirlik her
+// zaman) eski tek-çağrı yolu DEĞİŞMEDEN çalışır.
+//
 // verdicts, çağrılan mercek(ler)in ham kararlarıdır (hata durumunda hataya
 // kadar olanlar) — veri-erişimi merceğinin ham kararını karta yazmak ve
-// (tohum yolunda) "unsure" mercekleri loglamak için çağırana döner.
+// (tohum yolunda) "unsure" mercekleri loglamak için çağırana döner. N-oylu
+// merceğin elemanı NİHAİ karardır (ham oylar DEĞİL — onlar outcome.Verdicts'te).
 //
 // subject (#164): bu çağrının hangi girdi üzerinde çalıştığını taşır —
 // "card" (üretilmiş kart alanları, organik yol) ya da "seed" (ham tohum
@@ -95,23 +106,44 @@ func runBlockingLenses(ctx context.Context, chat llm.Chat, lenses []seedLens, us
 	verdicts := make([]lensVerdict, len(lenses))
 	var recorded []store.LensVerdict
 	for i, lens := range lenses {
-		// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
-		raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, userPrompt, 0)
-		if err != nil {
-			// #164: çağrı hatası verdict="error" + hata metniyle (500 rune'a
-			// kırpılmış) kalıcı kayda eklenir — NULL (hiç çağrılmadı) ile
-			// karışmasın diye. Bloklama/mevcut davranış DEĞİŞMEZ.
+		if lens.votes > 1 {
+			// N-oy yolu (#197): her oy AYRI bir yargı çağrısı (sıcaklık 0, #106).
+			call := func(voteCtx context.Context) (lensVerdict, string, error) {
+				raw, err := chat.ChatJSONWithTemperature(voteCtx, lens.system, userPrompt, 0)
+				if err != nil {
+					return lensVerdict{}, modelNameOf(chat), err
+				}
+				return parseLensVerdict(raw), modelNameOf(chat), nil
+			}
+			decision, voteRecords := voteLens(ctx, lens.votes, call, isThirdPartyBlock)
+			recorded = append(recorded, lensVoteVerdicts(lens, subject, lens.votes, voteRecords)...)
+			if decision.Err != nil {
+				// İlk oyun KENDİSİ hata verdi: bugünkü tek-çağrı hata yolu birebir.
+				return gateOutcome{Check: lens.name, Err: decision.Err, Verdicts: recorded}, verdicts[:i]
+			}
+			verdicts[i] = lensVerdict{Verdict: decision.Verdict, Criterion: decision.Criterion, Reason: decision.Reason}
+			if decision.Disputed {
+				log.Printf("mercek %q tartışmalı (konu: %s) — bloklamıyor: %s", lens.name, subject, decision.Reason)
+			}
+		} else {
+			// Yargı çağrısı (bloklayıcı mercek): sıcaklık 0 — tutarlı karar (#106).
+			raw, err := chat.ChatJSONWithTemperature(ctx, lens.system, userPrompt, 0)
+			if err != nil {
+				// #164: çağrı hatası verdict="error" + hata metniyle (500 rune'a
+				// kırpılmış) kalıcı kayda eklenir — NULL (hiç çağrılmadı) ile
+				// karışmasın diye. Bloklama/mevcut davranış DEĞİŞMEZ.
+				recorded = append(recorded, store.LensVerdict{
+					Lens: lens.name, PromptVersion: lens.version, Subject: subject,
+					Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), Model: modelNameOf(chat), At: time.Now().UTC(),
+				})
+				return gateOutcome{Check: lens.name, Err: err, Verdicts: recorded}, verdicts[:i]
+			}
+			verdicts[i] = parseLensVerdict(raw)
 			recorded = append(recorded, store.LensVerdict{
 				Lens: lens.name, PromptVersion: lens.version, Subject: subject,
-				Verdict: "error", Reason: clip(err.Error(), eliminationReasonLimit), Model: modelNameOf(chat), At: time.Now().UTC(),
+				Verdict: verdicts[i].Verdict, Reason: verdicts[i].Reason, Model: modelNameOf(chat), At: time.Now().UTC(),
 			})
-			return gateOutcome{Check: lens.name, Err: err, Verdicts: recorded}, verdicts[:i]
 		}
-		verdicts[i] = parseLensVerdict(raw)
-		recorded = append(recorded, store.LensVerdict{
-			Lens: lens.name, PromptVersion: lens.version, Subject: subject,
-			Verdict: verdicts[i].Verdict, Reason: verdicts[i].Reason, Model: modelNameOf(chat), At: time.Now().UTC(),
-		})
 		if stopOnFirstFail && verdicts[i].Verdict == "fail" {
 			return gateOutcome{Blocked: true, Stage: "blocking_lens", Check: lens.name, Reason: verdicts[i].Reason, Verdicts: recorded}, verdicts[:i+1]
 		}
@@ -137,22 +169,23 @@ func runBlockingLenses(ctx context.Context, chat llm.Chat, lenses []seedLens, us
 	return gateOutcome{Verdicts: recorded}, verdicts
 }
 
-// distinctivenessVoteRecord, voteDistinctiveness'in ÜRETTİĞİ TEK oyun
-// kaydıdır (#181) — evaluateDistinctiveness bunu store.LensVerdict'e,
-// lens-ab (lensab.go) kendi CSV satırının reason/tokens alanlarına eşler.
-// Err doluysa Verdict sıfır değerdir (call hata döndürdü, LLM cevabı YOK).
-type distinctivenessVoteRecord struct {
+// lensVoteRecord, voteLens'in ÜRETTİĞİ TEK oyun kaydıdır (#181, #197) —
+// evaluateDistinctiveness/runBlockingLenses bunu lensVoteVerdicts ile
+// store.LensVerdict'e, lens-ab (lensab.go) kendi CSV satırının reason/tokens
+// alanlarına eşler. Err doluysa Verdict sıfır değerdir (call hata döndürdü,
+// LLM cevabı YOK).
+type lensVoteRecord struct {
 	Verdict lensVerdict
 	Model   string
 	Err     error
 }
 
-// distinctivenessDecision, voteDistinctiveness'in N oy üzerinden verdiği
-// NİHAİ karardır — evaluateDistinctiveness bunu idea.Distinctiveness*/
-// gateOutcome alanlarına, lens-ab kendi satırının verdict/criterion'ına
-// AYNEN yazar.
-type distinctivenessDecision struct {
-	// Blocked: true ise N/N oy blok (fail K1|K2) — kart bloklanır.
+// lensVoteDecision, voteLens'in N oy üzerinden verdiği NİHAİ karardır —
+// evaluateDistinctiveness bunu idea.Distinctiveness*/gateOutcome alanlarına,
+// runBlockingLenses mercek kararına, lens-ab kendi satırının verdict/
+// criterion'ına AYNEN yazar.
+type lensVoteDecision struct {
+	// Blocked: true ise N/N oy blok — kart bloklanır.
 	Blocked bool
 	// Disputed: true ise oylar AYRIŞTI (en az bir blok oy, sonra blok
 	// OLMAYAN bir oy YA DA bir oy hatası) — kart YAZILIR, "tartışmalı"
@@ -167,70 +200,80 @@ type distinctivenessDecision struct {
 	Err error
 }
 
-// voteDistinctivenessCall, voteDistinctiveness'e geçirilen TEK oy
-// çağrısıdır — call(ctx) bir LLM turudur. Üretimde (evaluateDistinctiveness)
-// override+tek-seferlik-yedek mantığını İÇİNDE barındırır; lens-ab'de
-// (lensab.go) oran-sınırı bekle-yeniden-dene döngüsünü İÇİNDE barındırır —
-// voteDistinctiveness bu ayrıntıları BİLMEZ, yalnız (verdict, model, hata)
-// üçlüsünü okur.
-type voteDistinctivenessCall func(ctx context.Context) (lensVerdict, string, error)
+// lensVoteCall, voteLens'e geçirilen TEK oy çağrısıdır — call(ctx) bir LLM
+// turudur. Üretimde (evaluateDistinctiveness) override+tek-seferlik-yedek
+// mantığını İÇİNDE barındırır; lens-ab'de (lensab.go) oran-sınırı
+// bekle-yeniden-dene döngüsünü İÇİNDE barındırır — voteLens bu ayrıntıları
+// BİLMEZ, yalnız (verdict, model, hata) üçlüsünü okur.
+type lensVoteCall func(ctx context.Context) (lensVerdict, string, error)
 
-// voteDistinctiveness, özgünlük merceğinin N-OY ÇEKİRDEĞİDİR (#181, PO
-// kararı 2026-09-23: "oybirliğiyle blok" — ölçüm: kart 81'e 8 çağrıda 3 kez
-// "fail K1" dedi, tek çağrıyla bloklamak yazı-tura). Kart ANCAK TÜM oylar
-// blok derse bloklanır; oylar ayrışırsa kart YAZILIR ve "tartışmalı"
-// işaretlenir, PO karar verir (KKK-20260921: mercek yalnız bariz olanı
-// eler). SAF ve PAYLAŞILABİLİR: hem üretim (evaluateDistinctiveness) hem
-// `lens-ab --votes` AYNI bu fonksiyonu kullanır — iki kopya karar mantığı
-// YOK.
+// isDistinctivenessBlock, özgünlük merceğinin "blok oyu" yüklemidir (#166,
+// #181): verdict=="fail" && criterion ∈ {K1,K2} (doygunluk/yerleşik çözüm;
+// K3/K4 fail blok SAYILMAZ).
+func isDistinctivenessBlock(v lensVerdict) bool {
+	return v.Verdict == "fail" && (v.Criterion == "K1" || v.Criterion == "K2")
+}
+
+// isThirdPartyBlock, üçüncü-taraf merceğinin "blok oyu" yüklemidir (#197):
+// verdict=="fail" (bu merceğin criterion alanı yok — bloklayıcı mercek
+// grubundaki genel kural: yalnız "fail" bloklar, "unsure" bloklamaz).
+func isThirdPartyBlock(v lensVerdict) bool {
+	return v.Verdict == "fail"
+}
+
+// voteLens, bir merceğin N-OY ÇEKİRDEĞİDİR (#181, PO kararı 2026-09-23:
+// "oybirliğiyle blok" — ölçüm: kart 81'e 8 çağrıda 3 kez "fail K1" dedi, tek
+// çağrıyla bloklamak yazı-tura; #197: aynı düzen üçüncü-taraf merceğine de).
+// Kart ANCAK TÜM oylar blok derse bloklanır; oylar ayrışırsa kart YAZILIR ve
+// "tartışmalı" işaretlenir, PO karar verir (KKK-20260921: mercek yalnız
+// bariz olanı eler). SAF ve PAYLAŞILABİLİR: üretim (evaluateDistinctiveness,
+// runBlockingLenses) ve `lens-ab --votes` AYNI bu fonksiyonu kullanır — iki
+// kopya karar mantığı YOK; mercekler yalnız "blok oyu" yüklemiyle (isBlock)
+// ayrışır (isDistinctivenessBlock / isThirdPartyBlock).
 //
-// "Blok oyu" = verdict=="fail" && criterion ∈ {K1,K2} (doygunluk/yerleşik
-// çözüm — #166; K3/K4 fail blok SAYILMAZ). Erken çıkışlı: k=1..n sırayla
-// call(ctx) çağrılır.
+// Erken çıkışlı: k=1..n sırayla call(ctx) çağrılır.
 //   - call HATA verirse: k==1 → dur, Decision.Err dolu (bugünkü tek-çağrı
 //     davranışı birebir, diğer alanlar sıfır değer). k>1 → dur, oybirliği
 //     kurulamadı: TARTIŞMALI (Err YOK, bloklama YOK) — hata oyu da votes
 //     dönüşüne kaydedilir.
-//   - Oy BLOK DEĞİLSE (pass/unsure/K3-K4 fail): dur. k==1 → sonuç
+//   - Oy BLOK DEĞİLSE (pass/unsure/blok olmayan fail): dur. k==1 → sonuç
 //     bugünküyle birebir (bu oyun kendi verdict/criterion/reason'ı,
-//     Blocked=false — K1|K2 dışında hiçbir tek oy tek başına bloklamaz).
-//     k>1 → TARTIŞMALI: Verdict "unsure", Criterion İLK blok oyunun
-//     kriteri, Reason "tartışmalı: <blok>/<k> oy blok — " + İLK blok
+//     Blocked=false). k>1 → TARTIŞMALI: Verdict "unsure", Criterion İLK blok
+//     oyunun kriteri, Reason "tartışmalı: <blok>/<k> oy blok — " + İLK blok
 //     oyunun gerekçesi (eliminationReasonLimit'e clip'lenir).
 //   - Oy BLOK ise ve k<n: devam (bir sonraki oya geç). k==n (TÜMÜ blok):
 //     BLOKLA — Verdict/Criterion/Reason İLK oyunkiler (tek oyda k==1==n
 //     olduğundan zaten İLK oy — bugünkü blok yoluyla BİREBİR).
 //
 // n<=0 ise 1 sayılır (savunmacı — çağıranlar zaten >=1 garanti eder,
-// config.Config.DistinctivenessVotes de dahil).
-func voteDistinctiveness(ctx context.Context, n int, call voteDistinctivenessCall) (distinctivenessDecision, []distinctivenessVoteRecord) {
+// config.Config.DistinctivenessVotes/ThirdPartyVotes de dahil).
+func voteLens(ctx context.Context, n int, call lensVoteCall, isBlock func(lensVerdict) bool) (lensVoteDecision, []lensVoteRecord) {
 	if n <= 0 {
 		n = 1
 	}
 
-	votes := make([]distinctivenessVoteRecord, 0, n)
+	votes := make([]lensVoteRecord, 0, n)
 	blockCount := 0
 	var firstBlock *lensVerdict
 
 	for k := 1; k <= n; k++ {
 		v, model, err := call(ctx)
-		votes = append(votes, distinctivenessVoteRecord{Verdict: v, Model: model, Err: err})
+		votes = append(votes, lensVoteRecord{Verdict: v, Model: model, Err: err})
 
 		if err != nil {
 			if k == 1 {
-				return distinctivenessDecision{Err: err}, votes
+				return lensVoteDecision{Err: err}, votes
 			}
-			return disputedDistinctivenessDecision(blockCount, k, firstBlock), votes
+			return disputedLensDecision(blockCount, k, firstBlock), votes
 		}
 
-		isBlock := v.Verdict == "fail" && (v.Criterion == "K1" || v.Criterion == "K2")
-		if !isBlock {
+		if !isBlock(v) {
 			if k == 1 {
-				return distinctivenessDecision{
+				return lensVoteDecision{
 					Blocked: false, Verdict: v.Verdict, Criterion: v.Criterion, Reason: v.Reason,
 				}, votes
 			}
-			return disputedDistinctivenessDecision(blockCount, k, firstBlock), votes
+			return disputedLensDecision(blockCount, k, firstBlock), votes
 		}
 
 		blockCount++
@@ -239,26 +282,57 @@ func voteDistinctiveness(ctx context.Context, n int, call voteDistinctivenessCal
 			firstBlock = &fb
 		}
 		if k == n {
-			return distinctivenessDecision{
+			return lensVoteDecision{
 				Blocked: true, Verdict: "fail", Criterion: firstBlock.Criterion, Reason: firstBlock.Reason,
 			}, votes
 		}
 	}
 	// n>=1 olduğundan döngü yukarıda HER ZAMAN return eder — buraya erişilmez.
-	panic("voteDistinctiveness: erişilemez durum")
+	panic("voteLens: erişilemez durum")
 }
 
-// disputedDistinctivenessDecision, oyların AYRIŞTIĞI (en az bir blok oy,
-// ardından blok olmayan bir oy YA DA bir oy hatası) TARTIŞMALI kararı
-// kurar. firstBlock (dispute yalnız EN AZ bir blok oydan SONRA tetiklendiği
-// için) HER ZAMAN dolu gelir — nil kontrolü yalnız savunmacılık.
-func disputedDistinctivenessDecision(blockCount, k int, firstBlock *lensVerdict) distinctivenessDecision {
+// voteDistinctiveness, voteLens'in özgünlük merceği için (isDistinctivenessBlock
+// yüklemiyle) ince sarmalayıcısıdır (#181) — lens-ab ve birim testleri bu adı
+// kullanır; karar mantığı voteLens'tedir, burada KOPYA YOK.
+func voteDistinctiveness(ctx context.Context, n int, call lensVoteCall) (lensVoteDecision, []lensVoteRecord) {
+	return voteLens(ctx, n, call, isDistinctivenessBlock)
+}
+
+// disputedLensDecision, oyların AYRIŞTIĞI (en az bir blok oy, ardından blok
+// olmayan bir oy YA DA bir oy hatası) TARTIŞMALI kararı kurar. firstBlock
+// (dispute yalnız EN AZ bir blok oydan SONRA tetiklendiği için) HER ZAMAN dolu
+// gelir — nil kontrolü yalnız savunmacılık.
+func disputedLensDecision(blockCount, k int, firstBlock *lensVerdict) lensVoteDecision {
 	criterion, reason := "", fmt.Sprintf("tartışmalı: %d/%d oy blok", blockCount, k)
 	if firstBlock != nil {
 		criterion = firstBlock.Criterion
 		reason = clip(fmt.Sprintf("tartışmalı: %d/%d oy blok — %s", blockCount, k, firstBlock.Reason), eliminationReasonLimit)
 	}
-	return distinctivenessDecision{Disputed: true, Verdict: "unsure", Criterion: criterion, Reason: reason}
+	return lensVoteDecision{Disputed: true, Verdict: "unsure", Criterion: criterion, Reason: reason}
+}
+
+// lensVoteVerdicts, voteLens'in oy kayıtlarını kalıcı store.LensVerdict
+// kayıtlarına çevirir (#164, #181, #197) — evaluateDistinctiveness ve
+// runBlockingLenses'in TEK ortak biçimi: her oy AYRI bir kayıt, hata oyu
+// Verdict="error" + hata metni (500 rune'a clip), n>1 iken (YAPILAN oy
+// sayısından bağımsız, yapılandırılan n) Reason'ın başına "oy k/N: " öneki.
+func lensVoteVerdicts(lens seedLens, subject string, n int, votes []lensVoteRecord) []store.LensVerdict {
+	recorded := make([]store.LensVerdict, 0, len(votes))
+	for i, vr := range votes {
+		verdict, reason := vr.Verdict.Verdict, vr.Verdict.Reason
+		if vr.Err != nil {
+			verdict = "error"
+			reason = clip(vr.Err.Error(), eliminationReasonLimit)
+		}
+		if n > 1 {
+			reason = fmt.Sprintf("oy %d/%d: %s", i+1, n, reason)
+		}
+		recorded = append(recorded, store.LensVerdict{
+			Lens: lens.name, PromptVersion: lens.version, Subject: subject,
+			Verdict: verdict, Reason: reason, Model: vr.Model, At: time.Now().UTC(),
+		})
+	}
+	return recorded
 }
 
 // evaluateDistinctiveness, özgünlük merceğini votes kez oylatıp (#181,
@@ -331,21 +405,8 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 
 	decision, voteRecords := voteDistinctiveness(ctx, n, call)
 
-	recorded := make([]store.LensVerdict, 0, len(voteRecords))
-	for i, vr := range voteRecords {
-		verdict, reason := vr.Verdict.Verdict, vr.Verdict.Reason
-		if vr.Err != nil {
-			verdict = "error"
-			reason = clip(vr.Err.Error(), eliminationReasonLimit)
-		}
-		if n > 1 {
-			reason = fmt.Sprintf("oy %d/%d: %s", i+1, n, reason)
-		}
-		recorded = append(recorded, store.LensVerdict{
-			Lens: lensName, PromptVersion: lensDistinctivenessVersion, Subject: "card",
-			Verdict: verdict, Reason: reason, Model: vr.Model, At: time.Now().UTC(),
-		})
-	}
+	recorded := lensVoteVerdicts(
+		seedLens{name: lensName, version: lensDistinctivenessVersion}, "card", n, voteRecords)
 
 	if decision.Err != nil {
 		return gateOutcome{Err: decision.Err, Verdicts: recorded}

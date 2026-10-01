@@ -70,6 +70,16 @@ var lensRegistry = map[string]lensDef{
 	"distinctiveness":  {lensDistinctivenessSystem, lensDistinctivenessSystemV3},
 }
 
+// lensVoteBlock (#181, #197), `--votes >1` destekleyen merceklerin "blok oyu"
+// yüklemleri — üretimdeki oylama çağrı noktalarıyla (evaluateDistinctiveness →
+// isDistinctivenessBlock, runBlockingLenses → isThirdPartyBlock) AYNI
+// fonksiyonlar; ölçüm ile üretim aynı kararı verir. Bu haritada OLMAYAN bir
+// mercek (data_access, market_viability) oylanamaz.
+var lensVoteBlock = map[string]func(lensVerdict) bool{
+	"distinctiveness": isDistinctivenessBlock,
+	"third_party":     isThirdPartyBlock,
+}
+
 // LensABRowKey, --resume'da bir (çift, koşu) sonucunu tekil belirleyen
 // anahtar (#175) — CSV'de zaten var olan (verdict!="error") bir satırın
 // koşusu bu anahtarla ATLANIR (LLM tekrar çağrılmaz).
@@ -123,14 +133,17 @@ type LensABOptions struct {
 	// RateRetries: RateWait ile kaç kez daha denenir — tükenirse o (çift,
 	// koşu) için "error" satırı yazılır, koşu DEVAM EDER (bitmez).
 	RateRetries int
-	// Votes (#181, "--votes N"): distinctiveness satırlarında her "run"
-	// üretimdeki voteDistinctiveness çekirdeğiyle (gate.go) N oy çağrısı
-	// yapar — İKİ KOPYA KARAR MANTIĞI YOK. CSV satırı NİHAİ kararı taşır
+	// Votes (#181, "--votes N"; #197: third_party'ye genişletildi):
+	// distinctiveness ve third_party satırlarında her "run" üretimdeki voteLens
+	// çekirdeğiyle (gate.go) N oy çağrısı yapar — İKİ KOPYA KARAR MANTIĞI YOK
+	// (blok oyu yüklemi mercek başına: distinctiveness fail&K1|K2,
+	// third_party fail — bkz. lensVoteBlock). CSV satırı NİHAİ kararı taşır
 	// (verdict/criterion), tokens tüm oyların TOPLAMI, reason
 	// "oylar: v1,v2,... - karar gerekçesi" biçimindedir. <=1 ise (varsayılan)
 	// BUGÜNKÜ tek-çağrılık davranış BİREBİR korunur — hiçbir satır formatı
-	// değişmez. >1 iken Lens != "distinctiveness" HATA döner (bkz. RunLensAB
-	// başı) — bir oylama kararı yalnız özgünlük merceği için tanımlıdır.
+	// değişmez. >1 iken Lens, lensVoteBlock'ta olmayan bir mercekse (data_access,
+	// market_viability, "all") HATA döner (bkz. RunLensAB başı) — bir oylama
+	// kararı yalnız bu iki mercek için tanımlıdır.
 	Votes int
 	// ExistingRows: --resume'da VAR OLAN CSV'den okunmuş eski satırlar —
 	// bu koşuda YENİDEN ÜRETİLMEZ (SkipKeys zaten engeller), yalnız
@@ -304,17 +317,17 @@ func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []Golden
 		return LensABResult{}, fmt.Errorf("lens-ab: --prompt v1|v3 olmalı, geldi: %q", opts.PromptVersion)
 	}
 
-	// Votes (#181): bir oylama kararı yalnız özgünlük merceği için
-	// tanımlıdır — >1 iken --lens=distinctiveness DIŞINDA (özellikle "all")
-	// net hata döner, sessizce yok sayılmaz. <=1 BUGÜNKÜ tek-çağrılık
-	// davranışı DEĞİŞTİRMEZ (promptCol'a ek YAPILMAZ).
+	// Votes (#181, #197): bir oylama kararı yalnız özgünlük ve üçüncü-taraf
+	// mercekleri için tanımlıdır (lensVoteBlock) — >1 iken bunların DIŞINDA
+	// (özellikle "all") net hata döner, sessizce yok sayılmaz. <=1 BUGÜNKÜ
+	// tek-çağrılık davranışı DEĞİŞTİRMEZ (promptCol'a ek YAPILMAZ).
 	votes := opts.Votes
 	if votes <= 0 {
 		votes = 1
 	}
 	if votes > 1 {
-		if lensFilter != "distinctiveness" {
-			return LensABResult{}, fmt.Errorf("lens-ab: --votes >1 yalnız --lens=distinctiveness ile kullanılabilir (geldi: --lens=%q)", lensFilter)
+		if _, ok := lensVoteBlock[lensFilter]; !ok {
+			return LensABResult{}, fmt.Errorf("lens-ab: --votes >1 yalnız --lens=distinctiveness ya da --lens=third_party ile kullanılabilir (geldi: --lens=%q)", lensFilter)
 		}
 		// CSV prompt etiketine oy sayısı eklenir ("v1+oy3", "file:x+oy3")
 		// ki --resume farklı oy sayılarını karıştırmasın (#181).
@@ -426,10 +439,10 @@ outer:
 			callCtx := llm.WithStage(baseCtx, stage)
 
 			var row LensABRow
-			if gc.Lens == "distinctiveness" && votes > 1 {
-				// #181: N-oy yolu — üretimdeki SAF voteDistinctiveness
-				// çekirdeğini (gate.go) KULLANIR, kopyalamaz.
-				r, verr := voteDistinctivenessLensABRow(ctx, callCtx, activeChat, system, userPrompt, votes, opts, meter, stage, prevStageTotal, gc, promptCol, modelName, run)
+			if isBlock, voting := lensVoteBlock[gc.Lens]; voting && votes > 1 {
+				// #181, #197: N-oy yolu — üretimdeki SAF voteLens çekirdeğini
+				// (gate.go) mercek başına blok yüklemiyle KULLANIR, kopyalamaz.
+				r, verr := voteLensABRow(ctx, callCtx, activeChat, system, userPrompt, votes, isBlock, opts, meter, stage, prevStageTotal, gc, promptCol, modelName, run)
 				if verr != nil {
 					return result, verr
 				}
@@ -502,15 +515,16 @@ outer:
 	return result, nil
 }
 
-// voteDistinctivenessLensABRow (#181), --votes>1 iken TEK (çift, koşu)
+// voteLensABRow (#181, #197), --votes>1 iken TEK (çift, koşu)
 // satırını üretir: n oy çağrısı yapılır (her biri kendi oran-sınırı
 // bekle-yeniden-dene döngüsünü ve --sleep-ms'i İZLER — tek-çağrılık yoldaki
 // döngünün AYNISI, oy başına tekrarlanır), sonra üretimdeki SAF çekirdek
-// (gate.go voteDistinctiveness) kararı verir — iki kopya karar mantığı YOK.
+// (gate.go voteLens, isBlock = merceğin blok oyu yüklemi) kararı verir — iki
+// kopya karar mantığı YOK.
 // err yalnız GERÇEK bir ctx iptalinde (lensABSleep) dolu döner, RunLensAB'yi
 // durdurur; bir LLM/oran-sınırı hatası err DEĞİL, decision.Err'e ya da
 // (k>1'de) tartışmalı karara düşer — normal "error"/karar satırı üretir.
-func voteDistinctivenessLensABRow(ctx, callCtx context.Context, activeChat llm.Chat, system, userPrompt string, n int, opts LensABOptions, meter *llm.UsageMeter, stage string, prevStageTotal map[string]int, gc GoldenCase, promptCol, modelName string, run int) (LensABRow, error) {
+func voteLensABRow(ctx, callCtx context.Context, activeChat llm.Chat, system, userPrompt string, n int, isBlock func(lensVerdict) bool, opts LensABOptions, meter *llm.UsageMeter, stage string, prevStageTotal map[string]int, gc GoldenCase, promptCol, modelName string, run int) (LensABRow, error) {
 	tokens := 0
 	var abort error
 
@@ -546,7 +560,7 @@ func voteDistinctivenessLensABRow(ctx, callCtx context.Context, activeChat llm.C
 		return parseLensVerdict(raw), modelName, nil
 	}
 
-	decision, voteRecords := voteDistinctiveness(callCtx, n, call)
+	decision, voteRecords := voteLens(callCtx, n, call, isBlock)
 	if abort != nil {
 		return LensABRow{}, abort
 	}

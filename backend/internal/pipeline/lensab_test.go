@@ -398,11 +398,14 @@ func TestRunLensABPromptFileRequiresSingleLens(t *testing.T) {
 	}
 }
 
-// TestRunLensABVotesRequiresDistinctivenessLens (#181): --votes >1 yalnız
-// --lens=distinctiveness ile geçerlidir — DB/LLM'e HİÇ gitmeden (en erken
-// adımda) reddedilir, st/chat nil geçilebilir (TestRunLensABPromptFileRequiresSingleLens
-// ile AYNI desen). Votes<=1 (varsayılan) HERHANGİ bir lens ile sorunsuz.
-func TestRunLensABVotesRequiresDistinctivenessLens(t *testing.T) {
+// TestRunLensABVotesRequiresVotableLens (#181, #197): --votes >1 yalnız
+// oylanabilir mercekler (--lens=distinctiveness / --lens=third_party,
+// lensVoteBlock) ile geçerlidir; data_access, market_viability ve "all" ile
+// DB/LLM'e HİÇ gitmeden (en erken adımda) reddedilir, st/chat nil geçilebilir
+// (TestRunLensABPromptFileRequiresSingleLens ile AYNI desen). Votes<=1
+// (varsayılan) HERHANGİ bir lens ile sorunsuz. Oylanabilir mercekler boş set
+// ile (DB'ye hiç gidilmez) doğrulamadan GEÇER.
+func TestRunLensABVotesRequiresVotableLens(t *testing.T) {
 	set := []GoldenCase{{ID: 1, Kind: "idea", Lens: "third_party", Expect: "pass"}}
 
 	if _, err := RunLensAB(context.Background(), nil, nil, set, LensABOptions{
@@ -413,10 +416,31 @@ func TestRunLensABVotesRequiresDistinctivenessLens(t *testing.T) {
 		t.Errorf("hata mesajı --votes'a değinmeli, geldi: %v", err)
 	}
 
-	if _, err := RunLensAB(context.Background(), nil, nil, set, LensABOptions{
-		Lens: "third_party", PromptVersion: "v1", Votes: 3,
-	}); err == nil {
-		t.Fatal("--votes=3 --lens=third_party hata vermeli")
+	for _, lens := range []string{"data_access", "market_viability"} {
+		if _, err := RunLensAB(context.Background(), nil, nil, set, LensABOptions{
+			Lens: lens, PromptVersion: "v1", Votes: 3,
+		}); err == nil {
+			t.Errorf("--votes=3 --lens=%s hata vermeli", lens)
+		}
+	}
+
+	// Oylanabilir mercekler (#197: third_party artık kabul): boş set → hiç
+	// DB/LLM çağrısı yok, doğrulama geçer ve hata dönmez.
+	for _, lens := range []string{"third_party", "distinctiveness"} {
+		for _, pv := range []string{"v1", "v3"} {
+			if _, err := RunLensAB(context.Background(), nil, nil, nil, LensABOptions{
+				Lens: lens, PromptVersion: pv, Votes: 3,
+			}); err != nil {
+				t.Errorf("--votes=3 --lens=%s --prompt %s kabul edilmeli, hata: %v", lens, pv, err)
+			}
+		}
+	}
+
+	// Votes<=1: oylanamayan mercekte de hata YOK (boş set).
+	if _, err := RunLensAB(context.Background(), nil, nil, nil, LensABOptions{
+		Lens: "data_access", PromptVersion: "v1", Votes: 1,
+	}); err != nil {
+		t.Errorf("--votes=1 --lens=data_access hata vermemeli: %v", err)
 	}
 }
 
@@ -1170,5 +1194,129 @@ func TestRunLensABUnknownLensAndPrompt(t *testing.T) {
 	}
 	if _, err := RunLensAB(ctx, st, chat, nil, LensABOptions{Lens: "bilinmeyen", PromptVersion: "v1"}); err == nil {
 		t.Error("geçersiz --lens hata vermeli")
+	}
+}
+
+// ---------------------------------------------------------------- #197: third_party --votes
+
+// TestVoteLensABRowThirdParty (#197, DB'siz — voteLensABRow yalnız chat'e
+// dokunur): --votes>1 --lens=third_party satırı üretimdeki voteLens çekirdeği
+// + üçüncü-taraf blok yüklemiyle (fail, criterion yok sayılır) NİHAİ kararı
+// taşır; tokens tüm oyların toplamı, reason "oylar: ... — karar gerekçesi",
+// ayrışmada "unsure"+tartışmalı. Yüklem mercek başına: aynı oy dizisi
+// özgünlük yüklemiyle (K3 fail blok değil) tek çağrıda biter.
+func TestVoteLensABRowThirdParty(t *testing.T) {
+	chat := newLensABScriptedChat(t, []scriptedChatResponse{
+		{contains: "TP All Block Card", verdictByRun: []string{"fail", "fail", "fail"}, criterionByRun: []string{"K3", "K3", "K3"}, tokensPerCall: 10},
+		{contains: "TP Disputed Card", verdictByRun: []string{"fail", "pass"}, tokensPerCall: 7},
+		{contains: "TP Distinct Card", verdictByRun: []string{"fail", "fail", "fail"}, criterionByRun: []string{"K3", "K3", "K3"}, tokensPerCall: 10},
+	})
+
+	voteRow := func(title string, lens string, expect string) LensABRow {
+		t.Helper()
+		meter := llm.NewUsageMeter()
+		ctx := context.Background()
+		stage := lens + "/v3+oy3"
+		callCtx := llm.WithStage(llm.WithMeter(ctx, meter), stage)
+		gc := GoldenCase{ID: 1, Kind: "idea", Lens: lens, Expect: expect}
+		row, err := voteLensABRow(ctx, callCtx, chat, lensThirdPartySystemV3,
+			ideaLensUserPrompt(title, "p", "s", "u"), 3, lensVoteBlock[lens], LensABOptions{},
+			meter, stage, map[string]int{}, gc, "v3+oy3", "m", 1)
+		if err != nil {
+			t.Fatalf("voteLensABRow: %v", err)
+		}
+		return row
+	}
+
+	all := voteRow("TP All Block Card", "third_party", "fail")
+	if all.Verdict != "fail" || !all.Match || all.Tokens != 30 || all.PromptVersion != "v3+oy3" {
+		t.Errorf("3/3 fail -> fail, Match, 30 token, v3+oy3 beklenirdi: %+v", all)
+	}
+	if all.Reason != "oylar: fail,fail,fail — test" {
+		t.Errorf("reason %q", all.Reason)
+	}
+
+	disputed := voteRow("TP Disputed Card", "third_party", "fail")
+	if disputed.Verdict != "unsure" || disputed.Match || disputed.Tokens != 14 {
+		t.Errorf("fail,pass -> unsure (tartışmalı), Match yok, 14 token beklenirdi: %+v", disputed)
+	}
+	if disputed.Reason != "oylar: fail,pass — tartışmalı: 1/2 oy blok — test" {
+		t.Errorf("reason %q", disputed.Reason)
+	}
+
+	// Aynı K3-fail dizisi özgünlük yüklemiyle: K3 blok değil -> ilk oyda durur.
+	distinct := voteRow("TP Distinct Card", "distinctiveness", "fail")
+	if distinct.Verdict != "fail" || distinct.Criterion != "K3" || distinct.Tokens != 10 || distinct.Reason != "oylar: fail — test" {
+		t.Errorf("özgünlük yüklemiyle K3 fail tek çağrıda bitmeli (10 token): %+v", distinct)
+	}
+}
+
+// TestRunLensABVotesThirdPartyV3EndToEnd (#197): --lens=third_party --prompt v3
+// --votes 3 — her oy v3 sistem prompt'uyla çağrılır (lensThirdPartySystemV3),
+// CSV prompt etiketi "v3+oy3", satır NİHAİ kararı taşır, tokens oy toplamı.
+// TEST_DATABASE_URL yoksa atlanır; yalnız yerel httptest sunucusuna gider.
+func TestRunLensABVotesThirdPartyV3EndToEnd(t *testing.T) {
+	st, ctx := lensabTestStore(t)
+
+	id, err := st.InsertIdea(ctx, store.Idea{
+		Title: "Vote ThirdParty Card AB Test", ProblemStatement: "p", ProposedSolution: "s",
+		TargetUser: "u", SourceType: "pain_point", UrgencyScore: 3,
+	})
+	if err != nil {
+		t.Fatalf("InsertIdea: %v", err)
+	}
+	t.Cleanup(func() { st.Pool.Exec(ctx, "DELETE FROM ideas WHERE id = $1", id) })
+
+	var mu sync.Mutex
+	var systems []string
+	chat := newLensABHTTPChat(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		json.Unmarshal(body, &req)
+		mu.Lock()
+		for _, m := range req.Messages {
+			if m.Role == "system" {
+				systems = append(systems, m.Content)
+			}
+		}
+		mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"content": `{"verdict":"fail","criterion":"none","reason":"test"}`}}},
+			"usage":   map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10},
+		})
+	})
+
+	set := []GoldenCase{{ID: id, Kind: "idea", Lens: "third_party", Expect: "fail"}}
+	result, err := RunLensAB(ctx, st, chat, set, LensABOptions{
+		Lens: "third_party", PromptVersion: "v3", Runs: 2, Votes: 3,
+	})
+	if err != nil {
+		t.Fatalf("RunLensAB: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("2 satır beklenirdi, geldi %d", len(result.Rows))
+	}
+	for i, row := range result.Rows {
+		if row.PromptVersion != "v3+oy3" || row.Verdict != "fail" || !row.Match || row.Tokens != 30 {
+			t.Errorf("satır %d: v3+oy3/fail/Match/30 token beklenirdi: %+v", i, row)
+		}
+		if row.Reason != "oylar: fail,fail,fail — test" {
+			t.Errorf("satır %d: reason %q", i, row.Reason)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(systems) != 6 {
+		t.Fatalf("2 koşu x 3 oy = 6 çağrı beklenirdi, geldi %d", len(systems))
+	}
+	for i, sys := range systems {
+		if sys != lensThirdPartySystemV3 {
+			t.Errorf("çağrı %d v3 sistem prompt'unu kullanmalı", i)
+		}
 	}
 }

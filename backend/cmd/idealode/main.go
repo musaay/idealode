@@ -415,6 +415,15 @@ func logDistinctivenessLens(cfg *config.Config) {
 	log.Printf("özgünlük merceği: %s (%s)", model, hostOf(base))
 }
 
+// logThirdPartyLens, koşu başında üçüncü-taraf merceğinin hangi prompt
+// sürümü ve oy sayısıyla çalışacağını loglar (#197) — Railway'de
+// THIRD_PARTY_PROMPT/THIRD_PARTY_VOTES'un gerçekten okunduğu canlı izden
+// doğrulanabilsin diye. cmdSynthesize/cmdSeeds başında logDistinctivenessLens
+// ile birlikte çağrılır.
+func logThirdPartyLens(cfg *config.Config) {
+	log.Printf("üçüncü-taraf merceği: prompt=%s oy=%d", cfg.ThirdPartyPrompt, cfg.ThirdPartyVotes)
+}
+
 // hostOf, log satırlarında API anahtarı/yol sızdırmadan sağlayıcıyı
 // belirtmek için base URL'in host kısmını döner (llm.OpenAICompatClient'ın
 // iç host() yardımcısıyla AYNI ilke — burada tekrarlanır çünkü o unexported).
@@ -582,7 +591,7 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	rateWaitSec := fs.Int("rate-wait-sec", 65, "oran sınırı (429) sonrası bekleme (sn)")
 	rateRetries := fs.Int("rate-retries", 5, "oran sınırı sonrası yeniden deneme sayısı")
 	resume := fs.Bool("resume", false, "var olan --out CSV'sini tamamla (hatasız satırlar tekrar çağrılmaz)")
-	votes := fs.Int("votes", 1, "özgünlük mercek oylama sayısı (#181, yalnız --lens=distinctiveness ile >1)")
+	votes := fs.Int("votes", 1, "mercek oylama sayısı (#181/#197, yalnız --lens=distinctiveness ya da --lens=third_party ile >1)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -603,11 +612,11 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	if *resume && strings.TrimSpace(*outPath) == "" {
 		return fmt.Errorf("--resume için --out zorunlu")
 	}
-	// #181: bir oylama kararı yalnız özgünlük merceği için tanımlıdır —
-	// DB'ye/LLM'e gitmeden ÖNCE net hata (RunLensAB da aynı kısıtı
-	// tekrarlar, doğrudan çağrılan testler için).
-	if *votes > 1 && *lens != "distinctiveness" {
-		return fmt.Errorf("--votes >1 yalnız --lens=distinctiveness ile kullanılabilir")
+	// #181, #197: bir oylama kararı yalnız özgünlük ve üçüncü-taraf mercekleri
+	// için tanımlıdır — DB'ye/LLM'e gitmeden ÖNCE net hata (RunLensAB da aynı
+	// kısıtı tekrarlar, doğrudan çağrılan testler için).
+	if *votes > 1 && *lens != "distinctiveness" && *lens != "third_party" {
+		return fmt.Errorf("--votes >1 yalnız --lens=distinctiveness ya da --lens=third_party ile kullanılabilir")
 	}
 
 	raw, err := os.ReadFile(*setPath)
@@ -731,6 +740,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	chat := newChat(cfg)
 	distinctChat := newDistinctChat(cfg)
 	logDistinctivenessLens(cfg)
+	logThirdPartyLens(cfg)
 	if _, err := pipeline.GroupThemes(llm.WithStage(ctx, "kümeleme"), st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
@@ -757,6 +767,7 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	chat := newChat(cfg)
 	distinctChat := newDistinctChat(cfg)
 	logDistinctivenessLens(cfg)
+	logThirdPartyLens(cfg)
 	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL, distinctChat)
 	if err != nil {
 		return err

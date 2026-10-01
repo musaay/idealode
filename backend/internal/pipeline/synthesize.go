@@ -235,6 +235,9 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 	if distinctVotes <= 0 {
 		distinctVotes = 1
 	}
+	// Bloklayıcı mercek seti (#197): üçüncü-taraf prompt sürümü/oy sayısı
+	// config'ten (tohum yoluyla AYNI lensSetFor — iki kopya tanım YOK, #123).
+	lset := lensSetFor(cfg)
 	// #135: kümelenmiş (gerçek dert) temalar artık her zaman eski etiket
 	// temalarının önüne alınıyor — kaç temanın kümelemeden doğduğunu
 	// ölçülebilirlik için logla (preferPayment'tan bağımsız, koşulsuz).
@@ -338,9 +341,10 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
-		// Bloklayıcı mercekler (#123, #153): seeds.go'daki 2 mercek
+		// Bloklayıcı mercekler (#123, #153): seeds.go'daki lensSet'in 2 merceği
 		// (üçüncü-taraf inşa edilebilirlik / veri-erişimi — #169: pazar-
-		// işlerliği eşsiz katkısı 0 ölçüldüğünden kaldırıldı)
+		// işlerliği eşsiz katkısı 0 ölçüldüğünden kaldırıldı; üçüncü-taraf
+		// prompt sürümü/oy sayısı #197 ile config'ten)
 		// organik yolda da SIRAYLA, runBlockingLenses(stopOnFirstFail=true)
 		// ile çalışır — kart ÜRETİLDİ, DB'ye henüz YAZILMADI. İlk "fail"de
 		// durur, kalan mercekler çağrılmaz; kart yazılmaz ve tema bir sonraki
@@ -354,7 +358,7 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 		// alanları üzerinde çalışır (lensPrompt idea'dan kurulur) — tohum
 		// yolundaki subject="seed"in AKSİNE.
 		lensPrompt := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
-		lensOutcome, lensVerdicts := runBlockingLenses(ctx, chat, seedLenses, lensPrompt, true, "card")
+		lensOutcome, lensVerdicts := runBlockingLenses(ctx, chat, lset.organic, lensPrompt, true, "card")
 		// #164: bloklayıcı mercek(ler)in kalıcı kaydı — özgünlük merceğinin
 		// kaydıyla aşağıda birleştirilip ya idea.LensVerdicts'e (kart
 		// yazılırsa) ya da eliminations.verdicts'e (bloklanırsa) yazılır.
@@ -378,8 +382,8 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			// (#131) HAM kararı idea'ya yazılır (blockedByIdeaLens'in eski
 			// davranışıyla AYNI ilke).
 			var dataAccess lensVerdict
-			for i, lens := range seedLenses {
-				if lens.system == lensDataAccessSystem {
+			for i, lens := range lset.organic {
+				if lens.id == lensIDDataAccess {
 					dataAccess = lensVerdicts[i]
 				}
 			}
@@ -489,7 +493,7 @@ func blockedByIdeaLens(ctx context.Context, chat llm.Chat, idea *store.Idea) (le
 	}
 	var dataAccess lensVerdict
 	for i, lens := range seedLenses {
-		if lens.system == lensDataAccessSystem {
+		if lens.id == lensIDDataAccess {
 			dataAccess = verdicts[i]
 		}
 	}

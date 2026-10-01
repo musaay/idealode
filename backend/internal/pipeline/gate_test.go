@@ -460,7 +460,7 @@ func TestApplyGateOutcomeReturnsHoldError(t *testing.T) {
 // (verdict,criterion,reason) dizisini SIRAYLA döner; errAt (-1 = hiç hata
 // yok) o INDEXTEKİ (0-tabanlı) çağrıda hata döner.
 
-func seqVoteCall(votes []lensVerdict, errAt int) (voteDistinctivenessCall, *int) {
+func seqVoteCall(votes []lensVerdict, errAt int) (lensVoteCall, *int) {
 	calls := new(int)
 	fn := func(ctx context.Context) (lensVerdict, string, error) {
 		idx := *calls

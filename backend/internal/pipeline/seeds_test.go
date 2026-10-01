@@ -835,6 +835,64 @@ func TestProcessSeedsRevenueSkipsThirdPartyLens(t *testing.T) {
 	}
 }
 
+// TestProcessSeedsRevenueSkipsThirdPartyLensV3 (#197): THIRD_PARTY_PROMPT=v3
+// (+ 3 oy) seçiliyken gelir tohumunda üçüncü-taraf merceği HÂLÂ atlanır —
+// ne v1 ne v3 sistem prompt'u çağrılır (revenue ayıklaması metinle değil
+// kimlikle yapılır) — ve "skipped" kaydı SEÇİLİ sürümü ("v3") taşır.
+func TestProcessSeedsRevenueSkipsThirdPartyLensV3(t *testing.T) {
+	st := seedTestStore(t)
+	ctx := context.Background()
+
+	seedURL := "https://example.com/seed-skip-thirdparty-v3"
+	title := "Test Ucuncu Taraf V3 Atlanan Fikir"
+	cleanup := func() {
+		st.Pool.Exec(ctx, "DELETE FROM ideas WHERE title = $1", title)
+		st.Pool.Exec(ctx, "DELETE FROM raw_posts WHERE source_ref = $1", seedURL)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	jsonl := fmt.Sprintf(`{"date":"2026-01-01","name":"Skip ThirdParty V3 Seed","summary":"özet","evidence":"kanıt","source_url":%q,"tr_angle":"TR açısı"}`, seedURL)
+	chat := &trackingSeedChat{
+		lensVerdict: "pass",
+		cardResponse: fmt.Sprintf(`{"title":%q,"problem_statement":"sorun","proposed_solution":"çözüm",
+			"target_user":"kullanıcı","urgency_score":4,"monetization_signal":4,
+			"known_competitors_ai_guess":"","domain_tags":["test-seed-tag"]}`, title),
+	}
+	cfg := &config.Config{OutputLang: "tr", LLMSleepMS: 1, ThirdPartyPrompt: "v3", ThirdPartyVotes: 3}
+
+	n, err := ProcessSeeds(ctx, cfg, st, chat, jsonl)
+	if err != nil {
+		t.Fatalf("ProcessSeeds: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("1 idea beklenirdi, geldi: %d", n)
+	}
+
+	if chat.calls[lensThirdPartySystemV3] != 0 || chat.calls[lensThirdPartySystem] != 0 {
+		t.Errorf("üçüncü-taraf (v1 ya da v3) gelir tohumunda ÇAĞRILMAMALI: v3=%d v1=%d",
+			chat.calls[lensThirdPartySystemV3], chat.calls[lensThirdPartySystem])
+	}
+	if chat.calls[lensDataAccessSystem] == 0 {
+		t.Error("veri-erişimi merceği çağrılmalı")
+	}
+
+	lensVerdicts := mustLensVerdicts(t, ctx, st, title)
+	if len(lensVerdicts) < 2 {
+		t.Fatalf("en az 2 lens_verdicts elemanı beklenirdi, geldi %d: %+v", len(lensVerdicts), lensVerdicts)
+	}
+	skipped := lensVerdicts[0]
+	if skipped.Lens != "üçüncü-taraf inşa edilebilirlik" || skipped.Verdict != "skipped" || skipped.Subject != "seed" {
+		t.Errorf("lens_verdicts[0] üçüncü-taraf/skipped/seed beklenirdi, geldi: %+v", skipped)
+	}
+	if skipped.PromptVersion != "v3" {
+		t.Errorf("lens_verdicts[0].PromptVersion=v3 beklenirdi (seçili sürüm), geldi %q", skipped.PromptVersion)
+	}
+	if lensVerdicts[1].Lens != "veri-erişimi" || lensVerdicts[1].PromptVersion != lensDataAccessVersion {
+		t.Errorf("lens_verdicts[1] veri-erişimi v1 olmalı: %+v", lensVerdicts[1])
+	}
+}
+
 // distinctSeedChat: 2 bloklayıcı mercek + kart üretimi + dedup normal
 // davranır (pass/cardResponse/same:false); kart-sonrası özgünlük
 // merceği (lensDistinctivenessSystem) ayrıca yapılandırılabilir bir cevap ya
