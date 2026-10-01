@@ -147,3 +147,49 @@ func TestSkippedThirdPartyVerdictCarriesSelectedVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestNewLensSetFullDataAccessEmptyIsToday (#168): veri-erişimi prompt'u boş/
+// "v1" iken set bugünküyle BİREBİR aynı (DeepEqual).
+func TestNewLensSetFullDataAccessEmptyIsToday(t *testing.T) {
+	want := newLensSet("v1", 1)
+	for _, dp := range []string{"", "v1", "x"} {
+		if got := newLensSetFull("v1", 1, dp); !reflect.DeepEqual(got, want) {
+			t.Errorf("dataAccess=%q: bugünkü sette farklı: %+v", dp, got)
+		}
+	}
+	if !reflect.DeepEqual(lensSetFor(&config.Config{}), defaultLensSet) {
+		t.Error("boş config defaultLensSet ile aynı olmalı")
+	}
+}
+
+// TestNewLensSetFullDataAccessV3 (#168): v3 -> veri-erişimi system/etiket v3;
+// organik, trending ve revenue yolları AYNI tanımı taşır; üçüncü-taraf ve
+// ürünleştirilebilirlik değişmez; oy yok.
+func TestNewLensSetFullDataAccessV3(t *testing.T) {
+	set := lensSetFor(&config.Config{DataAccessPrompt: "v3", ThirdPartyPrompt: "v1", ThirdPartyVotes: 3})
+	want := seedLens{id: lensIDDataAccess, name: "veri-erişimi", system: lensDataAccessSystemV3, version: "v3"}
+	if set.organic[1] != want {
+		t.Errorf("organic veri-erişimi v3 olmalı: %+v", set.organic[1])
+	}
+	if set.trending[2] != want || set.revenue[0] != want {
+		t.Errorf("trending/revenue aynı v3 tanımı taşımalı: %+v / %+v", set.trending[2], set.revenue[0])
+	}
+	if set.organic[0] != newLensSet("v1", 3).organic[0] {
+		t.Error("üçüncü-taraf mercek değişmemeli")
+	}
+}
+
+// TestParseLensVerdictDataAccessV3Reason (#168): v3 reason'ı
+// "providers=[...] interface=[...]" önekiyle başlar — ayrıştırma bozulmaz,
+// reason olduğu gibi (data_access_reason'a) korunur.
+func TestParseLensVerdictDataAccessV3Reason(t *testing.T) {
+	reason := "providers=[Trendyol:c, Hepsiburada:c] interface=[none] Scraping needed for competitor prices."
+	raw := `{"verdict":"fail","reason":"` + reason + `"}`
+	v := parseLensVerdict(raw)
+	if v.Verdict != "fail" || v.Reason != reason {
+		t.Errorf("v3 cevabı bozuldu: %+v", v)
+	}
+	if v.Criterion != "none" {
+		t.Errorf("criterion none olmalı: %q", v.Criterion)
+	}
+}

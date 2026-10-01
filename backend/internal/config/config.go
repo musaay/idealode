@@ -60,6 +60,11 @@ type Config struct {
 	// Railway'de v3'e geçirir. lens-ab bunu OKUMAZ (kendi --prompt bayrağı var).
 	ThirdPartyPrompt string // THIRD_PARTY_PROMPT (default: v1; "v1"|"v3")
 
+	// DataAccessPrompt (#168): veri-erişimi merceğinin sistem prompt'u — "v1"
+	// (canlı) ya da "v3" (lensDataAccessSystemV3). Kurallar ThirdPartyPrompt'la
+	// AYNI: boş/geçersiz -> "v1" (geçersizde log uyarısı). OYLAMA YOK.
+	DataAccessPrompt string // DATA_ACCESS_PROMPT (default: v1; "v1"|"v3")
+
 	// ThirdPartyVotes (#197, PO kararı): üçüncü-taraf merceğinin kaç kez
 	// oylanacağı — DistinctivenessVotes ile AYNI oybirliği düzeni: kart ANCAK
 	// TÜM oylar "fail" derse bloklanır, oylar ayrışırsa kart YAZILIR (mercek
@@ -128,7 +133,8 @@ func Load() (*Config, error) {
 	c.DistinctivenessLLMModel = os.Getenv("DISTINCTIVENESS_LLM_MODEL")
 	c.DistinctivenessLLMAPIKey = os.Getenv("DISTINCTIVENESS_LLM_API_KEY")
 	c.DistinctivenessVotes = loadDistinctivenessVotes()
-	c.ThirdPartyPrompt = loadThirdPartyPrompt()
+	c.ThirdPartyPrompt = loadPromptVersion("THIRD_PARTY_PROMPT")
+	c.DataAccessPrompt = loadPromptVersion("DATA_ACCESS_PROMPT")
 	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
@@ -218,20 +224,21 @@ func loadVotesEnv(key string) int {
 	return n
 }
 
-// loadThirdPartyPrompt, THIRD_PARTY_PROMPT'u okur (#197): baştaki/sondaki
-// boşluk kırpılır; tam olarak "v1" ya da "v3" geçerlidir (büyük/küçük harf
-// DUYARLI). Boş → "v1" (sessiz, varsayılan). Başka her değer → "v1" + log
-// uyarısı (sessizce yanlış prompt'a düşülmesin) — getenvInt'in aksine Load()'u
-// DÜŞÜRMEZ: bu bir "özellik anahtarı", zorunlu bağlantı bilgisi değil.
-func loadThirdPartyPrompt() string {
-	v := strings.TrimSpace(os.Getenv("THIRD_PARTY_PROMPT"))
+// loadPromptVersion, bir mercek prompt-sürümü env'ini okur (#197, #168):
+// baştaki/sondaki boşluk kırpılır; tam olarak "v1" ya da "v3" geçerlidir
+// (büyük/küçük harf DUYARLI). Boş -> "v1" (sessiz, varsayılan). Başka her
+// değer -> "v1" + log uyarısı (sessizce yanlış prompt'a düşülmesin) —
+// getenvInt'in aksine Load()'u DÜŞÜRMEZ: bu bir "özellik anahtarı", zorunlu
+// bağlantı bilgisi değil.
+func loadPromptVersion(envName string) string {
+	v := strings.TrimSpace(os.Getenv(envName))
 	switch v {
 	case "":
 		return "v1"
 	case "v1", "v3":
 		return v
 	default:
-		log.Printf("config: THIRD_PARTY_PROMPT geçersiz (%q), v1 kullanılıyor — geçerli değerler: v1, v3", v)
+		log.Printf("config: %s geçersiz (%q), v1 kullanılıyor — geçerli değerler: v1, v3", envName, v)
 		return "v1"
 	}
 }
