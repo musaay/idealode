@@ -844,8 +844,11 @@ a { color: var(--color-primary-strong); }
     padding-top: 0;
     padding-bottom: 0;
     padding-left: calc(var(--app-gutter) + var(--sidenav-w));
-    padding-right: var(--app-gutter);
+    /* sağ boşluk (#201): layout'tan çıkarıldı; topbar sağ kenara değsin diye
+       gutter .topbar iç boşluğuna ve .site-main'e taşındı */
+    padding-right: 0;
   }
+  .site-main { padding-right: var(--app-gutter); }
 }
 
 /* Masaüstü üst çubuk (breadcrumb) — mobilde mobile-header üstlenir. */
@@ -862,6 +865,7 @@ a { color: var(--color-primary-strong); }
     gap: var(--space-4);
     height: var(--topbar-h);
     padding-inline: var(--space-7);
+    padding-right: calc(var(--space-7) + var(--app-gutter)); /* (#201) */
     background: var(--color-bar-bg);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--color-border);
@@ -885,7 +889,7 @@ a { color: var(--color-primary-strong); }
 /* 768-1023 px arası üst çubuk dar: breadcrumb kırpılmasın diye boşluklar
    daraltılır. Dokunma hedefleri (44px) korunur. */
 @media (min-width: 768px) and (max-width: 1023.98px) {
-  .topbar { padding-inline: var(--space-4); }
+  .topbar { padding-inline: var(--space-4); padding-right: calc(var(--space-4) + var(--app-gutter)); }
   .topbar-actions { gap: var(--space-2); }
   .breadcrumb { gap: var(--space-2); }
   .crumb { padding-inline: var(--space-3); }
@@ -2095,6 +2099,10 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
     top: var(--topbar-h);
     height: calc(100vh - var(--topbar-h));
     min-height: 500px;
+    /* (#201) .content padding'ini iptal et: rail topbar'ın hemen altından
+       başlasın ve sağ kenara kadar uzansın */
+    margin-top: calc(-1 * var(--space-7));
+    margin-right: calc(-1 * (var(--space-7) + var(--app-gutter))); /* geniş ekranda .site-main gutter'ını da aşar (#201) */
   }
 
   /* Masaüstünde sohbet "kart" değil, sol nav'ın karşı yöndeki eşi: düz yüzey,
