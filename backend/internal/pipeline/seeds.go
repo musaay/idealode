@@ -125,7 +125,12 @@ An API that exposes only the developer's OWN account, app or property (seller/me
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","reason":"..."}`
 
 // lensDataAccessVersion (#164): lensDataAccessSystem'in sürümü.
+// 09-14'te (#131) yeniden yazılan v2 içeriği; etiket geriye uyum için v1.
 const lensDataAccessVersion = "v1"
+
+// lensDataAccessVersionV3 (#168): DATA_ACCESS_PROMPT=v3 seçilince karta/kayda
+// yazılan sürüm etiketi (system: lensDataAccessSystemV3).
+const lensDataAccessVersionV3 = "v3"
 
 // #169: pazar-işlerliği merceği 2026-09-25'te bloklayıcı listelerden
 // (seedLenses/trendingLenses) KALDIRILDI — lead ölçümü (altın set, oybirliği/
@@ -266,10 +271,27 @@ func thirdPartyLens(promptVersion string, votes int) seedLens {
 // sayısıyla kurar (#197; config.Config.ThirdPartyPrompt/ThirdPartyVotes).
 // ("", 0) ve ("v1", 1) bugünkü tanımla BİREBİR aynıdır.
 func newLensSet(thirdPartyPrompt string, thirdPartyVotes int) lensSet {
+	return newLensSetFull(thirdPartyPrompt, thirdPartyVotes, "v1")
+}
+
+// dataAccessLens, seçili veri-erişimi prompt sürümünün merceğini kurar (#168):
+// "v3" -> lensDataAccessSystemV3 + "v3" etiketi; başka her değer (boş dahil)
+// -> canlı sürüm. Oylama YOK (votes sıfır).
+func dataAccessLens(promptVersion string) seedLens {
+	if promptVersion == "v3" {
+		return seedLens{id: lensIDDataAccess, name: "veri-erişimi", system: lensDataAccessSystemV3, version: lensDataAccessVersionV3}
+	}
+	return seedLens{id: lensIDDataAccess, name: "veri-erişimi", system: lensDataAccessSystem, version: lensDataAccessVersion}
+}
+
+// newLensSetFull, newLensSet'in veri-erişimi prompt sürümünü de alan hâlidir
+// (#168; config.Config.DataAccessPrompt). dataAccessPrompt "" ya da "v1" ->
+// bugünkü tanımla BİREBİR aynı.
+func newLensSetFull(thirdPartyPrompt string, thirdPartyVotes int, dataAccessPrompt string) lensSet {
 	tp := thirdPartyLens(thirdPartyPrompt, thirdPartyVotes)
 	organic := []seedLens{
 		tp,
-		{id: lensIDDataAccess, name: "veri-erişimi", system: lensDataAccessSystem, version: lensDataAccessVersion},
+		dataAccessLens(dataAccessPrompt),
 	}
 	trending := append([]seedLens{{id: lensIDProductizable, name: "ürünleştirilebilirlik", system: lensProductizableSystem, version: lensProductizableVersion}}, organic...)
 	var revenue []seedLens
@@ -282,10 +304,10 @@ func newLensSet(thirdPartyPrompt string, thirdPartyVotes int) lensSet {
 }
 
 // lensSetFor, config'in üçüncü-taraf ayarlarından (THIRD_PARTY_PROMPT/
-// THIRD_PARTY_VOTES) bir koşunun mercek setini kurar (#197) — SynthesizeIdeas
+// THIRD_PARTY_VOTES, DATA_ACCESS_PROMPT) bir koşunun mercek setini kurar (#197, #168) — SynthesizeIdeas
 // ve ProcessSeeds koşu başında BİR kez çağırır.
 func lensSetFor(cfg *config.Config) lensSet {
-	return newLensSet(cfg.ThirdPartyPrompt, cfg.ThirdPartyVotes)
+	return newLensSetFull(cfg.ThirdPartyPrompt, cfg.ThirdPartyVotes, cfg.DataAccessPrompt)
 }
 
 // defaultLensSet, env boşken (THIRD_PARTY_PROMPT=v1, THIRD_PARTY_VOTES=1)

@@ -424,6 +424,12 @@ func logThirdPartyLens(cfg *config.Config) {
 	log.Printf("üçüncü-taraf merceği: prompt=%s oy=%d", cfg.ThirdPartyPrompt, cfg.ThirdPartyVotes)
 }
 
+// logDataAccessLens, koşu başında veri-erişimi merceğinin hangi prompt
+// sürümüyle çalışacağını loglar (#168) — logThirdPartyLens ile aynı amaç.
+func logDataAccessLens(cfg *config.Config) {
+	log.Printf("veri-erişimi merceği: prompt=%s", cfg.DataAccessPrompt)
+}
+
 // hostOf, log satırlarında API anahtarı/yol sızdırmadan sağlayıcıyı
 // belirtmek için base URL'in host kısmını döner (llm.OpenAICompatClient'ın
 // iç host() yardımcısıyla AYNI ilke — burada tekrarlanır çünkü o unexported).
@@ -741,6 +747,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	distinctChat := newDistinctChat(cfg)
 	logDistinctivenessLens(cfg)
 	logThirdPartyLens(cfg)
+	logDataAccessLens(cfg)
 	if _, err := pipeline.GroupThemes(llm.WithStage(ctx, "kümeleme"), st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
@@ -768,6 +775,7 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	distinctChat := newDistinctChat(cfg)
 	logDistinctivenessLens(cfg)
 	logThirdPartyLens(cfg)
+	logDataAccessLens(cfg)
 	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL, distinctChat)
 	if err != nil {
 		return err

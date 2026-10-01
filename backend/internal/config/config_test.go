@@ -297,6 +297,45 @@ func TestThirdPartyPromptEnv(t *testing.T) {
 	}
 }
 
+// TestDataAccessPromptEnv, DATA_ACCESS_PROMPT ayrıştırmasını doğrular (#168):
+// THIRD_PARTY_PROMPT ile aynı kurallar.
+func TestDataAccessPromptEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env      string
+		want     string
+		wantWarn bool
+	}{
+		{"", "v1", false},
+		{"v1", "v1", false},
+		{"v3", "v3", false},
+		{" v3 ", "v3", false},
+		{"v2", "v1", true},
+		{"V3", "v1", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("DATA_ACCESS_PROMPT", tc.env)
+
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.DataAccessPrompt != tc.want {
+				t.Errorf("DATA_ACCESS_PROMPT=%q: %q beklenirdi, geldi %q", tc.env, tc.want, c.DataAccessPrompt)
+			}
+			if warned := strings.Contains(buf.String(), "DATA_ACCESS_PROMPT geçersiz"); warned != tc.wantWarn {
+				t.Errorf("DATA_ACCESS_PROMPT=%q: uyarı beklentisi %v, geldi %v", tc.env, tc.wantWarn, warned)
+			}
+		})
+	}
+}
+
 // TestThirdPartyDefaultsWhenUnset, iki değişken de hiç tanımlı değilken
 // (Railway'in bugünkü hâli) varsayılanların v1 / 1 oy olduğunu doğrular —
 // merge sonrası davranış bugünküyle birebir.
