@@ -70,5 +70,7 @@ bağlıdır (.github/workflows/lens-audit.yml).
 
 İş takibi: her iş (önemsiz tek satırlıklar hariç) önce GitHub issue olur,
 "IDEA LODE" project board'unda In progress'e çekilir (`gh project item-edit`),
-PR açıklaması `Closes #n` taşır; merge sonrası kart Done'a düşer. Board'da
+PR başlığı `(#n)` ve açıklaması `Refs #n` taşır (`Closes` DEĞİL — GitHub issue'yu
+kontrol listesi ve canlı doğrulamadan önce kapatır, 2026-10-01 #197 dersi); issue'yu
+lead merge kontrol listesi + canlı doğrulamadan sonra kapatır, kart o zaman Done'a. Board'da
 In progress boşken kimse çalışmıyor demektir.
