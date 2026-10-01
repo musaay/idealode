@@ -111,3 +111,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - ParakeetAI (Jure Sotošek) — görüşme sırasında canlı dinleyip anlık cevap üreten "gerçek zamanlı AI görüşme suflörü", $1M MRR, 1.5M+ kullanıcı, 2 yılda (2026-09-29)
 - Fastlane (Gaurav) — web sitesini tarayıp Tinder tarzı sağa/sola kaydırmayla trend videoya kıyasla AI kısa reklam videosu onaylatıp otomatik yayınlayan SaaS, 2 ayda $0'dan $69K MRR, 1000+ ödeyen kullanıcı (2026-09-30)
 - UK Vatandaşlık Sınavı Hazırlık Uygulaması (Flippa ilanı) — göçmenlik danışmanlıklarıyla ortaklık dağıtımlı, reklam+abonelik modelli, devlet zorunlu sınav nişine oturan mobil test-prep app, 434K+ indirme, aylık $18,957 kâr, $840K'a satışta (2026-09-30)
+- Starcrossed (Neda Farr) — TikTok'ta aşk/burç içerikli hesaptan ($6.99'luk kişisel okumayla ön-satış) büyüyen Co-Star tarzı aşk-odaklı astroloji uygulaması, 90 günde $70K MRR (2026-10-01)
