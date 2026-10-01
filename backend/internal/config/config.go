@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -50,6 +51,22 @@ type Config struct {
 	// maliyetini sınırsız büyütmesin). VARSAYILAN 1: merge sonrası davranış
 	// BUGÜNKÜYLE BİREBİR aynı kalır; lead ölçümden sonra Railway'de yükseltir.
 	DistinctivenessVotes int // DISTINCTIVENESS_VOTES (default: 1, üst sınır 5)
+
+	// ThirdPartyPrompt (#197): üçüncü-taraf inşa edilebilirlik merceğinin
+	// (organik + tohum yolu) hangi sistem prompt'unu kullanacağı — "v1" (canlı)
+	// ya da "v3" (#167 ölçümünde yakalamayı 8/36'dan 24/36'ya çıkaran aday).
+	// Boş/geçersiz değer "v1"e iner (geçersizde log uyarısı) — VARSAYILAN v1:
+	// merge sonrası davranış BUGÜNKÜYLE BİREBİR aynı kalır; lead ölçümden sonra
+	// Railway'de v3'e geçirir. lens-ab bunu OKUMAZ (kendi --prompt bayrağı var).
+	ThirdPartyPrompt string // THIRD_PARTY_PROMPT (default: v1; "v1"|"v3")
+
+	// ThirdPartyVotes (#197, PO kararı): üçüncü-taraf merceğinin kaç kez
+	// oylanacağı — DistinctivenessVotes ile AYNI oybirliği düzeni: kart ANCAK
+	// TÜM oylar "fail" derse bloklanır, oylar ayrışırsa kart YAZILIR (mercek
+	// kararı "unsure/tartışmalı", bkz. pipeline.runBlockingLenses). Aynı
+	// yükleme kuralları: boş/geçersiz/<1 → 1, >5 → 5. VARSAYILAN 1 (bugünkü
+	// tek-çağrı davranışı birebir).
+	ThirdPartyVotes int // THIRD_PARTY_VOTES (default: 1, üst sınır 5)
 
 	// Çıktı dili — üretilen kullanıcıya dönük metinler bu dilde (Rev 2: tr).
 	// EN'e geçiş = env değişikliği; tag'ler kanonik EN slug olduğu için
@@ -111,6 +128,8 @@ func Load() (*Config, error) {
 	c.DistinctivenessLLMModel = os.Getenv("DISTINCTIVENESS_LLM_MODEL")
 	c.DistinctivenessLLMAPIKey = os.Getenv("DISTINCTIVENESS_LLM_API_KEY")
 	c.DistinctivenessVotes = loadDistinctivenessVotes()
+	c.ThirdPartyPrompt = loadThirdPartyPrompt()
+	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
 	var err error
@@ -168,12 +187,24 @@ func loadPreferPaymentSignal() (bool, error) {
 	return getenvBool("REQUIRE_PAYMENT_SIGNAL", true)
 }
 
-// loadDistinctivenessVotes, DISTINCTIVENESS_VOTES'u okur (#181): boş/
-// ayrıştırılamayan/<1 değer sessizce 1'e (bugünkü davranış), >5 değer 5'e
-// indirgenir — getenvInt'in AKSİNE geçersiz değerde Load()'u DÜŞÜRMEZ, zira
-// bu ayar bir "maliyet kısıtı"dır, zorunlu bir bağlantı bilgisi değil.
+// loadDistinctivenessVotes, DISTINCTIVENESS_VOTES'u okur (#181) — kurallar
+// için bkz. loadVotesEnv.
 func loadDistinctivenessVotes() int {
-	v := strings.TrimSpace(os.Getenv("DISTINCTIVENESS_VOTES"))
+	return loadVotesEnv("DISTINCTIVENESS_VOTES")
+}
+
+// loadThirdPartyVotes, THIRD_PARTY_VOTES'u okur (#197) — DISTINCTIVENESS_VOTES
+// ile AYNI kurallar (bkz. loadVotesEnv).
+func loadThirdPartyVotes() int {
+	return loadVotesEnv("THIRD_PARTY_VOTES")
+}
+
+// loadVotesEnv, bir oy sayısı değişkenini okur: boş/ayrıştırılamayan/<1 değer
+// sessizce 1'e (bugünkü davranış), >5 değer 5'e indirgenir — getenvInt'in
+// AKSİNE geçersiz değerde Load()'u DÜŞÜRMEZ, zira bu ayar bir "maliyet
+// kısıtı"dır, zorunlu bir bağlantı bilgisi değil.
+func loadVotesEnv(key string) int {
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return 1
 	}
@@ -185,6 +216,24 @@ func loadDistinctivenessVotes() int {
 		return 5
 	}
 	return n
+}
+
+// loadThirdPartyPrompt, THIRD_PARTY_PROMPT'u okur (#197): baştaki/sondaki
+// boşluk kırpılır; tam olarak "v1" ya da "v3" geçerlidir (büyük/küçük harf
+// DUYARLI). Boş → "v1" (sessiz, varsayılan). Başka her değer → "v1" + log
+// uyarısı (sessizce yanlış prompt'a düşülmesin) — getenvInt'in aksine Load()'u
+// DÜŞÜRMEZ: bu bir "özellik anahtarı", zorunlu bağlantı bilgisi değil.
+func loadThirdPartyPrompt() string {
+	v := strings.TrimSpace(os.Getenv("THIRD_PARTY_PROMPT"))
+	switch v {
+	case "":
+		return "v1"
+	case "v1", "v3":
+		return v
+	default:
+		log.Printf("config: THIRD_PARTY_PROMPT geçersiz (%q), v1 kullanılıyor — geçerli değerler: v1, v3", v)
+		return "v1"
+	}
 }
 
 // loadBlendEnabled, BLEND_ENABLED'ı okur (#186): "true"/"1"/"yes" (büyük/

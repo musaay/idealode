@@ -253,7 +253,8 @@ type LensVerdict struct {
 	// tarihten ÖNCEKİ satırlarda görülebilir).
 	Lens string `json:"lens"`
 	// PromptVersion: mercek sabitinin yanındaki lensXVersion (özgünlük #166
-	// ile "v4"e yükseldi, diğer mercekler hâlâ "v1" — #163 §6).
+	// ile "v4"e yükseldi, diğer mercekler "v1"; üçüncü-taraf THIRD_PARTY_PROMPT=v3
+	// seçilirse "v3" — #197, #163 §6).
 	PromptVersion string `json:"prompt_version"`
 	// Subject: mercek HANGİ girdi üzerinde çalıştı — "card" (üretilmiş kart
 	// alanları) ya da "seed" (ham tohum alanları). Organik yolda TÜMÜ

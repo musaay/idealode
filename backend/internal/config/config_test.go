@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"log"
+	"os"
 	"strings"
 	"testing"
 )
@@ -212,6 +215,102 @@ func TestDistinctivenessVotesEnv(t *testing.T) {
 				t.Errorf("DISTINCTIVENESS_VOTES=%q: %d beklenirdi, geldi %d", tc.env, tc.want, c.DistinctivenessVotes)
 			}
 		})
+	}
+}
+
+// TestThirdPartyVotesEnv, THIRD_PARTY_VOTES ayrıştırmasını doğrular (#197) —
+// DISTINCTIVENESS_VOTES ile AYNI kurallar: boş->1, geçerli sayı->kendisi,
+// geçersiz/<1->1, üst sınırın (5) üstü->5. İki oy ayarı BİRBİRİNDEN bağımsızdır.
+func TestThirdPartyVotesEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"", 1},
+		{"3", 3},
+		{" 2 ", 2},
+		{"5", 5},
+		{"0", 1},
+		{"-2", 1},
+		{"x", 1},
+		{"9", 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("THIRD_PARTY_VOTES", tc.env)
+			t.Setenv("DISTINCTIVENESS_VOTES", "")
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.ThirdPartyVotes != tc.want {
+				t.Errorf("THIRD_PARTY_VOTES=%q: %d beklenirdi, geldi %d", tc.env, tc.want, c.ThirdPartyVotes)
+			}
+			if c.DistinctivenessVotes != 1 {
+				t.Errorf("DISTINCTIVENESS_VOTES etkilenmemeli (1), geldi %d", c.DistinctivenessVotes)
+			}
+		})
+	}
+}
+
+// TestThirdPartyPromptEnv, THIRD_PARTY_PROMPT ayrıştırmasını doğrular (#197):
+// boş->"v1" (sessiz), "v1"/"v3"->kendisi (boşluk kırpılır), başka her değer
+// ("v2", "V3", "x")->"v1" + log uyarısı (Load düşmez).
+func TestThirdPartyPromptEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env      string
+		want     string
+		wantWarn bool
+	}{
+		{"", "v1", false},
+		{"v1", "v1", false},
+		{"v3", "v3", false},
+		{" v3 ", "v3", false},
+		{"v2", "v1", true},
+		{"V3", "v1", true},
+		{"x", "v1", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("THIRD_PARTY_PROMPT", tc.env)
+
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.ThirdPartyPrompt != tc.want {
+				t.Errorf("THIRD_PARTY_PROMPT=%q: %q beklenirdi, geldi %q", tc.env, tc.want, c.ThirdPartyPrompt)
+			}
+			warned := strings.Contains(buf.String(), "THIRD_PARTY_PROMPT geçersiz")
+			if warned != tc.wantWarn {
+				t.Errorf("THIRD_PARTY_PROMPT=%q: uyarı logu beklentisi %v, geldi %v (log: %q)", tc.env, tc.wantWarn, warned, buf.String())
+			}
+		})
+	}
+}
+
+// TestThirdPartyDefaultsWhenUnset, iki değişken de hiç tanımlı değilken
+// (Railway'in bugünkü hâli) varsayılanların v1 / 1 oy olduğunu doğrular —
+// merge sonrası davranış bugünküyle birebir.
+func TestThirdPartyDefaultsWhenUnset(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("THIRD_PARTY_PROMPT", "")
+	t.Setenv("THIRD_PARTY_VOTES", "")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ThirdPartyPrompt != "v1" || c.ThirdPartyVotes != 1 {
+		t.Errorf("varsayılan v1/1 olmalı, geldi %q/%d", c.ThirdPartyPrompt, c.ThirdPartyVotes)
 	}
 }
 

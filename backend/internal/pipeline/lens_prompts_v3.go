@@ -1,13 +1,19 @@
 package pipeline
 
 // lens_prompts_v3.go (#165, üst plan #163 §4): dört mercek için "rewrite"
-// (v3) sistem prompt'larının BİREBİR kopyaları. Bu dosya YALNIZ `lens-ab`
-// A/B ölçüm komutunun (bkz. lensab.go) kullanımı içindir — hiçbir üretim
-// (organik/tohum) çağrı noktasına BAĞLANMAZ. synthesize.go/seeds.go hâlâ
-// yalnız v1 sabitlerini (lensThirdPartySystem, lensDataAccessSystem,
-// lensMarketViabilitySystem, lensDistinctivenessSystem) kullanır; v3'e
-// geçiş PO'nun #163 §7 açık sorularını yanıtlamasından SONRA, her mercek
-// için ayrı bir issue/PR ile olur (#163 §6 madde 3-6).
+// (v3) sistem prompt'larının BİREBİR kopyaları. Bu dosyadaki sabitlerin
+// çoğu YALNIZ `lens-ab` A/B ölçüm komutunun (bkz. lensab.go) kullanımı
+// içindir. TEK İSTİSNA (#197): lensThirdPartySystemV3, THIRD_PARTY_PROMPT=v3
+// ile üretim yoluna (organik/tohum — bkz. thirdPartyLens, seeds.go) da
+// seçilebilir; varsayılan v1'dir. Diğer üç v3 sabiti (veri-erişimi, pazar-
+// işlerliği, özgünlük) hâlâ hiçbir üretim çağrı noktasına BAĞLANMAZ; onlar
+// için v3'e geçiş PO'nun #163 §7 açık sorularını yanıtlamasından SONRA, her
+// mercek için ayrı bir issue/PR ile olur (#163 §6 madde 3-6).
+
+// lensThirdPartyVersionV3 (#197): lensThirdPartySystemV3'ün sürüm etiketi —
+// THIRD_PARTY_PROMPT=v3 seçilince kalıcı kayıtta (ideas.lens_verdicts/
+// eliminations.verdicts) prompt_version olarak yazılır.
+const lensThirdPartyVersionV3 = "v3"
 
 // lensThirdPartySystemV3 (#163 §4.1) — third-party-v3-prompt.txt.
 const lensThirdPartySystemV3 = `You judge ONE question about a proposed software product idea: could an INDEPENDENT third-party developer build and sell it as a product of its own, or is it really the ORIGINAL vendor's job dressed up as a product? Do NOT judge data access, APIs, terms of service, market size or competition — other checks cover those.
