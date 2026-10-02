@@ -414,6 +414,11 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* (#201) Mac yaylanma kaydırması sticky topbar'ı aşağı itip üstte boşluk açıyordu; yalnız masaüstü; mobilde çek-yenile korunur */
+@media (min-width: 768px) {
+  html { overscroll-behavior-y: none; }
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -1653,9 +1658,11 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 .meta-item dd { margin: var(--space-1) 0 0; color: var(--color-text); }
 
 /* ============================================================ Idea Copilot
-   Kart detayı yerleşimi: >=1024px sağ ray (sticky, 580px), <1024px çekmece.
-   Referans: IdeaDetailView sağ sütun (lg:w-84 / xl:w-96, sticky top-20,
-   h-[580px]) + IdeaCopilotChat (panel başlığı, balonlar, çipler, giriş).
+   Kart detayı yerleşimi: >=1024px sağ ray sabit (fixed), üst çubuk altından
+   ekran dibine (#201); <1024px çekmece.
+   Referans: IdeaDetailView sağ sütun (lg:w-84 / xl:w-96) + IdeaCopilotChat
+   (panel başlığı, balonlar, çipler, giriş). Referanstaki sticky top-20 ve
+   h-[580px] bilinçli olarak bırakıldı (#201).
    JS yoksa panel içeriğin altında normal akışta durur ve #chat çapası
    oraya kaydırır — çekmece yalnız JS varken devreye girer. */
 
@@ -2078,8 +2085,10 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   border-radius: var(--radius-pill);
 }
 
-/* ------------------------------------------- >=1024: sağ ray (sticky) */
+/* -------------------------------------------- >=1024: sağ ray (sabit) */
 @media (min-width: 1024px) {
+  :root { --rail-w: 336px; }
+
   .idea-layout {
     flex-direction: row;
     align-items: flex-start;
@@ -2090,19 +2099,20 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
   /* metin ayırıcı çizgiye yapışmasın */
   .idea-main { padding-right: var(--space-6); }
 
+  /* (#201) Ray sol nav gibi position: fixed; sticky iken ebeveynin sonunda
+     yukarı itilip üst çubuğun altına giriyordu. Akıştan çıktığı için yerini
+     .site-main'in sağ boşluğu tutar: içerik ve alt not rayın altına girmez. */
+  .site-main:has(.idea-rail) { padding-right: var(--rail-w); }
+
   .idea-rail {
     /* kullanıcı kararı: sol içerikten bağımsız, tam ekran yükseklikli panel
        (referanstaki sabit 580px'ten bilinçli sapma) */
-    flex: 0 0 336px;
-    width: 336px;
-    position: sticky;
+    position: fixed;
     top: var(--topbar-h);
-    height: calc(100vh - var(--topbar-h));
-    min-height: 500px;
-    /* (#201) .content padding'ini iptal et: rail topbar'ın hemen altından
-       başlasın ve sağ kenara kadar uzansın */
-    margin-top: calc(-1 * var(--space-7));
-    margin-right: calc(-1 * (var(--space-7) + var(--app-gutter))); /* geniş ekranda .site-main gutter'ını da aşar (#201) */
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    width: var(--rail-w);
   }
 
   /* Masaüstünde sohbet "kart" değil, sol nav'ın karşı yöndeki eşi: düz yüzey,
@@ -2117,7 +2127,7 @@ a.crumb:hover { background: var(--color-surface-2); color: var(--color-text); }
 
 @media (min-width: 1280px) {
   /* referans: xl:w-96 (384px) */
-  .idea-rail { flex-basis: 384px; width: 384px; }
+  :root { --rail-w: 384px; }
 }
 
 /* --------------------------------- <1024 + JS: alt çekmece (bottom sheet) */
