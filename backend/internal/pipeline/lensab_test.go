@@ -234,7 +234,7 @@ func TestWriteLensABCSV(t *testing.T) {
 }
 
 // TestGoldenSetFile, testdata/lens-golden.json'un #165 §5'teki tabloyla
-// birebir eşleştiğini (mercek başına çift sayısı + toplam 158) doğrular —
+// birebir eşleştiğini (mercek başına çift sayısı + toplam 182 — #199 ile +24) doğrular —
 // JSON'un kendisini okuyup ayrıştırma testi.
 func TestGoldenSetFile(t *testing.T) {
 	raw, err := os.ReadFile("../../testdata/lens-golden.json")
@@ -245,15 +245,15 @@ func TestGoldenSetFile(t *testing.T) {
 	if err := json.Unmarshal(raw, &set); err != nil {
 		t.Fatalf("altın set JSON değil: %v", err)
 	}
-	if len(set) != 158 {
-		t.Fatalf("toplam 158 çift beklenirdi, geldi: %d", len(set))
+	if len(set) != 182 {
+		t.Fatalf("toplam 182 çift beklenirdi, geldi: %d", len(set))
 	}
 
 	wantCounts := map[string]int{
 		"third_party":      33,
-		"data_access":      38,
+		"data_access":      50,
 		"market_viability": 35,
-		"distinctiveness":  52,
+		"distinctiveness":  64,
 	}
 	got := map[string]int{}
 	for _, gc := range set {
@@ -280,7 +280,7 @@ func TestGoldenSetFile(t *testing.T) {
 
 // TestGoldenSetRelabeling2026_09, #175 madde F'teki PO yeniden
 // etiketlemesinin ve #181'in (PO 2026-09-23: "84 de elenmeliymiş") altın
-// sette uygulandığını doğrular (toplam 158 SABİT — yalnız expect/criterion/
+// sette uygulandığını doğrular (toplam 182: 158 + #199 (2026-10-02) ekinin 24 çifti; 158 çiftlik etiketleme — yalnız expect/criterion/
 // watch değişti):
 //   - distinctiveness: 22/81 pass (izlemesiz, kriter yok); 82+84 (#181) +
 //     arşiv 8 kartı (20,23,85,89,92,93,103,113) fail/K1 (izlemesiz); kalan
@@ -297,8 +297,8 @@ func TestGoldenSetRelabeling2026_09(t *testing.T) {
 	if err := json.Unmarshal(raw, &set); err != nil {
 		t.Fatalf("altın set JSON değil: %v", err)
 	}
-	if len(set) != 158 {
-		t.Fatalf("F maddesi yalnız etiket değiştirir, toplam SABİT 158 olmalı, geldi: %d", len(set))
+	if len(set) != 182 {
+		t.Fatalf("toplam 182 olmalı (158 + #199 eki 24; etiketleme sayıyı değiştirmez), geldi: %d", len(set))
 	}
 
 	byKey := make(map[string]GoldenCase, len(set))
@@ -1318,5 +1318,68 @@ func TestRunLensABVotesThirdPartyV3EndToEnd(t *testing.T) {
 		if sys != lensThirdPartySystemV3 {
 			t.Errorf("çağrı %d v3 sistem prompt'unu kullanmalı", i)
 		}
+	}
+}
+
+// TestGoldenSetAdditions2026_10, #199 (2026-10-02) ile eklenen 24 çiftin
+// (id 132–143, distinctiveness + data_access) kritik beklentilerini sabitler.
+// watch = PO arşivi zevki, uyuma girmez; yalnız 137 (PO yayınladı) izlemesiz.
+func TestGoldenSetAdditions2026_10(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/lens-golden.json")
+	if err != nil {
+		t.Fatalf("altın set okunamadı: %v", err)
+	}
+	var set []GoldenCase
+	if err := json.Unmarshal(raw, &set); err != nil {
+		t.Fatalf("altın set JSON değil: %v", err)
+	}
+	byKey := make(map[string]GoldenCase, len(set))
+	for _, gc := range set {
+		if gc.Kind == "idea" {
+			byKey[fmt.Sprintf("%d/%s", gc.ID, gc.Lens)] = gc
+		}
+	}
+	type want struct {
+		id        int64
+		lens      string
+		expect    string
+		expectAny []string
+		criterion string
+		watch     bool
+	}
+	const dn, da = "distinctiveness", "data_access"
+	wants := []want{
+		{137, dn, "pass", nil, "", false},
+		{137, da, "pass", nil, "", false},
+		{132, dn, "fail", nil, "K3", true},
+		{132, da, "pass", nil, "", true},
+		{135, dn, "fail", nil, "K4", true},
+		{135, da, "pass", nil, "", true},
+		{136, dn, "fail", nil, "K4", true},
+		{136, da, "pass", nil, "", true},
+		{133, dn, "pass", nil, "", true},
+		{133, da, "", []string{"pass", "unsure"}, "", true},
+		{134, dn, "pass", nil, "", true},
+		{134, da, "", []string{"pass", "unsure"}, "", true},
+		{142, dn, "", []string{"unsure", "fail"}, "", true},
+		{142, da, "pass", nil, "", true},
+	}
+	for _, id := range []int64{138, 139, 140, 141, 143} {
+		wants = append(wants, want{id, dn, "pass", nil, "", true}, want{id, da, "pass", nil, "", true})
+	}
+	for _, w := range wants {
+		gc, ok := byKey[fmt.Sprintf("%d/%s", w.id, w.lens)]
+		if !ok {
+			t.Errorf("altın sette yok: id=%d lens=%s", w.id, w.lens)
+			continue
+		}
+		if gc.Expect != w.expect || gc.Criterion != w.criterion || gc.Watch != w.watch ||
+			fmt.Sprint(gc.ExpectAny) != fmt.Sprint(w.expectAny) {
+			t.Errorf("id=%d %s: %+v, istenen expect=%q expect_any=%v criterion=%q watch=%v",
+				w.id, w.lens, gc, w.expect, w.expectAny, w.criterion, w.watch)
+		}
+	}
+	if len(wants) != 24 {
+		t.Errorf("24 çift beklenirdi, tablo: %d", len(wants))
 	}
 }
