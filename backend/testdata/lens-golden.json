@@ -467,6 +467,95 @@
     "watch": true
   },
   {
+    "id": 137,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass"
+  },
+  {
+    "id": 132,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 135,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 136,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 133,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect_any": [
+      "pass",
+      "unsure"
+    ],
+    "watch": true
+  },
+  {
+    "id": 134,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect_any": [
+      "pass",
+      "unsure"
+    ],
+    "watch": true
+  },
+  {
+    "id": 138,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 139,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 140,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 141,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 143,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 142,
+    "kind": "idea",
+    "lens": "data_access",
+    "expect": "pass",
+    "watch": true
+  },
+  {
     "id": 20,
     "kind": "idea",
     "lens": "market_viability",
@@ -1052,5 +1141,94 @@
     "lens": "distinctiveness",
     "expect": "fail",
     "criterion": "K4"
+  },
+  {
+    "id": 137,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass"
+  },
+  {
+    "id": 132,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K3",
+    "watch": true
+  },
+  {
+    "id": 135,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K4",
+    "watch": true
+  },
+  {
+    "id": 136,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "fail",
+    "criterion": "K4",
+    "watch": true
+  },
+  {
+    "id": 133,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 134,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 138,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 139,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 140,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 141,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 143,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect": "pass",
+    "watch": true
+  },
+  {
+    "id": 142,
+    "kind": "idea",
+    "lens": "distinctiveness",
+    "expect_any": [
+      "unsure",
+      "fail"
+    ],
+    "watch": true
   }
 ]
