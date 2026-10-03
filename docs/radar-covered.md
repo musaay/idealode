@@ -113,3 +113,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - UK Vatandaşlık Sınavı Hazırlık Uygulaması (Flippa ilanı) — göçmenlik danışmanlıklarıyla ortaklık dağıtımlı, reklam+abonelik modelli, devlet zorunlu sınav nişine oturan mobil test-prep app, 434K+ indirme, aylık $18,957 kâr, $840K'a satışta (2026-09-30)
 - Starcrossed (Neda Farr) — TikTok'ta aşk/burç içerikli hesaptan ($6.99'luk kişisel okumayla ön-satış) büyüyen Co-Star tarzı aşk-odaklı astroloji uygulaması, 90 günde $70K MRR (2026-10-01)
 - Polotno (Anton Lavrenov) — tüketiciye değil şirketlere satılan, uygulamalara gömülebilen beyaz-etiketli tasarım editörü SDK'sı + toplu görsel/video üretim API'si, $60K MRR / 200+ müşteri (2026-10-02)
+- GeoSports (Frank Michael Smith) — Claude ile 8 saatte yapılan "haritada dokun" spor coğrafyası günlük bilmece oyunu, $40K/ay (ağırlıklı programatik reklam) + 2 haftada $47K ARR abonelik, 700K aylık kullanıcı (2026-10-03)
