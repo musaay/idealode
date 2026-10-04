@@ -114,3 +114,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Starcrossed (Neda Farr) — TikTok'ta aşk/burç içerikli hesaptan ($6.99'luk kişisel okumayla ön-satış) büyüyen Co-Star tarzı aşk-odaklı astroloji uygulaması, 90 günde $70K MRR (2026-10-01)
 - Polotno (Anton Lavrenov) — tüketiciye değil şirketlere satılan, uygulamalara gömülebilen beyaz-etiketli tasarım editörü SDK'sı + toplu görsel/video üretim API'si, $60K MRR / 200+ müşteri (2026-10-02)
 - GeoSports (Frank Michael Smith) — Claude ile 8 saatte yapılan "haritada dokun" spor coğrafyası günlük bilmece oyunu, $40K/ay (ağırlıklı programatik reklam) + 2 haftada $47K ARR abonelik, 700K aylık kullanıcı (2026-10-03)
+- Avenue (Tom Holliday) — hizmet işletmelerinin web sitesine eklenen, müşterinin aramak zorunda kalmadan talep/randevu gönderebildiği widget, kapı kapı iPad demosuyla satılıyor, ~A$85K/ay (~$55K) (2026-10-04)
+- Shift (Jason McCreary) — Laravel uygulamalarını repo'ya bağlanıp otomatik PR ile sürüm yükselten tek-kurucu geliştirici aracı, 10 yılda $50K MRR (2026-10-04)
