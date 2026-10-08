@@ -117,3 +117,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Avenue (Tom Holliday) — hizmet işletmelerinin web sitesine eklenen, müşterinin aramak zorunda kalmadan talep/randevu gönderebildiği widget, kapı kapı iPad demosuyla satılıyor, ~A$85K/ay (~$55K) (2026-10-04)
 - Shift (Jason McCreary) — Laravel uygulamalarını repo'ya bağlanıp otomatik PR ile sürüm yükselten tek-kurucu geliştirici aracı, 10 yılda $50K MRR (2026-10-04)
 - Kori — çeviri değil ilk dersten konuşma çıkışına odaklanan AI Kore dili öğrenme uygulaması, aynı zamanda çoklu-niş "veri deneyi" portföyünün parçası olarak üretilip satışa çıkarıldı, $4K MRR (2026-10-06)
+- Dead-Domain Portfolio (Erik Aronesty) — kapanmış şirketlerin hâlâ arama talebi olan alan adlarını satın alıp pazarlamasız hizmete dönüştürdüğü ~30 mikro-ürünlük portföy (DirtSignal, OnwardTravel), portföy toplamı $15K/ay (2026-10-08)
