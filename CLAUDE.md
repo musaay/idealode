@@ -65,6 +65,10 @@ edilmez (#166 dersi, #182). Mutlak %95 eşiği canlının kendisi %90 ölçüld�
 için göreliye çevrildi (#181). Sağlayıcı/model/oylama değişikliği de prompt
 değişikliği sayılır. Canlı ölçümü lead koşar (developer canlı LLM'e
 dokunmaz), sonucu issue/PR'a ekler.
+Her spec "Veri varsayımları" bölümü taşır: tasarımın dayandığı dağılımlar
+(kardinalite, frekans, oran) lead tarafından canlı DB'de ölçülür, rakam +
+sorgu yazılır ya da açıkça TAHMİN denir; reviewer bölüm yoksa işi keser
+(reviewer.md madde 7, #206 — #149 etiket dağılımı ölçülmeden yazıldı).
 Mercek/prompt denetimi her ayın 1'i ve 15'inde otomatik issue ile takvime
 bağlıdır (.github/workflows/lens-audit.yml).
 

@@ -36,6 +36,16 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
    çıkışı bir env bayrağına bağlı ve varsayılanı eski davranış olan
    değişiklikte ölçüm, bayrak açılmadan önce lead tarafından yapılır;
    PR'da varsayılanın gerçekten eski davranış olduğunu doğrula.
+7. VERİ VARSAYIMLARI (#206): issue/spec'te "Veri varsayımları" bölümü
+   olmalı. Tasarımın dayandığı her veri dağılımı (kaç farklı değer, kova
+   başına kaç kayıt, hangi oran — örn. "etiket başına mevcut tema sayısı")
+   ya ölçülmüş rakam + sorgusu/kaynağı ya da açık "TAHMİN" etiketi taşır;
+   dayanılan dağılım yoksa bölüm "Yok" + tek cümle gerekçe der. Bölüm
+   yoksa ya da kaynaksız rakam varsa bulgu "DÜZELTME GEREKLİ"dir (madde 6
+   ile aynı ağırlık). Bunu DB'ye bakmadan, yalnız issue metninden denetle;
+   diff spec'te adı geçmeyen bir dağılıma dayanıyorsa (sabit eşik, limit,
+   kovalama anahtarı) onu da bulgu yaz. Ders: #149 etiket dağılımı
+   ölçülmeden yazıldı → 10-04..09 kart kuraklığı.
 
 İki kritik kural:
 - SPEKÜLATİF BULGU YASAK — her bulgu koda karşı doğrulanmış olmalı:
