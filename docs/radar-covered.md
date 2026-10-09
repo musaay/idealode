@@ -118,3 +118,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Shift (Jason McCreary) — Laravel uygulamalarını repo'ya bağlanıp otomatik PR ile sürüm yükselten tek-kurucu geliştirici aracı, 10 yılda $50K MRR (2026-10-04)
 - Kori — çeviri değil ilk dersten konuşma çıkışına odaklanan AI Kore dili öğrenme uygulaması, aynı zamanda çoklu-niş "veri deneyi" portföyünün parçası olarak üretilip satışa çıkarıldı, $4K MRR (2026-10-06)
 - Dead-Domain Portfolio (Erik Aronesty) — kapanmış şirketlerin hâlâ arama talebi olan alan adlarını satın alıp pazarlamasız hizmete dönüştürdüğü ~30 mikro-ürünlük portföy (DirtSignal, OnwardTravel), portföy toplamı $15K/ay (2026-10-08)
+- Reddit Agency (Sabyr Nurgaliyev) — "ChatGPT markanı önermezse ödeme yapmazsın" vaadiyle markaların Reddit'te içerik/itibar stratejisini yöneten büyüme ajansı, Stripe doğrulamalı $51K MRR (2026-10-09)
