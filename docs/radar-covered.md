@@ -119,3 +119,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Kori — çeviri değil ilk dersten konuşma çıkışına odaklanan AI Kore dili öğrenme uygulaması, aynı zamanda çoklu-niş "veri deneyi" portföyünün parçası olarak üretilip satışa çıkarıldı, $4K MRR (2026-10-06)
 - Dead-Domain Portfolio (Erik Aronesty) — kapanmış şirketlerin hâlâ arama talebi olan alan adlarını satın alıp pazarlamasız hizmete dönüştürdüğü ~30 mikro-ürünlük portföy (DirtSignal, OnwardTravel), portföy toplamı $15K/ay (2026-10-08)
 - Reddit Agency (Sabyr Nurgaliyev) — "ChatGPT markanı önermezse ödeme yapmazsın" vaadiyle markaların Reddit'te içerik/itibar stratejisini yöneten büyüme ajansı, Stripe doğrulamalı $51K MRR (2026-10-09)
+- VirtualJK (James Kemp) — gerçek bir danışmanın $25M'lık satış deneyimiyle eğitilmiş AI "replikant"ı, haftalık $97/yıllık $5000 abonelikle satılan danışmanlık klonu, Stripe doğrulamalı $43.3K MRR / tüm zamanlar $3.37M gelir (2026-10-10)
+- BackPedal — GPS+Bluetooth takip, eski polis ekiplerinden kurtarma servisi ve sigorta ortaklığını birleştiren e-bisiklet hırsızlık koruma aboneliği, ~$48.4K MRR, 1000+ bisiklet kurtarma %79.7 oranla (2026-10-10)
