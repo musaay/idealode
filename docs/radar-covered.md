@@ -121,3 +121,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Reddit Agency (Sabyr Nurgaliyev) — "ChatGPT markanı önermezse ödeme yapmazsın" vaadiyle markaların Reddit'te içerik/itibar stratejisini yöneten büyüme ajansı, Stripe doğrulamalı $51K MRR (2026-10-09)
 - VirtualJK (James Kemp) — gerçek bir danışmanın $25M'lık satış deneyimiyle eğitilmiş AI "replikant"ı, haftalık $97/yıllık $5000 abonelikle satılan danışmanlık klonu, Stripe doğrulamalı $43.3K MRR / tüm zamanlar $3.37M gelir (2026-10-10)
 - BackPedal — GPS+Bluetooth takip, eski polis ekiplerinden kurtarma servisi ve sigorta ortaklığını birleştiren e-bisiklet hırsızlık koruma aboneliği, ~$48.4K MRR, 1000+ bisiklet kurtarma %79.7 oranla (2026-10-10)
+- Supliful — içerik üreticilerinin stoksuz/ön maliyetsiz kendi takviye/kozmetik/kahve markasını kurup fason üretim+lojistikle sattığı CPG platformu, $179.3K MRR, $53.6M all-time (Stripe doğrulamalı) (2026-10-11)
+- Podawaa — LinkedIn kullanıcılarını birbirinin gönderisine karşılıklı beğeni/yorum yapacak şekilde eşleştiren AI amplifikasyon platformu, $66K MRR, 614 abone (Stripe doğrulamalı) (2026-10-11)
