@@ -123,3 +123,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - BackPedal — GPS+Bluetooth takip, eski polis ekiplerinden kurtarma servisi ve sigorta ortaklığını birleştiren e-bisiklet hırsızlık koruma aboneliği, ~$48.4K MRR, 1000+ bisiklet kurtarma %79.7 oranla (2026-10-10)
 - Supliful — içerik üreticilerinin stoksuz/ön maliyetsiz kendi takviye/kozmetik/kahve markasını kurup fason üretim+lojistikle sattığı CPG platformu, $179.3K MRR, $53.6M all-time (Stripe doğrulamalı) (2026-10-11)
 - Podawaa — LinkedIn kullanıcılarını birbirinin gönderisine karşılıklı beğeni/yorum yapacak şekilde eşleştiren AI amplifikasyon platformu, $66K MRR, 614 abone (Stripe doğrulamalı) (2026-10-11)
+- OmegleWeb — yasal sorunlarla kapanan Omegle'ın yerine geçen rastgele video/metin sohbet sitesi, $76K MRR (Stripe doğrulamalı), 659K aylık kullanıcı (2026-10-13)
