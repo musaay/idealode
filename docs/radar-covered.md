@@ -125,3 +125,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Podawaa — LinkedIn kullanıcılarını birbirinin gönderisine karşılıklı beğeni/yorum yapacak şekilde eşleştiren AI amplifikasyon platformu, $66K MRR, 614 abone (Stripe doğrulamalı) (2026-10-11)
 - OmegleWeb — yasal sorunlarla kapanan Omegle'ın yerine geçen rastgele video/metin sohbet sitesi, $76K MRR (Stripe doğrulamalı), 659K aylık kullanıcı (2026-10-13)
 - Conductor (Danny Nemer) — API'si olmayan QuickBooks Desktop/Enterprise muhasebe yazılımını modern REST/TypeScript API'sine çeviren "legacy köprü" hizmeti, 1.400+ işletme senkronize, ~$42K/ay (TrustMRR) (2026-10-15)
+- Voicy (Kourosh Ghaffari) — klavyede yavaş yazan/yazmakta zorlanan insanlar için önce babasına yapılan, sonra ürünleşen sesli-yazıya dönüştürme uygulaması, ~$18K/ay (2026-10-16)
+- Pckgr (intunepckgr.com) — Microsoft Intune'da uygulama paketleme ve sessiz otomatik güncelleme yapan niş IT-admin SaaS'ı, $83K MRR (2026-10-16)
