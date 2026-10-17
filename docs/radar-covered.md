@@ -127,3 +127,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Conductor (Danny Nemer) — API'si olmayan QuickBooks Desktop/Enterprise muhasebe yazılımını modern REST/TypeScript API'sine çeviren "legacy köprü" hizmeti, 1.400+ işletme senkronize, ~$42K/ay (TrustMRR) (2026-10-15)
 - Voicy (Kourosh Ghaffari) — klavyede yavaş yazan/yazmakta zorlanan insanlar için önce babasına yapılan, sonra ürünleşen sesli-yazıya dönüştürme uygulaması, ~$18K/ay (2026-10-16)
 - Pckgr (intunepckgr.com) — Microsoft Intune'da uygulama paketleme ve sessiz otomatik güncelleme yapan niş IT-admin SaaS'ı, $83K MRR (2026-10-16)
+- Cardstock + Scanémon (Kyle Fowler) — telefon kamerasıyla fiziksel kart tarayıp eBay verisinden anlık piyasa değeri gösteren abonelik tabanlı iki koleksiyon kartı uygulaması (spor kartları + Pokémon), ~$120K/ay toplam (2026-10-17)
