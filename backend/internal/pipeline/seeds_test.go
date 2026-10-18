@@ -1327,3 +1327,92 @@ func TestDistinctivenessLogSuffix(t *testing.T) {
 		})
 	}
 }
+
+// --- #210: tohum kartı istemi v1/v3 seçimi ---
+
+// TestSeedCardPromptsV1Unchanged: SEED_CARD_PROMPT verilmediğinde (ya da v1)
+// gönderilen istemler bugünküyle BİREBİR aynıdır (#210).
+func TestSeedCardPromptsV1Unchanged(t *testing.T) {
+	seed := radarSeed{Name: "N", Summary: "S", Evidence: "E", SourceURL: "https://x.example", TRAngle: "TR açısı"}
+	gate := trendingGateResult{repo: "o/r", stars: 100, lastDelta: 5, persistedDays: 3}
+	for _, v := range []string{"", "v1"} {
+		cfg := &config.Config{OutputLang: "tr", SeedCardPrompt: v}
+
+		sys, usr := seedCardPrompts(cfg, seed, false, gate)
+		if sys != fmt.Sprintf(seedCardSystemTmpl, langName("tr")) || usr != seedCardUserPrompt(seed) {
+			t.Errorf("v=%q: gelir istemi v1'den farklı", v)
+		}
+		sys, usr = seedCardPrompts(cfg, seed, true, gate)
+		if sys != fmt.Sprintf(seedMomentumCardSystemTmpl, langName("tr")) ||
+			usr != seedMomentumCardUserPrompt(seed, "o/r", 100, 5, 3) {
+			t.Errorf("v=%q: ivme istemi v1'den farklı", v)
+		}
+	}
+}
+
+// TestSeedCardPromptsV3: v3'te V3 sistem sabitleri + "Seed angle" etiketi;
+// "TR angle / localization idea" geçmez.
+func TestSeedCardPromptsV3(t *testing.T) {
+	seed := radarSeed{Name: "N", Summary: "S", Evidence: "E", SourceURL: "https://x.example", TRAngle: "TR açısı"}
+	gate := trendingGateResult{repo: "o/r", stars: 100, lastDelta: 5, persistedDays: 3}
+	cfg := &config.Config{OutputLang: "tr", SeedCardPrompt: "v3"}
+
+	sys, usr := seedCardPrompts(cfg, seed, false, gate)
+	if sys != fmt.Sprintf(seedCardSystemTmplV3, langName("tr")) {
+		t.Error("gelir sistem istemi V3 olmalı")
+	}
+	if !strings.Contains(usr, "Seed angle (context, not the target market): TR açısı") || strings.Contains(usr, "TR angle / localization idea") {
+		t.Errorf("gelir kullanıcı istemi v3 etiketini taşımalı: %q", usr)
+	}
+	if !strings.HasPrefix(usr, "Seed name: N\nSummary: S\nRevenue/traction evidence: E\nSource: https://x.example\n") {
+		t.Errorf("gelir kullanıcı istemi önceki satırlar aynı kalmalı: %q", usr)
+	}
+
+	// İvme tohumu v3'te de v1 yolunda kalır (ölçülmedi, #210).
+	sys, usr = seedCardPrompts(cfg, seed, true, gate)
+	if sys != fmt.Sprintf(seedMomentumCardSystemTmpl, langName("tr")) ||
+		usr != seedMomentumCardUserPrompt(seed, "o/r", 100, 5, 3) {
+		t.Error("v3'te ivme istemi v1 ile byte-byte aynı olmalı")
+	}
+}
+
+// TestSeedCardTmplV3Placeholders: fmt.Sprintf güvenliği — tam bir "%s".
+func TestSeedCardTmplV3Placeholders(t *testing.T) {
+	for name, tmpl := range map[string]string{"gelir": seedCardSystemTmplV3, "ivme": seedMomentumCardSystemTmplV3} {
+		if n := strings.Count(tmpl, "%"); n != 1 || strings.Count(tmpl, "%s") != 1 {
+			t.Errorf("%s: tam olarak bir %%s ve başka %% olmamalı (%% sayısı %d)", name, n)
+		}
+	}
+}
+
+// TestSeedMomentumTmplV3DiffersOnlyThreeParts: ivme V3 = gelir V3 + yalnız
+// üç değişiklik (#210).
+func TestSeedMomentumTmplV3DiffersOnlyThreeParts(t *testing.T) {
+	const revFirst = `You generate a concrete software product idea card ("market_derived") from a validated market seed — an existing product with real revenue/traction evidence. The builder sells GLOBALLY.`
+	const momFirst = `You generate a concrete software product idea card ("momentum_derived") from a validated GROWTH SEED — a GitHub repository showing real trending momentum (stars, forks, persistence on GitHub Trending) but NO revenue evidence. The builder sells GLOBALLY.`
+	const revMon = `- monetization_signal: integer 0-5 (this idea already has revenue evidence from the seed — score accordingly, usually 3-5).`
+	const momMon = `- monetization_signal: integer 0-5 — there is NO revenue evidence for this seed, only growth/traction. Score 0-2 UNLESS the idea has a clear paid path (e.g. an obvious enterprise/pro tier, a paid API, a SaaS wrapper with real willingness-to-pay).`
+
+	got := seedCardSystemTmplV3
+	for _, p := range [][2]string{
+		{revFirst, momFirst},
+		{"the specific reason it makes money", "the specific reason people adopt it"},
+		{revMon, momMon},
+	} {
+		if strings.Count(got, p[0]) != 1 {
+			t.Fatalf("gelir V3'te %q tam bir kez geçmeli", p[0])
+		}
+		got = strings.Replace(got, p[0], p[1], 1)
+	}
+	if got != seedMomentumCardSystemTmplV3 {
+		t.Error("ivme V3, gelir V3'ün üç değişikliğiyle birebir eşleşmiyor")
+	}
+}
+
+// TestParseRadarSeedsReadsTRAngleKey: JSON anahtarı tr_angle korunur.
+func TestParseRadarSeedsReadsTRAngleKey(t *testing.T) {
+	seeds := parseRadarSeeds(`{"date":"2026-01-01","name":"A","summary":"s","evidence":"e","source_url":"https://a.example","tr_angle":"açı"}`)
+	if len(seeds) != 1 || seeds[0].TRAngle != "açı" {
+		t.Errorf("tr_angle okunmalı: %+v", seeds)
+	}
+}

@@ -626,10 +626,82 @@ Rules:
 - monetization_signal: integer 0-5 (this idea already has revenue evidence from the seed — score accordingly, usually 3-5).
 - known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
 
+// seedAngleLabelV1/V3: kullanıcı isteminin son satır etiketi (#210).
+// v1 etiketi canlı davranışla BİREBİR; v3 açıyı "bağlam" olarak çerçeveler.
+const (
+	seedAngleLabelV1 = "TR angle / localization idea: "
+	seedAngleLabelV3 = "Seed angle (context, not the target market): "
+)
+
 func seedCardUserPrompt(s radarSeed) string {
-	return fmt.Sprintf("Seed name: %s\nSummary: %s\nRevenue/traction evidence: %s\nSource: %s\nTR angle / localization idea: %s",
-		s.Name, s.Summary, s.Evidence, s.SourceURL, s.TRAngle)
+	return seedCardUserPromptLabeled(s, seedAngleLabelV1)
 }
+
+func seedCardUserPromptLabeled(s radarSeed, angleLabel string) string {
+	return fmt.Sprintf("Seed name: %s\nSummary: %s\nRevenue/traction evidence: %s\nSource: %s\n%s%s",
+		s.Name, s.Summary, s.Evidence, s.SourceURL, angleLabel, s.TRAngle)
+}
+
+// seedCardPrompts, tohum kartı için (sistem, kullanıcı) istemini seçer (#210):
+// cfg.SeedCardPrompt == "v3" ise YALNIZ gelir tohumunda V3 şablonu + v3 etiketi; aksi halde
+// (varsayılan) bugünkü v1 yolu, byte-byte aynı.
+func seedCardPrompts(cfg *config.Config, seed radarSeed, isTrending bool, gate trendingGateResult) (system, user string) {
+	// İvme tohumları ölçülmedi (#210): v3'te bile v1 yolunda kalır.
+	if isTrending {
+		return fmt.Sprintf(seedMomentumCardSystemTmpl, langName(cfg.OutputLang)),
+			seedMomentumCardUserPrompt(seed, gate.repo, gate.stars, gate.lastDelta, gate.persistedDays)
+	}
+	if cfg.SeedCardPrompt == "v3" {
+		return fmt.Sprintf(seedCardSystemTmplV3, langName(cfg.OutputLang)),
+			seedCardUserPromptLabeled(seed, seedAngleLabelV3)
+	}
+	return fmt.Sprintf(seedCardSystemTmpl, langName(cfg.OutputLang)), seedCardUserPrompt(seed)
+}
+
+// seedCardSystemTmplV3 (#210): "yerelleştirme" yerine mekanizmayı başka işe/
+// alıcıya taşıma. Metin lead tarafından ölçüldü (altın set + 3 koşu) — DEĞİŞTİRME.
+const seedCardSystemTmplV3 = `You generate a concrete software product idea card ("market_derived") from a validated market seed — an existing product with real revenue/traction evidence. The builder sells GLOBALLY.
+
+YOUR JOB IS TO MOVE THE MECHANISM, NOT TO COPY THE PRODUCT. First name, to yourself, the seed's core mechanism: the specific reason it makes money (e.g. "read real sensor data and play synthetic feedback through existing hardware", "rent a bridge that turns API-less legacy software into a modern API"). Then build a DIFFERENT product that applies that mechanism to a different job, a different buyer, or an underserved gap. Do NOT propose the same product for another country, language or local market — "the seed, but in country X / in language Y / with local payments" is a copy and is not acceptable.
+
+Read the seed angle you receive and decide which case it is:
+(1) The angle ALREADY moves the mechanism to a different job, buyer or device category (e.g. a car feature rebuilt for scooters), OR it names specific local systems, institutions or rules that need real technical work to serve (e.g. connecting local accounting software that has no API). If the angle names concrete local software products, institutions or rules (for example specific accounting/ERP products, a national e-invoice or tax system, a government portal), it is case (1): the hard local integration IS the product, even if a similar product exists in another country. Then KEEP the angle's target and build exactly that idea well — do not move it somewhere else.
+(2) The angle only places the same product in a country, language or local market. Then ignore the country and move the mechanism to a different job, buyer or gap yourself.
+
+CRITICAL CONSTRAINT: Propose a realistic, grounded, SOFTWARE-heavy idea that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months.
+
+Return ONLY a JSON object:
+{"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
+
+Rules:
+- title, problem_statement, proposed_solution, target_user MUST be written in %s.
+- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated). Never translate tags.
+- urgency_score: integer 1-5.
+- monetization_signal: integer 0-5 (this idea already has revenue evidence from the seed — score accordingly, usually 3-5).
+- known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
+
+// seedMomentumCardSystemTmplV3 (#210): seedCardSystemTmplV3'ün ivme varyantı —
+// gelirden yalnız üç yerde ayrılır (ilk paragraf, "adopt it", monetization satırı).
+// ölçülmedi, yolda kullanılmıyor (#210).
+const seedMomentumCardSystemTmplV3 = `You generate a concrete software product idea card ("momentum_derived") from a validated GROWTH SEED — a GitHub repository showing real trending momentum (stars, forks, persistence on GitHub Trending) but NO revenue evidence. The builder sells GLOBALLY.
+
+YOUR JOB IS TO MOVE THE MECHANISM, NOT TO COPY THE PRODUCT. First name, to yourself, the seed's core mechanism: the specific reason people adopt it (e.g. "read real sensor data and play synthetic feedback through existing hardware", "rent a bridge that turns API-less legacy software into a modern API"). Then build a DIFFERENT product that applies that mechanism to a different job, a different buyer, or an underserved gap. Do NOT propose the same product for another country, language or local market — "the seed, but in country X / in language Y / with local payments" is a copy and is not acceptable.
+
+Read the seed angle you receive and decide which case it is:
+(1) The angle ALREADY moves the mechanism to a different job, buyer or device category (e.g. a car feature rebuilt for scooters), OR it names specific local systems, institutions or rules that need real technical work to serve (e.g. connecting local accounting software that has no API). If the angle names concrete local software products, institutions or rules (for example specific accounting/ERP products, a national e-invoice or tax system, a government portal), it is case (1): the hard local integration IS the product, even if a similar product exists in another country. Then KEEP the angle's target and build exactly that idea well — do not move it somewhere else.
+(2) The angle only places the same product in a country, language or local market. Then ignore the country and move the mechanism to a different job, buyer or gap yourself.
+
+CRITICAL CONSTRAINT: Propose a realistic, grounded, SOFTWARE-heavy idea that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months.
+
+Return ONLY a JSON object:
+{"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
+
+Rules:
+- title, problem_statement, proposed_solution, target_user MUST be written in %s.
+- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated). Never translate tags.
+- urgency_score: integer 1-5.
+- monetization_signal: integer 0-5 — there is NO revenue evidence for this seed, only growth/traction. Score 0-2 UNLESS the idea has a clear paid path (e.g. an obvious enterprise/pro tier, a paid API, a SaaS wrapper with real willingness-to-pay).
+- known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
 
 // seedMomentumCardSystemTmpl: seedCardSystemTmpl'in ivme varyantı (#89) —
 // gelir kanıtı YOKTUR, yalnız GitHub Trending kalıcılık/kullanım kanıtı
@@ -649,8 +721,12 @@ Rules:
 - known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
 
 func seedMomentumCardUserPrompt(s radarSeed, repo string, stars, lastDelta, persistedDays int) string {
-	return fmt.Sprintf("Seed name: %s\nRepo: %s\nSummary: %s\nGrowth evidence: %s\nSource: %s\nTR angle / localization idea: %s",
-		s.Name, repo, s.Summary, momentumEvidenceLine(stars, lastDelta, persistedDays), s.SourceURL, s.TRAngle)
+	return seedMomentumCardUserPromptLabeled(s, repo, stars, lastDelta, persistedDays, seedAngleLabelV1)
+}
+
+func seedMomentumCardUserPromptLabeled(s radarSeed, repo string, stars, lastDelta, persistedDays int, angleLabel string) string {
+	return fmt.Sprintf("Seed name: %s\nRepo: %s\nSummary: %s\nGrowth evidence: %s\nSource: %s\n%s%s",
+		s.Name, repo, s.Summary, momentumEvidenceLine(stars, lastDelta, persistedDays), s.SourceURL, angleLabel, s.TRAngle)
 }
 
 // seedRawPost, tohumun raw_posts işlenme imlecidir: platform='radar_seed',
@@ -838,14 +914,7 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// eliminations.verdicts'e (K1|K2 ile bloklanırsa, #166) yazılır.
 		allVerdicts := append([]store.LensVerdict{}, lensOutcome.Verdicts...)
 
-		var system, userPrompt string
-		if isTrending {
-			system = fmt.Sprintf(seedMomentumCardSystemTmpl, langName(cfg.OutputLang))
-			userPrompt = seedMomentumCardUserPrompt(seed, gate.repo, gate.stars, gate.lastDelta, gate.persistedDays)
-		} else {
-			system = fmt.Sprintf(seedCardSystemTmpl, langName(cfg.OutputLang))
-			userPrompt = seedCardUserPrompt(seed)
-		}
+		system, userPrompt := seedCardPrompts(cfg, seed, isTrending, gate)
 		raw, err := chat.ChatJSON(llm.WithStage(ctx, "tohum"), system, userPrompt)
 		if err != nil {
 			log.Printf("seeds: %q kart üretimi HATA: %v — atlandı (yeniden denenecek)", seed.Name, err)
