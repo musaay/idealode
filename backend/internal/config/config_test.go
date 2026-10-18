@@ -297,8 +297,51 @@ func TestThirdPartyPromptEnv(t *testing.T) {
 	}
 }
 
+// TestSeedCardPromptEnv, SEED_CARD_PROMPT ayrıştırmasını doğrular (#210):
+// boş->"v1" (sessiz), "v1"/"v3"->kendisi (boşluk kırpılır), başka her değer
+// ("v2", "V3", "x")->"v1" + log uyarısı (Load düşmez).
+func TestSeedCardPromptEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+
+	cases := []struct {
+		env      string
+		want     string
+		wantWarn bool
+	}{
+		{"", "v1", false},
+		{"v1", "v1", false},
+		{"v3", "v3", false},
+		{" v3 ", "v3", false},
+		{"v2", "v1", true},
+		{"V3", "v1", true},
+		{"x", "v1", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("SEED_CARD_PROMPT", tc.env)
+
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.SeedCardPrompt != tc.want {
+				t.Errorf("SEED_CARD_PROMPT=%q: %q beklenirdi, geldi %q", tc.env, tc.want, c.SeedCardPrompt)
+			}
+			warned := strings.Contains(buf.String(), "SEED_CARD_PROMPT geçersiz")
+			if warned != tc.wantWarn {
+				t.Errorf("SEED_CARD_PROMPT=%q: uyarı logu beklentisi %v, geldi %v (log: %q)", tc.env, tc.wantWarn, warned, buf.String())
+			}
+		})
+	}
+}
+
 // TestDataAccessPromptEnv, DATA_ACCESS_PROMPT ayrıştırmasını doğrular (#168):
 // THIRD_PARTY_PROMPT ile aynı kurallar.
+
 func TestDataAccessPromptEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 

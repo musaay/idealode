@@ -60,6 +60,13 @@ type Config struct {
 	// Railway'de v3'e geçirir. lens-ab bunu OKUMAZ (kendi --prompt bayrağı var).
 	ThirdPartyPrompt string // THIRD_PARTY_PROMPT (default: v1; "v1"|"v3")
 
+	// SeedCardPrompt (#210): tohum kartı üretim isteminin sürümü — "v1" (canlı,
+	// yerelleştirme açısı) ya da "v3" (mekanizmayı başka işe/alıcıya taşıma).
+	// Kurallar ThirdPartyPrompt'la AYNI: boş/geçersiz -> "v1" (geçersizde log
+	// uyarısı) — VARSAYILAN v1: merge sonrası istemler BUGÜNKÜYLE BİREBİR aynı
+	// kalır; lead ölçümden sonra Railway'de v3'e geçirir.
+	SeedCardPrompt string // SEED_CARD_PROMPT (default: v1; "v1"|"v3")
+
 	// DataAccessPrompt (#168): veri-erişimi merceğinin sistem prompt'u — "v1"
 	// (canlı) ya da "v3" (lensDataAccessSystemV3). Kurallar ThirdPartyPrompt'la
 	// AYNI: boş/geçersiz -> "v1" (geçersizde log uyarısı). OYLAMA YOK.
@@ -135,6 +142,7 @@ func Load() (*Config, error) {
 	c.DistinctivenessVotes = loadDistinctivenessVotes()
 	c.ThirdPartyPrompt = loadPromptVersion("THIRD_PARTY_PROMPT")
 	c.DataAccessPrompt = loadPromptVersion("DATA_ACCESS_PROMPT")
+	c.SeedCardPrompt = loadPromptVersion("SEED_CARD_PROMPT")
 	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
