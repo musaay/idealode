@@ -129,3 +129,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Pckgr (intunepckgr.com) — Microsoft Intune'da uygulama paketleme ve sessiz otomatik güncelleme yapan niş IT-admin SaaS'ı, $83K MRR (2026-10-16)
 - Cardstock + Scanémon (Kyle Fowler) — telefon kamerasıyla fiziksel kart tarayıp eBay verisinden anlık piyasa değeri gösteren abonelik tabanlı iki koleksiyon kartı uygulaması (spor kartları + Pokémon), ~$120K/ay toplam (2026-10-17)
 - 1Lookup (Robby Frank) — telefon/e-posta/IP doğrulama, zenginleştirme, B2B prospecting, SEO ve transkripsiyon dahil 34 veri ürününü tek API anahtarı + tek paylaşılan kredi bakiyesiyle sunan veri servisi, $263,953 MRR (Stripe doğrulamalı, TrustMRR) (2026-10-18)
+- Vaultaire — iPhone için cihaz-içi (zero-knowledge) şifreli dosya/foto/video kasası uygulaması, ~$41K/ay (2026-10-19)
+- ArtCraft (storytold/artcraft) — çoklu sağlayıcılı (Midjourney/fal/GPT Image/Wan) AI görsel+video+ses yaratım masaüstü motoru, ★33.3K, ivme (2026-10-19)
