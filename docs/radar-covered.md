@@ -131,3 +131,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - 1Lookup (Robby Frank) — telefon/e-posta/IP doğrulama, zenginleştirme, B2B prospecting, SEO ve transkripsiyon dahil 34 veri ürününü tek API anahtarı + tek paylaşılan kredi bakiyesiyle sunan veri servisi, $263,953 MRR (Stripe doğrulamalı, TrustMRR) (2026-10-18)
 - Vaultaire — iPhone için cihaz-içi (zero-knowledge) şifreli dosya/foto/video kasası uygulaması, ~$41K/ay (2026-10-19)
 - ArtCraft (storytold/artcraft) — çoklu sağlayıcılı (Midjourney/fal/GPT Image/Wan) AI görsel+video+ses yaratım masaüstü motoru, ★33.3K, ivme (2026-10-19)
+- Laper — senarist/yönetmenler için senaryo+storyboard+prodüksiyon planlamayı birleştiren, yazarın kendi sesini koruyan AI ajanlı yaratım platformu, $45,837 MRR (2026-10-20)
+- Pep AI — peptid protokolü (doz, viyal ömrü, enjeksiyon yeri, yan etki) takip edip doktor için PDF rapor üreten mobil uygulama, $30K/ay (2026-10-20)
