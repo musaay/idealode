@@ -133,3 +133,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - ArtCraft (storytold/artcraft) — çoklu sağlayıcılı (Midjourney/fal/GPT Image/Wan) AI görsel+video+ses yaratım masaüstü motoru, ★33.3K, ivme (2026-10-19)
 - Laper — senarist/yönetmenler için senaryo+storyboard+prodüksiyon planlamayı birleştiren, yazarın kendi sesini koruyan AI ajanlı yaratım platformu, $45,837 MRR (2026-10-20)
 - Pep AI — peptid protokolü (doz, viyal ömrü, enjeksiyon yeri, yan etki) takip edip doktor için PDF rapor üreten mobil uygulama, $30K/ay (2026-10-20)
+- Gomotion AI (Iker) — bir konu başlığını tek tıkla YouTube'a yüklenmeye hazır 15+ dakikalık tam belgesele çeviren, faceless kanal sahiplerine yönelik AI video otomasyon aracı, $51.853 MRR (2026-10-21)
