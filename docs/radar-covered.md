@@ -134,3 +134,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Laper — senarist/yönetmenler için senaryo+storyboard+prodüksiyon planlamayı birleştiren, yazarın kendi sesini koruyan AI ajanlı yaratım platformu, $45,837 MRR (2026-10-20)
 - Pep AI — peptid protokolü (doz, viyal ömrü, enjeksiyon yeri, yan etki) takip edip doktor için PDF rapor üreten mobil uygulama, $30K/ay (2026-10-20)
 - Gomotion AI (Iker) — bir konu başlığını tek tıkla YouTube'a yüklenmeye hazır 15+ dakikalık tam belgesele çeviren, faceless kanal sahiplerine yönelik AI video otomasyon aracı, $51.853 MRR (2026-10-21)
+- Kibu (Daniel Caridi) — zihinsel/gelişimsel engelli (I/DD) bakım kuruluşları için mevzuat uyumluluğu/EHR dokümantasyonunu hizmet alan kişiye yönelik öğretim içeriğiyle aynı platformda birleştiren B2B SaaS, $234K MRR, 375 abonelik, 48 eyalet (2026-10-22)
+- 3AK Track (Christian Rac, Braylin Byrd) — iki üniversiteli atletin no-code kurduğu, sprinter/koşucular için AI adım analizi + kalori takibi + AI koç sunan spor performans uygulaması, ilk 28 günde $17,460 (RevenueCat doğrulamalı) (2026-10-22)
