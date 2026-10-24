@@ -137,3 +137,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Kibu (Daniel Caridi) — zihinsel/gelişimsel engelli (I/DD) bakım kuruluşları için mevzuat uyumluluğu/EHR dokümantasyonunu hizmet alan kişiye yönelik öğretim içeriğiyle aynı platformda birleştiren B2B SaaS, $234K MRR, 375 abonelik, 48 eyalet (2026-10-22)
 - 3AK Track (Christian Rac, Braylin Byrd) — iki üniversiteli atletin no-code kurduğu, sprinter/koşucular için AI adım analizi + kalori takibi + AI koç sunan spor performans uygulaması, ilk 28 günde $17,460 (RevenueCat doğrulamalı) (2026-10-22)
 - TJM Labs (Jonathan Adly) — eczanelere "dijital çalışan" (AI bot) kiralayan, her botu yıllık kontratla kişi başı gibi fiyatlandıran eczane otomasyon platformu, $25M ARR / 450 eczane / $10M Series A (2026-10-23)
+- Payout (Casper Opala / Connor Burd) — kullanıcının haberi olmadığı class-action tazminatlarını resmi kayıtlardan tarayıp otomatik başvuran mobil uygulama, ~$52K MRR (acquire.com) (2026-10-24)
+- ToneAdapt (Kyan Santiago) — gitarist/bas gitaristlere kendi amfi/pedal donanımına özel ton ayarı veren AI uygulaması, ~$3.6K MRR doğrulanmış (TrustMRR) (2026-10-24)
