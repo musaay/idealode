@@ -140,4 +140,3 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Payout (Casper Opala / Connor Burd) — kullanıcının haberi olmadığı class-action tazminatlarını resmi kayıtlardan tarayıp otomatik başvuran mobil uygulama, ~$52K MRR (acquire.com) (2026-10-24)
 - ToneAdapt (Kyan Santiago) — gitarist/bas gitaristlere kendi amfi/pedal donanımına özel ton ayarı veren AI uygulaması, ~$3.6K MRR doğrulanmış (TrustMRR) (2026-10-24)
 - Vibe App Scanner (Jacob, @silexdev) — AI/"vibe coding" ile üretilen uygulamalara özel otomatik güvenlik tarayıcısı, bulduğu açıkları kodlama ajanlarının (Claude Code, Cursor vb.) doğrudan uygulayabileceği AI-hazır düzeltme talimatına çeviriyor, $807 MRR / $6,089 tüm zamanlar, Stripe doğrulamalı (TrustMRR) (2026-10-25)
-- Sober Tracker (Ivan Terekhin) — hesap/bulut gerektirmeyen, tamamen cihaz-içi çalışan gizlilik-önce ayıklık (sobriety) takip uygulaması, $1,865 MRR / 763 abone, RevenueCat doğrulamalı (TrustMRR) (2026-10-25)
