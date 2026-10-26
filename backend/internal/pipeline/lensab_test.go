@@ -1160,7 +1160,7 @@ func TestLensABUserPromptFromDB(t *testing.T) {
 		st.Pool.Exec(ctx, "DELETE FROM eliminations WHERE id = $1", elimID)
 	})
 
-	ideaPrompt, err := lensABUserPrompt(ctx, st, GoldenCase{ID: ideaID, Kind: "idea"})
+	ideaPrompt, err := lensABUserPrompt(ctx, st, GoldenCase{ID: ideaID, Kind: "idea"}, false)
 	if err != nil {
 		t.Fatalf("lensABUserPrompt (idea): %v", err)
 	}
@@ -1169,7 +1169,7 @@ func TestLensABUserPromptFromDB(t *testing.T) {
 		t.Errorf("idea prompt = %q, istenen %q", ideaPrompt, want)
 	}
 
-	elimPrompt, err := lensABUserPrompt(ctx, st, GoldenCase{ID: elimID, Kind: "elimination"})
+	elimPrompt, err := lensABUserPrompt(ctx, st, GoldenCase{ID: elimID, Kind: "elimination"}, false)
 	if err != nil {
 		t.Fatalf("lensABUserPrompt (elimination): %v", err)
 	}
@@ -1178,7 +1178,7 @@ func TestLensABUserPromptFromDB(t *testing.T) {
 		t.Errorf("elimination prompt = %q, istenen %q", elimPrompt, wantElim)
 	}
 
-	if _, err := lensABUserPrompt(ctx, st, GoldenCase{ID: 999999999, Kind: "idea"}); err != store.ErrNotFound {
+	if _, err := lensABUserPrompt(ctx, st, GoldenCase{ID: 999999999, Kind: "idea"}, false); err != store.ErrNotFound {
 		t.Errorf("var olmayan idea: ErrNotFound bekleniyordu, geldi: %v", err)
 	}
 }

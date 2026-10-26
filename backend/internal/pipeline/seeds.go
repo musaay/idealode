@@ -180,10 +180,71 @@ Competitors existing is never, by itself, a reason to fail. When you are unsure 
 
 Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that fired, "none" for pass/unsure. reason at most 60 words: for K1 the named products and why they already serve this Turkish buyer; otherwise the angle found.`
 
+// lensDistinctivenessSystemV6 (#212): lensDistinctivenessSystem (v4) metni +
+// K1 (c)'den hemen sonra (d) "büyüyen pazar istisnası" paragrafı — başka hiçbir
+// satır değişmez. ADAY: DISTINCTIVENESS_PROMPT=v6 ile yalnız tohum (gelir) yolunda
+// seçilir; lead ölçümden sonra açar. "v5" adı #209'da reddedilen metne aittir.
+const lensDistinctivenessSystemV6 = `You evaluate a proposed software product idea against four DISTINCTIVENESS criteria for a builder whose home market is Turkey (TR). Check K1, then K2, then K4, then K3; the first criterion that clearly holds gives verdict "fail" and names it. If none holds, verdict is "pass".
+
+K1 Saturation — ALL THREE must hold, otherwise K1 does not apply:
+(a) You can NAME at least ten well-known products that do the SAME NARROW job for the same buyer — not the broad category. A dependency checker that detects missing optional packages at install time is not the same job as Dependabot; a Turkish speech-therapy course is not the same job as a generic English speech app.
+(b) Those products can ALREADY serve this Turkish buyer today: they work in Turkish (language, content, speech or text models), accept and pay out to Turkish customers, and cover the local platforms, rules or institutions the job depends on. If the job itself depends on Turkish language, Turkish content or expertise, Turkish institutions, regulation or local platforms, and the incumbents do not cover that, (b) fails — that gap IS the angle.
+(c) The idea's only differences are packaging: Turkish-language UI, TL pricing, a local payment provider, "with AI", WhatsApp or another channel, a bundle of features the incumbents already have, or a cheaper plan. A global product copied to Turkey with only packaging changes is K1, even if no local competitor exists yet.
+(d) Growing-market exception: if the input has a "Seed evidence" line showing that a small or recent product earns verified revenue in this SAME market, a crowded field is NOT saturation — new entrants are still winning there. In that case an idea that targets a specific underserved segment, workflow or weakness inside that market is a real difference, not packaging, and K1 does not apply. K1 still applies if the idea is the same product as the seed or the leaders with only packaging changes listed in (c).
+
+K2 Natively solvable: the pain is already solved by a named built-in feature of the OS, browser or platform the user is on, and the product only adds a lock, overlay or trick on top. Name the feature.
+
+K4 Platform fragility: name the single vendor change that would end the idea. "Could be copied" or "APIs may change" is not K4.
+
+K3 Demand reality: no concrete paying segment. For a consumer or local-business product, name who in Turkey pays for this today (a paid product, agency or freelancer fee, or a manual cost it replaces). For a developer or B2B tool sold globally, a named payer anywhere is enough.
+
+Competitors existing is never, by itself, a reason to fail. When you are unsure whether K1 (b) or (c) holds, do not fail on K1.
+
+Return ONLY a JSON object: {"verdict":"pass|fail|unsure","criterion":"K1|K2|K3|K4|none","reason":"..."} — criterion is the ONE that fired, "none" for pass/unsure. reason at most 60 words: for K1 the named products and why they already serve this Turkish buyer; otherwise the angle found.`
+
 // lensDistinctivenessVersion (#164, #166): lensDistinctivenessSystem'in
 // sürümü — v4 metnine geçişle "v1"den "v4"e yükseldi (kalıcı kayıtta
 // prompt_version olarak yazılır).
 const lensDistinctivenessVersion = "v4"
+
+// lensDistinctivenessVersionV6 (#212): lensDistinctivenessSystemV6'nın sürümü
+// (lens_verdicts.prompt_version).
+const lensDistinctivenessVersionV6 = "v6"
+
+// distinctPromptKey, DISTINCTIVENESS_PROMPT sürümünü cfg'den distinctivenessRaw'a
+// taşıyan ctx anahtarıdır (#212): evaluateDistinctiveness/distinctivenessCheck/
+// distinctivenessRaw imzaları (testlerde kullanılıyor) DEĞİŞMEDEN, paket düzeyi
+// değişken olmadan sürüm seçimi. Değer yoksa "v4" (bugünkü davranış).
+type distinctPromptKey struct{}
+
+// withDistinctivenessPrompt, ctx'e özgünlük istem sürümünü ("v4"|"v6") ekler.
+func withDistinctivenessPrompt(ctx context.Context, version string) context.Context {
+	return context.WithValue(ctx, distinctPromptKey{}, version)
+}
+
+// distinctivenessPromptFrom, ctx'teki sürümü döner; "v6" dışındaki her şey "v4".
+func distinctivenessPromptFrom(ctx context.Context) string {
+	if v, _ := ctx.Value(distinctPromptKey{}).(string); v == "v6" {
+		return "v6"
+	}
+	return "v4"
+}
+
+// distinctivenessSystemFor, sürüme göre özgünlük sistem istemini seçer.
+func distinctivenessSystemFor(version string) string {
+	if version == "v6" {
+		return lensDistinctivenessSystemV6
+	}
+	return lensDistinctivenessSystem
+}
+
+// distinctivenessVersionFor, sürüme göre lens_verdicts.prompt_version değeri.
+func distinctivenessVersionFor(version string) string {
+	if version == "v6" {
+		return lensDistinctivenessVersionV6
+	}
+	return lensDistinctivenessVersion
+}
 
 // lensProductizableSystem: ivme tohumlarına özgü 4. mercek (#89 kapı madde
 // 4) — awesome-list, eğitim/kurs, makale/paper, model ağırlığı, saf
@@ -389,6 +450,27 @@ func ideaLensUserPrompt(title, problem, solution, targetUser string) string {
 		title, problem, solution, targetUser)
 }
 
+// seedEvidenceUserPrompt (#212): özgünlük v6'da, YALNIZ source_type ==
+// "market_derived" ve ExampleQuotes doluyken ideaLensUserPrompt çıktısının
+// sonuna tohumun doğrulanmış gelir kanıtını ekler. Diğer tüm durumlarda
+// (v4, pain_point, momentum_derived, boş alıntı) base AYNEN döner.
+func seedEvidenceUserPrompt(base, sourceType string, quotes []string) string {
+	if sourceType != "market_derived" || len(quotes) == 0 {
+		return base
+	}
+	return base + "\nSeed evidence (verified revenue of a product in this market): " + quotes[0]
+}
+
+// distinctivenessUserPrompt, özgünlük çağrısının kullanıcı istemi: v4'te
+// bugünkü ideaLensUserPrompt (byte-byte), v6'da seedEvidenceUserPrompt ile.
+func distinctivenessUserPrompt(version string, idea *store.Idea) string {
+	base := ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser)
+	if version != "v6" {
+		return base
+	}
+	return seedEvidenceUserPrompt(base, idea.SourceType, idea.ExampleQuotes)
+}
+
 // distinctivenessCheck, kart üretildikten SONRA çağrılan özgünlük
 // merceğidir (#101 v3; adı #138 ile "advise"den değişti — artık K1|K2 için
 // bloklayıcı, #166): store.Idea'nın distinctiveness_verdict/criterion/reason
@@ -422,8 +504,10 @@ func distinctivenessCheck(ctx context.Context, chat llm.Chat, idea *store.Idea) 
 // çağrısı YOK.
 func distinctivenessRaw(ctx context.Context, chat llm.Chat, idea *store.Idea) (lensVerdict, error) {
 	// Yargı çağrısı (özgünlük merceği): sıcaklık 0 — tutarlı karar (#106).
-	raw, err := chat.ChatJSONWithTemperature(ctx, lensDistinctivenessSystem,
-		ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), 0)
+	// #212: sürüm ctx'ten (cfg.DistinctivenessPrompt, yalnız tohum yolunda) gelir.
+	ver := distinctivenessPromptFrom(ctx)
+	raw, err := chat.ChatJSONWithTemperature(ctx, distinctivenessSystemFor(ver),
+		distinctivenessUserPrompt(ver, idea), 0)
 	if err != nil {
 		return lensVerdict{}, err
 	}
@@ -642,8 +726,15 @@ func seedCardUserPromptLabeled(s radarSeed, angleLabel string) string {
 		s.Name, s.Summary, s.Evidence, s.SourceURL, angleLabel, s.TRAngle)
 }
 
+// seedCardUserPromptNoAngle (#212, v4): açı (TR angle) satırı OLMADAN tohum
+// kullanıcı istemi — v4 pazarı tohumun kendi kanıtından okur, açı yönlendirmez.
+func seedCardUserPromptNoAngle(s radarSeed) string {
+	return fmt.Sprintf("Seed name: %s\nSummary: %s\nRevenue/traction evidence: %s\nSource: %s",
+		s.Name, s.Summary, s.Evidence, s.SourceURL)
+}
+
 // seedCardPrompts, tohum kartı için (sistem, kullanıcı) istemini seçer (#210):
-// cfg.SeedCardPrompt == "v3" ise YALNIZ gelir tohumunda V3 şablonu + v3 etiketi; aksi halde
+// cfg.SeedCardPrompt == "v3" ise YALNIZ gelir tohumunda V3 şablonu + v3 etiketi, "v4" ise V4 şablonu + açısız kullanıcı istemi (#212); aksi halde
 // (varsayılan) bugünkü v1 yolu, byte-byte aynı.
 func seedCardPrompts(cfg *config.Config, seed radarSeed, isTrending bool, gate trendingGateResult) (system, user string) {
 	// İvme tohumları ölçülmedi (#210): v3'te bile v1 yolunda kalır.
@@ -654,6 +745,11 @@ func seedCardPrompts(cfg *config.Config, seed radarSeed, isTrending bool, gate t
 	if cfg.SeedCardPrompt == "v3" {
 		return fmt.Sprintf(seedCardSystemTmplV3, langName(cfg.OutputLang)),
 			seedCardUserPromptLabeled(seed, seedAngleLabelV3)
+	}
+	// v4 (#212): aynı pazarda kal, boş kesimi yaz; kullanıcı istemi açı satırını taşımaz.
+	if cfg.SeedCardPrompt == "v4" {
+		return fmt.Sprintf(seedCardSystemTmplV4, langName(cfg.OutputLang)),
+			seedCardUserPromptNoAngle(seed)
 	}
 	return fmt.Sprintf(seedCardSystemTmpl, langName(cfg.OutputLang)), seedCardUserPrompt(seed)
 }
@@ -679,6 +775,29 @@ Rules:
 - urgency_score: integer 1-5.
 - monetization_signal: integer 0-5 (this idea already has revenue evidence from the seed — score accordingly, usually 3-5).
 - known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
+
+// seedCardSystemTmplV4 (#212): mekanizmayı başka işe taşımak (v3) tohumun gelir
+// kanıtını taşıdığı pazardan çıkarıyordu; v4 AYNI pazarda (aynı iş + aynı alıcı)
+// boş kesimi yazdırır. SEED_CARD_PROMPT=v4 ile seçilir; v3'e DOKUNULMADI.
+const seedCardSystemTmplV4 = `You generate a concrete software product idea card ("market_derived") from a validated market seed — an existing product with real revenue/traction evidence. The builder sells GLOBALLY.
+
+STAY IN THE SEED'S MARKET AND WIN A SLICE OF IT — DO NOT COPY THE PRODUCT AND DO NOT LEAVE THE MARKET. The seed's revenue proves that buyers in this market pay today and that a small, recent product can still win there, even if many competitors exist. First name, to yourself, the seed's market: the job it does and the buyer who pays. Then build a DIFFERENT product for the SAME job and the SAME kind of buyer that wins a slice the seed and the market leaders serve badly: a specific underserved buyer segment (by size, industry, role, regulation or workflow), a painful step they still leave manual, or a concrete weakness their users complain about. Name that slice explicitly in the problem statement. Do NOT move to a different job or buyer — a guitar-tone tool turned into a coffee-recipe tool throws away the evidence. Do NOT propose the same product for another country, language or local market — "the seed, but in country X / in language Y / with local payments" is a copy and is not acceptable.
+
+Read the seed angle you receive and decide which case it is:
+(1) The angle names specific local systems, institutions or rules that need real technical work to serve (for example specific accounting/ERP products, a national e-invoice or tax system, a government portal). Then the hard local integration IS the slice: KEEP the angle's target and build exactly that idea well, even if a similar product exists in another country.
+(2) Otherwise, find the slice inside the seed's market yourself. The angle may suggest moving the mechanism to another field, job, sport, device or industry, or naming a country or language — IGNORE those suggestions: they throw away the seed's revenue evidence. Use the angle only as context about why the seed wins.
+
+CRITICAL CONSTRAINT: Propose a realistic, grounded, SOFTWARE-heavy idea that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months.
+
+Return ONLY a JSON object:
+{"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
+
+Rules:
+- title, problem_statement, proposed_solution, target_user MUST be written in %s.
+- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated). Never translate tags.
+- urgency_score: integer 1-5.
+- monetization_signal: integer 0-5 (this idea already has revenue evidence from the seed — score accordingly, usually 3-5).
+- known_competitors_ai_guess: name the seed and the leaders of this market and the slice they leave open, phrased as an unverified AI guess; empty string if you have none.`
 
 // seedMomentumCardSystemTmplV3 (#210): seedCardSystemTmplV3'ün ivme varyantı —
 // gelirden yalnız üç yerde ayrılır (ilk paragraf, "adopt it", monetization satırı).
@@ -956,7 +1075,13 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 		// subject="card" (#164): özgünlük kart üretildikten SONRA, kart
 		// alanları üzerinde çalışır — evaluateDistinctiveness bunu kendi
 		// içinde Subject="card" ile kaydeder.
-		distinctOutcome := evaluateDistinctiveness(ctx, chat, &idea, distinctVotes, distinctChat...)
+		// #212: DISTINCTIVENESS_PROMPT=v6 YALNIZ gelir (market_derived) tohum
+		// kartında uygulanır; ivme tohumu ve organik yol v4'te kalır (byte-byte).
+		distinctCtx := ctx
+		if !isTrending {
+			distinctCtx = withDistinctivenessPrompt(ctx, cfg.DistinctivenessPrompt)
+		}
+		distinctOutcome := evaluateDistinctiveness(distinctCtx, chat, &idea, distinctVotes, distinctChat...)
 		allVerdicts = append(allVerdicts, distinctOutcome.Verdicts...)
 		if distinctOutcome.Err != nil {
 			log.Printf("seeds: %q özgünlük merceği HATA: %v — kart yine de yazılıyor (alanlar boş)", seed.Name, distinctOutcome.Err)

@@ -145,6 +145,13 @@ type LensABOptions struct {
 	// market_viability, "all") HATA döner (bkz. RunLensAB başı) — bir oylama
 	// kararı yalnız bu iki mercek için tanımlıdır.
 	Votes int
+	// SeedEvidence (#212, "--seed-evidence"): yalnız distinctiveness için —
+	// idea satırlarının kullanıcı istemi üretimdeki v6 yoluyla
+	// (distinctivenessUserPrompt) kurulur: market_derived + dolu example_quotes
+	// ise ilk alıntı "Seed evidence" satırı olarak eklenir. Kapalıyken
+	// (varsayılan) kullanıcı istemi bugünküyle BİREBİR aynı. Elimination
+	// satırlarına uygulanmaz (kaynak türü/alıntı taşımazlar).
+	SeedEvidence bool
 	// ExistingRows: --resume'da VAR OLAN CSV'den okunmuş eski satırlar —
 	// bu koşuda YENİDEN ÜRETİLMEZ (SkipKeys zaten engeller), yalnız
 	// Summaries hesabına eski+yeni BİRLİKTE girsin diye taşınır (LensABResult.
@@ -317,6 +324,11 @@ func RunLensAB(ctx context.Context, st *store.Store, chat llm.Chat, set []Golden
 		return LensABResult{}, fmt.Errorf("lens-ab: --prompt v1|v3 olmalı, geldi: %q", opts.PromptVersion)
 	}
 
+	// SeedEvidence (#212): yalnız --lens=distinctiveness ile anlamlı.
+	if opts.SeedEvidence && lensFilter != "distinctiveness" {
+		return LensABResult{}, fmt.Errorf("lens-ab: --seed-evidence yalnız --lens=distinctiveness ile kullanılabilir (geldi: --lens=%q)", lensFilter)
+	}
+
 	// Votes (#181, #197): bir oylama kararı yalnız özgünlük ve üçüncü-taraf
 	// mercekleri için tanımlıdır (lensVoteBlock) — >1 iken bunların DIŞINDA
 	// (özellikle "all") net hata döner, sessizce yok sayılmaz. <=1 BUGÜNKÜ
@@ -407,7 +419,7 @@ outer:
 			system = def.v3
 		}
 
-		userPrompt, err := lensABUserPrompt(ctx, st, gc)
+		userPrompt, err := lensABUserPrompt(ctx, st, gc, opts.SeedEvidence)
 		if err != nil {
 			// Girdi (DB) hatası: LLM'e hiç gidilmeden, henüz tamamlanmamış
 			// HER koşu için bir "error" satırı yazılır, sonraki çifte
@@ -600,12 +612,16 @@ func voteLensABRow(ctx, callCtx context.Context, activeChat llm.Chat, system, us
 // aynı şablon — subject eliminations.subject'e (title yerine), detail
 // eliminations.detail'e (problem yerine) yazılır; solution/target_user boş
 // (eliminations bu alanları taşımaz).
-func lensABUserPrompt(ctx context.Context, st *store.Store, gc GoldenCase) (string, error) {
+func lensABUserPrompt(ctx context.Context, st *store.Store, gc GoldenCase, seedEvidence bool) (string, error) {
 	switch gc.Kind {
 	case "idea":
 		idea, err := st.GetIdeaForAudit(ctx, gc.ID)
 		if err != nil {
 			return "", err
+		}
+		if seedEvidence {
+			// #212: üretimdeki v6 kullanıcı istemiyle AYNI fonksiyon.
+			return distinctivenessUserPrompt("v6", idea), nil
 		}
 		return ideaLensUserPrompt(idea.Title, idea.ProblemStatement, idea.ProposedSolution, idea.TargetUser), nil
 	case "elimination":

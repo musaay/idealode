@@ -65,7 +65,13 @@ type Config struct {
 	// Kurallar ThirdPartyPrompt'la AYNI: boş/geçersiz -> "v1" (geçersizde log
 	// uyarısı) — VARSAYILAN v1: merge sonrası istemler BUGÜNKÜYLE BİREBİR aynı
 	// kalır; lead ölçümden sonra Railway'de v3'e geçirir.
-	SeedCardPrompt string // SEED_CARD_PROMPT (default: v1; "v1"|"v3")
+	SeedCardPrompt string // SEED_CARD_PROMPT (default: v1; "v1"|"v3"|"v4" — v4: #212)
+
+	// DistinctivenessPrompt (#212): özgünlük merceğinin sistem istemi sürümü —
+	// "v4" (canlı, varsayılan) ya da "v6" (K1 büyüme istisnası, aday; yalnız
+	// gelir tohumu yolunda uygulanır). Geçersiz değer -> "v4" + log uyarısı.
+	// ("v5" #209'da reddedilen metne ait — kabul EDİLMEZ.)
+	DistinctivenessPrompt string // DISTINCTIVENESS_PROMPT (default: v4; "v4"|"v6")
 
 	// DataAccessPrompt (#168): veri-erişimi merceğinin sistem prompt'u — "v1"
 	// (canlı) ya da "v3" (lensDataAccessSystemV3). Kurallar ThirdPartyPrompt'la
@@ -142,7 +148,8 @@ func Load() (*Config, error) {
 	c.DistinctivenessVotes = loadDistinctivenessVotes()
 	c.ThirdPartyPrompt = loadPromptVersion("THIRD_PARTY_PROMPT")
 	c.DataAccessPrompt = loadPromptVersion("DATA_ACCESS_PROMPT")
-	c.SeedCardPrompt = loadPromptVersion("SEED_CARD_PROMPT")
+	c.SeedCardPrompt = loadPromptVersionOf("SEED_CARD_PROMPT", "v1", "v1", "v3", "v4")
+	c.DistinctivenessPrompt = loadPromptVersionOf("DISTINCTIVENESS_PROMPT", "v4", "v4", "v6")
 	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
@@ -239,16 +246,26 @@ func loadVotesEnv(key string) int {
 // getenvInt'in aksine Load()'u DÜŞÜRMEZ: bu bir "özellik anahtarı", zorunlu
 // bağlantı bilgisi değil.
 func loadPromptVersion(envName string) string {
+	return loadPromptVersionOf(envName, "v1", "v1", "v3")
+}
+
+// loadPromptVersionOf (#212), loadPromptVersion'ın izinli-değer listeli genel
+// hâli: boş -> def (sessiz), allowed içindeyse kendisi, başka her değer -> def +
+// log uyarısı. THIRD_PARTY/DATA_ACCESS loadPromptVersion ile v1|v3'te kalır
+// (v4/v6 REDDEDİLİR); yalnız SEED_CARD_PROMPT ve DISTINCTIVENESS_PROMPT kendi
+// listesini geçer.
+func loadPromptVersionOf(envName, def string, allowed ...string) string {
 	v := strings.TrimSpace(os.Getenv(envName))
-	switch v {
-	case "":
-		return "v1"
-	case "v1", "v3":
-		return v
-	default:
-		log.Printf("config: %s geçersiz (%q), v1 kullanılıyor — geçerli değerler: v1, v3", envName, v)
-		return "v1"
+	if v == "" {
+		return def
 	}
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	log.Printf("config: %s geçersiz (%q), %s kullanılıyor — geçerli değerler: %s", envName, v, def, strings.Join(allowed, ", "))
+	return def
 }
 
 // loadBlendEnabled, BLEND_ENABLED'ı okur (#186): "true"/"1"/"yes" (büyük/
