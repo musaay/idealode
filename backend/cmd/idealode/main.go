@@ -598,8 +598,12 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	rateRetries := fs.Int("rate-retries", 5, "oran sınırı sonrası yeniden deneme sayısı")
 	resume := fs.Bool("resume", false, "var olan --out CSV'sini tamamla (hatasız satırlar tekrar çağrılmaz)")
 	votes := fs.Int("votes", 1, "mercek oylama sayısı (#181/#197, yalnız --lens=distinctiveness ya da --lens=third_party ile >1)")
+	seedEvidence := fs.Bool("seed-evidence", false, "özgünlük idea satırlarına tohum gelir kanıtı satırını ekle (#212; yalnız --lens=distinctiveness)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
+	}
+	if *seedEvidence && *lens != "distinctiveness" {
+		return fmt.Errorf("--seed-evidence yalnız --lens=distinctiveness ile kullanılabilir")
 	}
 	if strings.TrimSpace(*setPath) == "" {
 		return fmt.Errorf("--set zorunlu")
@@ -712,6 +716,7 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 		RateWait:       time.Duration(*rateWaitSec) * time.Second,
 		RateRetries:    *rateRetries,
 		Votes:          *votes,
+		SeedEvidence:   *seedEvidence,
 		ExistingRows:   existingRows,
 		SkipKeys:       skipKeys,
 		OnRow: func(r pipeline.LensABRow) error {

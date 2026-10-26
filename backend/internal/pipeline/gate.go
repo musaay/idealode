@@ -406,7 +406,7 @@ func evaluateDistinctiveness(ctx context.Context, chat llm.Chat, idea *store.Ide
 	decision, voteRecords := voteDistinctiveness(ctx, n, call)
 
 	recorded := lensVoteVerdicts(
-		seedLens{name: lensName, version: lensDistinctivenessVersion}, "card", n, voteRecords)
+		seedLens{name: lensName, version: distinctivenessVersionFor(distinctivenessPromptFrom(ctx))}, "card", n, voteRecords)
 
 	if decision.Err != nil {
 		return gateOutcome{Err: decision.Err, Verdicts: recorded}
