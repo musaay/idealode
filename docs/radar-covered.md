@@ -144,3 +144,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Floga / PlayPauseBe (Umberto Mezzadra) — yoga kart destesi markasından (PlayPauseBe) doğan, app store komisyonunu bypass etmek için web billing ile satılan yoga alışkanlık uygulaması, ~$10K/ay (~4000 kullanıcı), lifetime deal lansmanında 24 saatte $120K+ (2026-10-27)
 - Boothie (Keremcan Şeker) — selfie'den AI retro fotokabin görseli üreten tek kişilik iOS uygulaması, TrustMRR $52,938 MRR (2026-10-29)
 - Vugola — uzun-format videoyu AI ile kısa klip+altyazıya çeviren araç, 19 yaşında tek kurucu, $11,200 MRR / 400 ödeyen kullanıcı (2026-10-29)
+- ChatSEO (Paul Vengeons) — Google Search Console verisini grafik yerine sohbet tabanlı aksiyon planına çeviren AI SEO asistanı, €14K MRR / 5 ayda €70K toplam gelir, reklamsız bootstrap (2026-10-30)
+- Excel Exercises (Jake) — video değil tarayıcı-içi uygulamalı alıştırmalarla Excel öğreten freemium eğitim sitesi, $30-35K/ay, ~2.500 ödeyen abone (2026-10-30)
