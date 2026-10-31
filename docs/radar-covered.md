@@ -146,3 +146,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Vugola — uzun-format videoyu AI ile kısa klip+altyazıya çeviren araç, 19 yaşında tek kurucu, $11,200 MRR / 400 ödeyen kullanıcı (2026-10-29)
 - ChatSEO (Paul Vengeons) — Google Search Console verisini grafik yerine sohbet tabanlı aksiyon planına çeviren AI SEO asistanı, €14K MRR / 5 ayda €70K toplam gelir, reklamsız bootstrap (2026-10-30)
 - Excel Exercises (Jake) — video değil tarayıcı-içi uygulamalı alıştırmalarla Excel öğreten freemium eğitim sitesi, $30-35K/ay, ~2.500 ödeyen abone (2026-10-30)
+- AbMaxx (Lino) — AI karın fotoğrafı taramasıyla kişiselleştirilmiş antrenman planı sunan fitness uygulaması, TrustMRR doğrulamalı $20.4K MRR (2026-10-31)
+- GojiberryAI (romàn czerny) — B2B satış ekipleri için yüksek niyetli potansiyel müşteri bulan AI GTM/outreach ajanı platformu, TrustMRR doğrulamalı $424K MRR (2026-10-31)
