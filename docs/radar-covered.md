@@ -148,3 +148,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Excel Exercises (Jake) — video değil tarayıcı-içi uygulamalı alıştırmalarla Excel öğreten freemium eğitim sitesi, $30-35K/ay, ~2.500 ödeyen abone (2026-10-30)
 - AbMaxx (Lino) — AI karın fotoğrafı taramasıyla kişiselleştirilmiş antrenman planı sunan fitness uygulaması, TrustMRR doğrulamalı $20.4K MRR (2026-10-31)
 - GojiberryAI (romàn czerny) — B2B satış ekipleri için yüksek niyetli potansiyel müşteri bulan AI GTM/outreach ajanı platformu, TrustMRR doğrulamalı $424K MRR (2026-10-31)
+- Postiz (Nevo David) — açık kaynak sosyal medya paylaşım/otomasyon platformu, insan kullanıcıdan AI ajanlarına satışa yeniden konumlanarak büyüyen tek-kişilik şirket, $145K MRR (2026-11-01)
+- Virlo (Nic Mauro) — TikTok/Reels/Shorts için ajanslara yönelik trend-istihbaratı ve rakip izleme aracı, kendi veri toplama altyapısını kurarak büyüyen, $31K MRR / %35 aylık büyüme (2026-11-01)
