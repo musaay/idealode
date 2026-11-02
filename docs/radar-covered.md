@@ -150,3 +150,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - GojiberryAI (romàn czerny) — B2B satış ekipleri için yüksek niyetli potansiyel müşteri bulan AI GTM/outreach ajanı platformu, TrustMRR doğrulamalı $424K MRR (2026-10-31)
 - Postiz (Nevo David) — açık kaynak sosyal medya paylaşım/otomasyon platformu, insan kullanıcıdan AI ajanlarına satışa yeniden konumlanarak büyüyen tek-kişilik şirket, $145K MRR (2026-11-01)
 - Virlo (Nic Mauro) — TikTok/Reels/Shorts için ajanslara yönelik trend-istihbaratı ve rakip izleme aracı, kendi veri toplama altyapısını kurarak büyüyen, $31K MRR / %35 aylık büyüme (2026-11-01)
+- Local SEO Rank Coach (Flippa ilanı) — local SEO ajansları için Google Haritalar sıralama takibi + AI aksiyon önerisi sunan SaaS, $209.561 ARR / $22.250 MRR (2026-11-02)
+- Hex (anomalyco/hex) — Mac/Windows/Linux için cihaz-içi (offline) sesli dikte uygulaması, ★3.6K, ivme (2026-11-02)
