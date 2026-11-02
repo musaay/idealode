@@ -1037,10 +1037,11 @@ type CompetitorABStore interface {
 }
 
 // RunCompetitorAB (`lens-ab --lens competitor`): set'teki idea id'leri için
-// runCompetitorCheck'i runs kez çalıştırır; satır başına
+// runCompetitorCheck'i (v2: koşu başına N arama + birleşim) runs kez çalıştırır;
+// satır kart×koşu başına, tokens N aramanın toplamı; satır başına
 // "id,run,verdict,doğrulanmış_sayısı,doğrulanamayan_sayısı,tokens" CSV yazar.
 // DB'ye YAZMAZ (yalnız kartı okur). systemPrompt boşsa canlı istem.
-func RunCompetitorAB(ctx context.Context, st CompetitorABStore, chat llm.Chat, set []GoldenCase, runs int, systemPrompt string, w io.Writer) error {
+func RunCompetitorAB(ctx context.Context, st CompetitorABStore, chat llm.Chat, set []GoldenCase, runs, searches int, systemPrompt string, w io.Writer) error {
 	if runs < 1 {
 		runs = 1
 	}
@@ -1056,7 +1057,7 @@ func RunCompetitorAB(ctx context.Context, st CompetitorABStore, chat llm.Chat, s
 		}
 		for run := 1; run <= runs; run++ {
 			meter := llm.NewUsageMeter()
-			v, ok, bad := runCompetitorCheckCounts(llm.WithMeter(ctx, meter), chat, idea, competitorOpts{System: systemPrompt})
+			v, ok, bad := runCompetitorCheckCounts(llm.WithMeter(ctx, meter), chat, idea, competitorOpts{System: systemPrompt, Searches: searches})
 			tokens := meter.Snapshot()["competitor"].TotalTokens
 			if err := cw.Write([]string{strconv.FormatInt(gc.ID, 10), strconv.Itoa(run), v.Verdict,
 				strconv.Itoa(ok), strconv.Itoa(bad), strconv.Itoa(tokens)}); err != nil {

@@ -796,7 +796,7 @@ func cmdLensABCompetitor(ctx context.Context, cfg *config.Config, setPath, promp
 		defer f.Close()
 		out = f
 	}
-	return pipeline.RunCompetitorAB(ctx, st, chat, set, runs, system, out)
+	return pipeline.RunCompetitorAB(ctx, st, chat, set, runs, cfg.CompetitorSearches, system, out)
 }
 
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
