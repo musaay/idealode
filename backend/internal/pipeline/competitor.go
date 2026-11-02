@@ -29,13 +29,16 @@ import (
 
 const (
 	competitorLensName    = "rakip-kontrolü"
-	competitorLensVersion = "v1"
+	competitorLensVersion = "v2"
 
 	// competitorMaxVerify, tek kartta doğrulanacak en fazla rakip sayısı
 	// (model uzun liste uydurursa süre/istek patlamasın).
 	competitorMaxVerify = 8
 	competitorMaxBody   = 512 << 10
 	competitorMaxReason = 1000
+
+	// competitorDefaultSearches: kart başına varsayılan arama sayısı (v2 oylaması).
+	competitorDefaultSearches = 3
 )
 
 // competitorSystemPrompt, rakip kontrolü sistem istemi (spec #212 adım 3, birebir).
@@ -245,7 +248,8 @@ func verifyCompetitor(ctx context.Context, v competitorVerifier, c competitorEnt
 type competitorOpts struct {
 	System   string // boşsa competitorSystemPrompt (lens-ab --prompt-file)
 	Verifier *competitorVerifier
-	Timeout  time.Duration // LLM çağrısı zaman aşımı; 0 -> 3 dk
+	Timeout  time.Duration // HER arama çağrısının zaman aşımı; 0 -> 3 dk
+	Searches int           // kart başına arama sayısı; <1 -> 3, >5 -> 5
 }
 
 // runCompetitorCheck, kart için rakip kontrolünü çalıştırır. Asla kartı
@@ -259,7 +263,9 @@ func runCompetitorCheckWith(ctx context.Context, chat llm.Chat, idea *store.Idea
 	return v
 }
 
-// runCompetitorCheckCounts, verdict'e ek olarak doğrulanmış/doğrulanamayan
+// runCompetitorCheckCounts (v2): kart başına opts.Searches sıralı arama, adaylar
+// ad bazında birleşir, birleşikten en çok competitorMaxVerify rakip doğrulanır;
+// doğrulanmış >=2 -> fail. Hepsi hata -> error. verdict'e ek olarak doğrulanmış/doğrulanamayan
 // rakip sayılarını da döner (lens-ab CSV'si için).
 func runCompetitorCheckCounts(ctx context.Context, chat llm.Chat, idea *store.Idea, opts competitorOpts) (store.LensVerdict, int, int) {
 	v := store.LensVerdict{
@@ -284,36 +290,74 @@ func runCompetitorCheckCounts(ctx context.Context, chat llm.Chat, idea *store.Id
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
 	}
-	callCtx, cancel := context.WithTimeout(llm.WithStage(ctx, "competitor"), timeout)
-	defer cancel()
-	raw, err := sc.ChatWithBrowserSearch(callCtx, system, competitorUserPrompt(idea))
-	if err != nil {
-		v.Verdict, v.Reason = "error", truncateRunes("LLM hatası: "+err.Error(), 300)
+	searches := opts.Searches
+	if searches < 1 {
+		searches = competitorDefaultSearches
+	}
+	if searches > 5 {
+		searches = 5
+	}
+
+	// Aramalar SIRALI (Groq TPM sınırı); her biri kendi zaman aşımıyla.
+	// Adaylar ad bazında (büyük/küçük harf duyarsız) birleştirilir.
+	var cands []competitorEntry
+	candSeen := map[string]bool{}
+	slice, lastErr := "", ""
+	okSearches := 0
+	for i := 0; i < searches; i++ {
+		if ctx.Err() != nil {
+			lastErr = "bağlam iptal: " + ctx.Err().Error()
+			break
+		}
+		callCtx, cancel := context.WithTimeout(llm.WithStage(ctx, "competitor"), timeout)
+		raw, err := sc.ChatWithBrowserSearch(callCtx, system, competitorUserPrompt(idea))
+		cancel()
+		if err != nil {
+			lastErr = "LLM hatası: " + err.Error()
+			log.Printf("competitor: %q arama %d/%d hata: %v", idea.Title, i+1, searches, err)
+			continue
+		}
+		ans := parseCompetitorAnswer(raw)
+		if ans.Verdict == "error" {
+			lastErr = fmt.Sprintf("LLM yanıtı ayrıştırılamadı: %.120s", raw)
+			log.Printf("competitor: %q arama %d/%d yanıt ayrıştırılamadı", idea.Title, i+1, searches)
+			continue
+		}
+		okSearches++
+		if slice == "" {
+			slice = strings.TrimSpace(ans.Slice)
+		}
+		log.Printf("competitor: %q arama %d/%d LLM verdict=%s, %d aday rakip", idea.Title, i+1, searches, ans.Verdict, len(ans.Competitors))
+		for _, c := range ans.Competitors {
+			key := strings.ToLower(strings.TrimSpace(c.Name))
+			if key == "" || candSeen[key] {
+				continue
+			}
+			candSeen[key] = true
+			cands = append(cands, c)
+		}
+	}
+	if okSearches == 0 {
+		v.Verdict, v.Reason = "error", truncateRunes(fmt.Sprintf("aramalar: 0/%d başarılı | %s", searches, lastErr), 300)
 		return v, 0, 0
 	}
-	ans := parseCompetitorAnswer(raw)
-	if ans.Verdict == "error" {
-		v.Verdict, v.Reason = "error", truncateRunes(fmt.Sprintf("LLM yanıtı ayrıştırılamadı: %.120s", raw), 300)
-		return v, 0, 0
-	}
-	log.Printf("competitor: %q LLM verdict=%s, %d aday rakip", idea.Title, ans.Verdict, len(ans.Competitors))
 
 	verifier := newCompetitorVerifier()
 	if opts.Verifier != nil {
 		verifier = *opts.Verifier
 	}
 	var okList, badList []string
-	seen := map[string]bool{}
-	for _, c := range ans.Competitors {
-		name := strings.TrimSpace(c.Name)
-		key := strings.ToLower(name)
-		if name == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		if len(seen) > competitorMaxVerify {
+	seenURL := map[string]bool{}
+	for n, c := range cands {
+		if n >= competitorMaxVerify {
 			break
 		}
+		name := strings.TrimSpace(c.Name)
+		u := strings.ToLower(strings.TrimSpace(c.URL))
+		if u != "" && seenURL[u] { // aynı URL iki kez doğrulanmaz
+			continue
+		}
+		seenURL[u] = true
 		if verifyCompetitor(ctx, verifier, c) {
 			okList = append(okList, fmt.Sprintf("%s (%s)", name, strings.TrimSpace(c.URL)))
 		} else {
@@ -331,8 +375,8 @@ func runCompetitorCheckCounts(ctx context.Context, chat llm.Chat, idea *store.Id
 		}
 		return strings.Join(l, sep)
 	}
-	v.Reason = truncateRunes(fmt.Sprintf("slice: %s | doğrulanmış: %s | doğrulanamayan: %s",
-		strings.TrimSpace(ans.Slice), join(okList, "; "), join(badList, ", ")), competitorMaxReason)
+	v.Reason = truncateRunes(fmt.Sprintf("slice: %s | doğrulanmış: %s | doğrulanamayan: %s | aramalar: %d/%d başarılı",
+		slice, join(okList, "; "), join(badList, ", "), okSearches, searches), competitorMaxReason)
 	return v, len(okList), len(badList)
 }
 
@@ -370,7 +414,7 @@ func applyCompetitorFlag(ctx context.Context, cfg *config.Config, chat llm.Chat,
 	if c, ok := ctx.Value(competitorChatKey{}).(llm.Chat); ok && c != nil {
 		cc = c
 	}
-	v := runCompetitorCheck(ctx, cc, idea)
+	v := runCompetitorCheckWith(ctx, cc, idea, competitorOpts{Searches: cfg.CompetitorSearches})
 	idea.LensVerdicts = append(idea.LensVerdicts, v)
 	log.Printf("competitor: %q -> %s: %s", idea.Title, v.Verdict, v.Reason)
 }

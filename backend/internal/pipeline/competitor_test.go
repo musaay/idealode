@@ -133,7 +133,7 @@ func TestRunCompetitorCheck(t *testing.T) {
 	two := fmt.Sprintf(`{"slice":"kids kits","competitors":[{"name":"KiwiCo","url":"%s/ok","overlap":"a"},{"name":"MEL Science","url":"%s/ok2","overlap":"b"},{"name":"SonoRev","url":"%s/gone","overlap":"c"}],"verdict":"GAP_TAKEN"}`, srv.URL, srv.URL, srv.URL)
 	f := &fakeSearchChat{answer: "Sonuç:\n" + two + "\nbitti"}
 	v := runCompetitorCheckWith(ctx, f, testIdea(), opts)
-	if v.Verdict != "fail" || v.Lens != competitorLensName || v.PromptVersion != "v1" || v.Subject != "card" || v.Model != "fake-search" {
+	if v.Verdict != "fail" || v.Lens != competitorLensName || v.PromptVersion != "v2" || v.Subject != "card" || v.Model != "fake-search" {
 		t.Errorf("fail beklenirdi: %+v", v)
 	}
 	if !strings.Contains(v.Reason, "doğrulanmış: KiwiCo ("+srv.URL+"/ok); MEL Science") || !strings.Contains(v.Reason, "doğrulanamayan: SonoRev") || !strings.HasPrefix(v.Reason, "slice: kids kits |") {
@@ -174,7 +174,7 @@ func TestApplyCompetitorFlag(t *testing.T) {
 
 	on := testIdea()
 	applyCompetitorFlag(ctx, &config.Config{CompetitorCheck: true}, f, on)
-	if f.searchCalls.Load() != 1 || len(on.LensVerdicts) != 1 || on.LensVerdicts[0].Lens != "rakip-kontrolü" || on.LensVerdicts[0].Verdict != "pass" {
+	if f.searchCalls.Load() != 3 || len(on.LensVerdicts) != 1 || on.LensVerdicts[0].Lens != "rakip-kontrolü" || on.LensVerdicts[0].Verdict != "pass" {
 		t.Errorf("açıkken pass verdict beklenirdi: %+v", on.LensVerdicts)
 	}
 
@@ -188,7 +188,7 @@ func TestApplyCompetitorFlag(t *testing.T) {
 	sc := &fakeSearchChat{answer: `{"slice":"s","competitors":[]}`}
 	viaCtx := testIdea()
 	applyCompetitorFlag(WithCompetitorChat(ctx, sc), &config.Config{CompetitorCheck: true}, &fakeChat{}, viaCtx)
-	if sc.searchCalls.Load() != 1 || viaCtx.LensVerdicts[0].Verdict != "pass" {
+	if sc.searchCalls.Load() != 3 || viaCtx.LensVerdicts[0].Verdict != "pass" {
 		t.Errorf("ctx istemcisi kullanılmalı: %+v", viaCtx.LensVerdicts)
 	}
 }

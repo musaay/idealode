@@ -79,6 +79,9 @@ type Config struct {
 	// gpt-oss-20b/120b'de çalışır; istemci LLM_BASE_URL + LLM_API_KEY ile kurulur.
 	CompetitorCheck bool   // COMPETITOR_CHECK (default: off; "on"|"off")
 	CompetitorModel string // COMPETITOR_CHECK_MODEL (default: openai/gpt-oss-120b)
+	// CompetitorSearches (v2): kart başına sıralı arama sayısı, 1..5; boş -> 3,
+	// geçersiz -> 3 + log uyarısı (Load'u düşürmez).
+	CompetitorSearches int // COMPETITOR_SEARCHES (default: 3)
 
 	// DataAccessPrompt (#168): veri-erişimi merceğinin sistem prompt'u — "v1"
 	// (canlı) ya da "v3" (lensDataAccessSystemV3). Kurallar ThirdPartyPrompt'la
@@ -162,6 +165,7 @@ func Load() (*Config, error) {
 	if c.CompetitorModel == "" {
 		c.CompetitorModel = "openai/gpt-oss-120b"
 	}
+	c.CompetitorSearches = loadCompetitorSearches()
 	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
@@ -224,6 +228,21 @@ func loadPreferPaymentSignal() (bool, error) {
 // için bkz. loadVotesEnv.
 func loadDistinctivenessVotes() int {
 	return loadVotesEnv("DISTINCTIVENESS_VOTES")
+}
+
+// loadCompetitorSearches, COMPETITOR_SEARCHES'i okur: boş -> 3; sayı değil ya
+// da 1..5 dışı -> 3 + log uyarısı.
+func loadCompetitorSearches() int {
+	v := strings.TrimSpace(os.Getenv("COMPETITOR_SEARCHES"))
+	if v == "" {
+		return 3
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 5 {
+		log.Printf("config: COMPETITOR_SEARCHES=%q geçersiz (1..5), 3 kullanılıyor", v)
+		return 3
+	}
+	return n
 }
 
 // loadThirdPartyVotes, THIRD_PARTY_VOTES'u okur (#197) — DISTINCTIVENESS_VOTES
