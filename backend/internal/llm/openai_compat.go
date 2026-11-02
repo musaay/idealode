@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,10 @@ type chatRequest struct {
 	Messages       []chatMessage `json:"messages"`
 	Temperature    float64       `json:"temperature"`
 	ResponseFormat *respFormat   `json:"response_format,omitempty"`
+	// Tools ve ReasoningEffort opsiyoneldir (#212 adım 3): boşken JSON'a
+	// girmez, mevcut çağrıların payload'ı byte-byte aynı kalır.
+	Tools           []map[string]string `json:"tools,omitempty"`
+	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {
@@ -120,7 +125,46 @@ func (c *OpenAICompatClient) ChatJSONWithTemperature(ctx context.Context, system
 	if err != nil {
 		return "", err
 	}
+	return c.postWithRetry(ctx, payload)
+}
 
+// SearchChat, internet aramalı (browser_search aracı) sohbet için opsiyonel
+// arayüzdür (#212 adım 3) — NamedChat gibi type assertion ile kullanılır.
+type SearchChat interface {
+	ChatWithBrowserSearch(ctx context.Context, system, user string) (string, error)
+}
+
+// citationRe, browser_search cevabına karışan 【...】 atıf işaretleridir.
+var citationRe = regexp.MustCompile(`【[^】]*】`)
+
+// ChatWithBrowserSearch, modelin browser_search aracıyla internette arama
+// yapabildiği tek tur sohbettir (sıcaklık 0, reasoning_effort=low).
+// response_format BİLEREK gönderilmez (araçla çakışabilir); cevaptaki atıf
+// işaretleri silinir.
+func (c *OpenAICompatClient) ChatWithBrowserSearch(ctx context.Context, system, user string) (string, error) {
+	payload, err := json.Marshal(chatRequest{
+		Model: c.Model,
+		Messages: []chatMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
+		},
+		Temperature:     0,
+		Tools:           []map[string]string{{"type": "browser_search"}},
+		ReasoningEffort: "low",
+	})
+	if err != nil {
+		return "", err
+	}
+	out, err := c.postWithRetry(ctx, payload)
+	if err != nil {
+		return "", err
+	}
+	return citationRe.ReplaceAllString(out, ""), nil
+}
+
+// postWithRetry, hazır payload'ı retry/backoff/usage yoluyla gönderir
+// (ChatJSONWithTemperature ile ChatWithBrowserSearch ortak gövdesi).
+func (c *OpenAICompatClient) postWithRetry(ctx context.Context, payload []byte) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {

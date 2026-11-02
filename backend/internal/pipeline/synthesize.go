@@ -448,6 +448,9 @@ func SynthesizeIdeas(ctx context.Context, cfg *config.Config, st *store.Store, c
 			continue
 		}
 
+		// Rakip kontrolü (#212 adım 3): BAYRAK, bloklamaz; dedup SONRASI.
+		applyCompetitorFlag(ctx, cfg, chat, &idea)
+
 		if _, err := st.InsertIdea(ctx, idea); err != nil {
 			return created, err
 		}

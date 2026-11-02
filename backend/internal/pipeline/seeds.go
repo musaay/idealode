@@ -1122,6 +1122,10 @@ func ProcessSeeds(ctx context.Context, cfg *config.Config, st *store.Store, chat
 			continue
 		}
 
+		// Rakip kontrolü (#212 adım 3): BAYRAK, bloklamaz; dedup SONRASI ki
+		// mükerrer karta arama çağrısı harcanmasın. Kapalıyken no-op.
+		applyCompetitorFlag(ctx, cfg, chat, &idea)
+
 		// Sıra önemli: ÖNCE InsertIdea (asıl değerli iş), SONRA markProcessed.
 		// Tersi olsaydı InsertIdea hata verdiğinde tohum mark'lanmış ama
 		// kartsız kalır (kalıcı kayıp). markProcessed InsertIdea'dan SONRA

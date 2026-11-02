@@ -403,6 +403,18 @@ func newDistinctChat(cfg *config.Config) llm.Chat {
 	return llm.NewOpenAICompat(cfg.DistinctivenessLLMBaseURL, cfg.DistinctivenessLLMAPIKey, cfg.DistinctivenessLLMModel)
 }
 
+// newCompetitorChat, rakip kontrolü (#212 adım 3) için AYRI istemci kurar:
+// LLM_BASE_URL + LLM_API_KEY ile, ama model cfg.CompetitorModel (browser_search
+// yalnız Groq'ta gpt-oss-20b/120b'de çalışır). COMPETITOR_CHECK kapalıysa nil
+// döner — mevcut istemcilere dokunulmaz.
+func newCompetitorChat(cfg *config.Config) llm.Chat {
+	if !cfg.CompetitorCheck {
+		return nil
+	}
+	log.Printf("rakip kontrolü: açık (bayrak, bloklamaz) model=%s (%s)", cfg.CompetitorModel, hostOf(cfg.LLMBaseURL))
+	return llm.NewOpenAICompat(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.CompetitorModel)
+}
+
 // logDistinctivenessLens, koşu başında özgünlük merceğinin hangi model/host
 // üzerinden çalışacağını loglar (#166) — cmdSynthesize/cmdSeeds başında bir
 // kez çağrılır (run komutu ikisini de sırayla çalıştırdığından iki kez
@@ -602,6 +614,9 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
+	if *lens == "competitor" {
+		return cmdLensABCompetitor(ctx, cfg, *setPath, *promptFile, *outPath, *runs)
+	}
 	if *seedEvidence && *lens != "distinctiveness" {
 		return fmt.Errorf("--seed-evidence yalnız --lens=distinctiveness ile kullanılabilir")
 	}
@@ -735,6 +750,55 @@ func cmdLensAB(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
+// cmdLensABCompetitor, `lens-ab --lens competitor` ölçümüdür (#212 adım 3):
+// set'teki kartlar için rakip kontrolünü --runs kez koşar, CSV yazar
+// (id,run,verdict,doğrulanmış,doğrulanamayan,tokens). DB'ye YAZMAZ.
+// --prompt-file aday istemdir; verilmezse canlı istem.
+func cmdLensABCompetitor(ctx context.Context, cfg *config.Config, setPath, promptFile, outPath string, runs int) error {
+	if strings.TrimSpace(setPath) == "" {
+		return fmt.Errorf("--set zorunlu")
+	}
+	raw, err := os.ReadFile(setPath)
+	if err != nil {
+		return fmt.Errorf("altın set okunamadı: %w", err)
+	}
+	var set []pipeline.GoldenCase
+	if err := json.Unmarshal(raw, &set); err != nil {
+		return fmt.Errorf("altın set JSON değil: %w", err)
+	}
+	var system string
+	if strings.TrimSpace(promptFile) != "" {
+		b, err := os.ReadFile(promptFile)
+		if err != nil {
+			return fmt.Errorf("--prompt-file okunamadı: %w", err)
+		}
+		system = string(b)
+	}
+	if err := cfg.RequireLLM(); err != nil {
+		return err
+	}
+	if err := cfg.RequireDatabaseURL(); err != nil {
+		return err
+	}
+	st, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	chat := llm.NewOpenAICompat(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.CompetitorModel)
+	var out io.Writer = os.Stdout
+	if strings.TrimSpace(outPath) != "" {
+		f, ferr := os.Create(outPath)
+		if ferr != nil {
+			return ferr
+		}
+		defer f.Close()
+		out = f
+	}
+	return pipeline.RunCompetitorAB(ctx, st, chat, set, runs, system, out)
+}
+
 func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.RequireLLM(); err != nil {
 		return err
@@ -756,6 +820,7 @@ func cmdSynthesize(ctx context.Context, cfg *config.Config) error {
 	if _, err := pipeline.GroupThemes(llm.WithStage(ctx, "kümeleme"), st, chat); err != nil {
 		return fmt.Errorf("tema gruplama: %w", err)
 	}
+	ctx = pipeline.WithCompetitorChat(ctx, newCompetitorChat(cfg))
 	n, err := pipeline.SynthesizeIdeas(ctx, cfg, st, chat, distinctChat)
 	log.Printf("synthesize tamam: %d yeni idea", n)
 	return err
@@ -781,6 +846,7 @@ func cmdSeeds(ctx context.Context, cfg *config.Config) error {
 	logDistinctivenessLens(cfg)
 	logThirdPartyLens(cfg)
 	logDataAccessLens(cfg)
+	ctx = pipeline.WithCompetitorChat(ctx, newCompetitorChat(cfg))
 	n, err := pipeline.ProcessSeeds(ctx, cfg, st, chat, pipeline.RadarSeedsJSONL, distinctChat)
 	if err != nil {
 		return err
