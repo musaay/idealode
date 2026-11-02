@@ -1028,3 +1028,48 @@ func FormatLensABSummary(result LensABResult) string {
 	}
 	return sb.String()
 }
+
+// ---- Rakip kontrolü ölçümü (#212 adım 3) ----
+
+// CompetitorABStore, RunCompetitorAB'nin ihtiyaç duyduğu tek okuma.
+type CompetitorABStore interface {
+	GetIdeaForAudit(ctx context.Context, id int64) (*store.Idea, error)
+}
+
+// RunCompetitorAB (`lens-ab --lens competitor`): set'teki idea id'leri için
+// runCompetitorCheck'i runs kez çalıştırır; satır başına
+// "id,run,verdict,doğrulanmış_sayısı,doğrulanamayan_sayısı,tokens" CSV yazar.
+// DB'ye YAZMAZ (yalnız kartı okur). systemPrompt boşsa canlı istem.
+func RunCompetitorAB(ctx context.Context, st CompetitorABStore, chat llm.Chat, set []GoldenCase, runs int, systemPrompt string, w io.Writer) error {
+	if runs < 1 {
+		runs = 1
+	}
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"id", "run", "verdict", "doğrulanmış_sayısı", "doğrulanamayan_sayısı", "tokens"}); err != nil {
+		return err
+	}
+	cw.Flush()
+	for _, gc := range set {
+		idea, err := st.GetIdeaForAudit(ctx, gc.ID)
+		if err != nil {
+			return fmt.Errorf("kart %d okunamadı: %w", gc.ID, err)
+		}
+		for run := 1; run <= runs; run++ {
+			meter := llm.NewUsageMeter()
+			v, ok, bad := runCompetitorCheckCounts(llm.WithMeter(ctx, meter), chat, idea, competitorOpts{System: systemPrompt})
+			tokens := meter.Snapshot()["competitor"].TotalTokens
+			if err := cw.Write([]string{strconv.FormatInt(gc.ID, 10), strconv.Itoa(run), v.Verdict,
+				strconv.Itoa(ok), strconv.Itoa(bad), strconv.Itoa(tokens)}); err != nil {
+				return err
+			}
+			cw.Flush()
+			if err := cw.Error(); err != nil {
+				return err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
+}

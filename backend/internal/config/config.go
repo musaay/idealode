@@ -73,6 +73,13 @@ type Config struct {
 	// ("v5" #209'da reddedilen metne ait — kabul EDİLMEZ.)
 	DistinctivenessPrompt string // DISTINCTIVENESS_PROMPT (default: v4; "v4"|"v6")
 
+	// CompetitorCheck (#212 adım 3): rakip kontrolü merceği (internet aramalı,
+	// BAYRAK — bloklamaz). "on" açar; varsayılan kapalı, geçersiz değer -> kapalı
+	// + log uyarısı. CompetitorModel: browser_search yalnız Groq'ta
+	// gpt-oss-20b/120b'de çalışır; istemci LLM_BASE_URL + LLM_API_KEY ile kurulur.
+	CompetitorCheck bool   // COMPETITOR_CHECK (default: off; "on"|"off")
+	CompetitorModel string // COMPETITOR_CHECK_MODEL (default: openai/gpt-oss-120b)
+
 	// DataAccessPrompt (#168): veri-erişimi merceğinin sistem prompt'u — "v1"
 	// (canlı) ya da "v3" (lensDataAccessSystemV3). Kurallar ThirdPartyPrompt'la
 	// AYNI: boş/geçersiz -> "v1" (geçersizde log uyarısı). OYLAMA YOK.
@@ -150,6 +157,11 @@ func Load() (*Config, error) {
 	c.DataAccessPrompt = loadPromptVersion("DATA_ACCESS_PROMPT")
 	c.SeedCardPrompt = loadPromptVersionOf("SEED_CARD_PROMPT", "v1", "v1", "v3", "v4")
 	c.DistinctivenessPrompt = loadPromptVersionOf("DISTINCTIVENESS_PROMPT", "v4", "v4", "v6")
+	c.CompetitorCheck = loadPromptVersionOf("COMPETITOR_CHECK", "off", "on", "off") == "on"
+	c.CompetitorModel = strings.TrimSpace(os.Getenv("COMPETITOR_CHECK_MODEL"))
+	if c.CompetitorModel == "" {
+		c.CompetitorModel = "openai/gpt-oss-120b"
+	}
 	c.ThirdPartyVotes = loadThirdPartyVotes()
 	c.BlendEnabled = loadBlendEnabled()
 
