@@ -152,3 +152,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Virlo (Nic Mauro) — TikTok/Reels/Shorts için ajanslara yönelik trend-istihbaratı ve rakip izleme aracı, kendi veri toplama altyapısını kurarak büyüyen, $31K MRR / %35 aylık büyüme (2026-11-01)
 - Local SEO Rank Coach (Flippa ilanı) — local SEO ajansları için Google Haritalar sıralama takibi + AI aksiyon önerisi sunan SaaS, $209.561 ARR / $22.250 MRR (2026-11-02)
 - Hex (anomalyco/hex) — Mac/Windows/Linux için cihaz-içi (offline) sesli dikte uygulaması, ★3.6K, ivme (2026-11-02)
+- AI Study Platform for Nursing Students (Flippa ilanı) — ders notlarını flashcard/quiz'e çeviren + NCLEX sınav hazırlığı sunan, TikTok/Instagram üzerinden hemşirelik öğrencisi içerik üreticileriyle büyüyen AI çalışma platformu, $18.8K MRR / 915 abone, 1 yaşında (2026-11-03)
