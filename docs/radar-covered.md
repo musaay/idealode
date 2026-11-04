@@ -153,3 +153,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Local SEO Rank Coach (Flippa ilanı) — local SEO ajansları için Google Haritalar sıralama takibi + AI aksiyon önerisi sunan SaaS, $209.561 ARR / $22.250 MRR (2026-11-02)
 - Hex (anomalyco/hex) — Mac/Windows/Linux için cihaz-içi (offline) sesli dikte uygulaması, ★3.6K, ivme (2026-11-02)
 - AI Study Platform for Nursing Students (Flippa ilanı) — ders notlarını flashcard/quiz'e çeviren + NCLEX sınav hazırlığı sunan, TikTok/Instagram üzerinden hemşirelik öğrencisi içerik üreticileriyle büyüyen AI çalışma platformu, $18.8K MRR / 915 abone, 1 yaşında (2026-11-03)
+- Liinks (Starter Story vaka çalışması) — kişisel/kurumsal link-in-bio ve mobil-öncelikli mini-site aracı, $31.5K MRR (2026-11-04)
+- Calorie AI (Flippa ilanı, "calorie-ai-food-scan") — fotoğraftan AI kalori/besin tarama uygulaması, $35.7K/ay (2026-11-04)
