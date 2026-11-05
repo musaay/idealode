@@ -155,3 +155,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AI Study Platform for Nursing Students (Flippa ilanı) — ders notlarını flashcard/quiz'e çeviren + NCLEX sınav hazırlığı sunan, TikTok/Instagram üzerinden hemşirelik öğrencisi içerik üreticileriyle büyüyen AI çalışma platformu, $18.8K MRR / 915 abone, 1 yaşında (2026-11-03)
 - Liinks (Starter Story vaka çalışması) — kişisel/kurumsal link-in-bio ve mobil-öncelikli mini-site aracı, $31.5K MRR (2026-11-04)
 - Calorie AI (Flippa ilanı, "calorie-ai-food-scan") — fotoğraftan AI kalori/besin tarama uygulaması, $35.7K/ay (2026-11-04)
+- Canary (Sing with Canary, Starter Story vaka çalışması) — şarkı sözü/çeviri+karaoke ile dil öğrenme iOS uygulaması, 28 günde $25K / MRR ~$14K, 2.000 ücretli abone (2026-11-05)
