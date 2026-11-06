@@ -156,3 +156,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Liinks (Starter Story vaka çalışması) — kişisel/kurumsal link-in-bio ve mobil-öncelikli mini-site aracı, $31.5K MRR (2026-11-04)
 - Calorie AI (Flippa ilanı, "calorie-ai-food-scan") — fotoğraftan AI kalori/besin tarama uygulaması, $35.7K/ay (2026-11-04)
 - Canary (Sing with Canary, Starter Story vaka çalışması) — şarkı sözü/çeviri+karaoke ile dil öğrenme iOS uygulaması, 28 günde $25K / MRR ~$14K, 2.000 ücretli abone (2026-11-05)
+- NeuroFrames (Nicolai Klemke) — şarkılarına görsel klip üretmek isteyen hobi/bağımsız müzisyenlere yönelik AI müzik videosu üretim aracı, $100K/ay gelir, ~1.500 ödeyen müşteri (2026-11-06)
