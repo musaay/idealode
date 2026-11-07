@@ -157,3 +157,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Calorie AI (Flippa ilanı, "calorie-ai-food-scan") — fotoğraftan AI kalori/besin tarama uygulaması, $35.7K/ay (2026-11-04)
 - Canary (Sing with Canary, Starter Story vaka çalışması) — şarkı sözü/çeviri+karaoke ile dil öğrenme iOS uygulaması, 28 günde $25K / MRR ~$14K, 2.000 ücretli abone (2026-11-05)
 - NeuroFrames (Nicolai Klemke) — şarkılarına görsel klip üretmek isteyen hobi/bağımsız müzisyenlere yönelik AI müzik videosu üretim aracı, $100K/ay gelir, ~1.500 ödeyen müşteri (2026-11-06)
+- Pretty Prompt (Ilai Szpiezak) — ChatGPT/Gemini/Claude'a gömülü AI prompt iyileştirme Chrome eklentisi, AppSumo lifetime-deal ile 60 günde $300K satış, VC'siz bootstrap (2026-11-07)
+- CMMS & Field Service SaaS (acquire.com ilanı) — IoT+AI bakım yönetimi/field-service platformu, $300K TTM gelir / $150K kâr / %150 YoY büyüme, 10-50 müşteri (2026-11-07)
