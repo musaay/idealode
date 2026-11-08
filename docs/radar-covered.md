@@ -159,3 +159,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - NeuroFrames (Nicolai Klemke) — şarkılarına görsel klip üretmek isteyen hobi/bağımsız müzisyenlere yönelik AI müzik videosu üretim aracı, $100K/ay gelir, ~1.500 ödeyen müşteri (2026-11-06)
 - Pretty Prompt (Ilai Szpiezak) — ChatGPT/Gemini/Claude'a gömülü AI prompt iyileştirme Chrome eklentisi, AppSumo lifetime-deal ile 60 günde $300K satış, VC'siz bootstrap (2026-11-07)
 - CMMS & Field Service SaaS (acquire.com ilanı) — IoT+AI bakım yönetimi/field-service platformu, $300K TTM gelir / $150K kâr / %150 YoY büyüme, 10-50 müşteri (2026-11-07)
+- AI Pişirme Asistanı Uygulaması (Flippa ilanı) — fotoğraf/tarif girişine göre özel pişirme iş akışları öneren iOS abonelik uygulaması, ~$91K 2026 yıllıklaştırılmış net kâr (2026-11-08)
+- Kur'an Arapçası Okuma/Tecvid Uygulaması (Flippa ilanı) — İngilizce konuşan Müslümanlara AI destekli Arapça okuma/telaffuz pratiği sunan iOS/Android abonelik uygulaması, $1.29M ARR / 24.670 ücretli abone (2026-11-08)
