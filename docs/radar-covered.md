@@ -161,3 +161,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - CMMS & Field Service SaaS (acquire.com ilanı) — IoT+AI bakım yönetimi/field-service platformu, $300K TTM gelir / $150K kâr / %150 YoY büyüme, 10-50 müşteri (2026-11-07)
 - AI Pişirme Asistanı Uygulaması (Flippa ilanı) — fotoğraf/tarif girişine göre özel pişirme iş akışları öneren iOS abonelik uygulaması, ~$91K 2026 yıllıklaştırılmış net kâr (2026-11-08)
 - Kur'an Arapçası Okuma/Tecvid Uygulaması (Flippa ilanı) — İngilizce konuşan Müslümanlara AI destekli Arapça okuma/telaffuz pratiği sunan iOS/Android abonelik uygulaması, $1.29M ARR / 24.670 ücretli abone (2026-11-08)
+- LLM Gateway (Luca Steeb, Smakosh) — açık kaynak çoklu-sağlayıcı LLM API gateway/yönlendirici, $78.764 MRR / $1M+ toplam gelir (2026-11-09)
+- BlogToPin / Block2Pin (Nick) — web sitesinden otomatik SEO'lu Pinterest pin'i üreten B2B SaaS, $16K MRR (2026-11-09)
+- OpenMausBot (milind-soni) — mevcut AI aboneliğinle kendi bot ekibini çalıştıran açık kaynak Grok Bot alternatifi, ★18.8K, ivme (2026-11-09)
