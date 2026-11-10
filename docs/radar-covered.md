@@ -164,3 +164,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - LLM Gateway (Luca Steeb, Smakosh) — açık kaynak çoklu-sağlayıcı LLM API gateway/yönlendirici, $78.764 MRR / $1M+ toplam gelir (2026-11-09)
 - BlogToPin / Block2Pin (Nick) — web sitesinden otomatik SEO'lu Pinterest pin'i üreten B2B SaaS, $16K MRR (2026-11-09)
 - OpenMausBot (milind-soni) — mevcut AI aboneliğinle kendi bot ekibini çalıştıran açık kaynak Grok Bot alternatifi, ★18.8K, ivme (2026-11-09)
+- MagicSlides (IndianAppGuy / Sanskar) — doküman/PDF/YouTube videosunu tek tıkla düzenlenebilir PowerPoint sunumuna çeviren AI aracı, 6 yılda 30+ tek-özellikli üründen (Google Workspace/Chrome mağazaları üzerinde) toplam $1M gelir, ayda ~1000 ödeyen müşteri (2026-11-10)
