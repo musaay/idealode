@@ -166,3 +166,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - OpenMausBot (milind-soni) — mevcut AI aboneliğinle kendi bot ekibini çalıştıran açık kaynak Grok Bot alternatifi, ★18.8K, ivme (2026-11-09)
 - MagicSlides (IndianAppGuy / Sanskar) — doküman/PDF/YouTube videosunu tek tıkla düzenlenebilir PowerPoint sunumuna çeviren AI aracı, 6 yılda 30+ tek-özellikli üründen (Google Workspace/Chrome mağazaları üzerinde) toplam $1M gelir, ayda ~1000 ödeyen müşteri (2026-11-10)
 - AI Sourdough Ekmek Takip Uygulaması (Flippa ilanı) — maya/hamur fotoğrafını AI ile analiz eden sourdough-özel ekmek pişirme takip uygulaması, $58-98K/yıl net kâr, aylık $6.8K kâr (2026-11-11)
+- Papermark (Marc Seitz, Iuliia Shnai) — açık kaynaklı güvenli doküman paylaşım/data-room platformu, 28 ayda $3M ARR, bootstrap (2026-11-12)
