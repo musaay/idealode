@@ -168,3 +168,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AI Sourdough Ekmek Takip Uygulaması (Flippa ilanı) — maya/hamur fotoğrafını AI ile analiz eden sourdough-özel ekmek pişirme takip uygulaması, $58-98K/yıl net kâr, aylık $6.8K kâr (2026-11-11)
 - Papermark (Marc Seitz, Iuliia Shnai) — açık kaynaklı güvenli doküman paylaşım/data-room platformu, 28 ayda $3M ARR, bootstrap (2026-11-12)
 - Cometly (Grant Cooper, Matt Pattoli) — B2B SaaS pazarlama ekipleri için reklam-gelir atıf (revenue attribution) platformu, ~10 kişilik küçük ekip, Stripe doğrulu $202,937 MRR (2026-11-13)
+- AI Looksmaxxing Uygulaması (Flippa ilanı) — selfie'den AI ile çekicilik/görünüm skoru ve kişisel gelişim önerisi sunan iOS uygulaması, $716K TTM gelir (2026-11-14)
+- Sosyal Beceri Koçluğu Uygulaması (Flippa ilanı) — yetişkinlere kısa ders + pratik senaryolarla iletişim becerisi öğreten iOS/Android uygulaması, $1.21M yıllık gelir (2026-11-14)
+- Nose Job - Plastic Surgery AI — selfie'den burun/çene/göz kapağı estetik operasyon sonucunu önizleyen mobil uygulama, $41.555 toplam gelir / $3.107 MRR (2026-11-14)
