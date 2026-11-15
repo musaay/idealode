@@ -171,3 +171,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AI Looksmaxxing Uygulaması (Flippa ilanı) — selfie'den AI ile çekicilik/görünüm skoru ve kişisel gelişim önerisi sunan iOS uygulaması, $716K TTM gelir (2026-11-14)
 - Sosyal Beceri Koçluğu Uygulaması (Flippa ilanı) — yetişkinlere kısa ders + pratik senaryolarla iletişim becerisi öğreten iOS/Android uygulaması, $1.21M yıllık gelir (2026-11-14)
 - Nose Job - Plastic Surgery AI — selfie'den burun/çene/göz kapağı estetik operasyon sonucunu önizleyen mobil uygulama, $41.555 toplam gelir / $3.107 MRR (2026-11-14)
+- AiSDR (Yuriy Zaremba) — şirket web sitesinden otomatik AI outbound planı çıkarıp e-posta/LinkedIn kampanyası yürüten B2B AI satış geliştirme (SDR) ajanı, TrustMRR doğrulamalı $179.391 MRR, 176 aktif abonelik (2026-11-15)
