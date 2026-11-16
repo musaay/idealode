@@ -67,9 +67,20 @@ prototipin mock alanları değil.
 - Canlı DB'ye dokunmaz (ui zaten DB'ye bağlanmaz); yerel doğrulama için
   `web.IdeaStore` arayüzünü (apiclient'in uyguladığı) fake ile besler.
   Gerçek veriyle görsel kontrol lead'e bırakılır.
+- Görsel/düzen değişikliğinde httptest yetmez: fake store ile yerel
+  sunucuyu ayağa kaldırır, spec'teki her kırılım × iki tema için ölçer
+  (spec kırılım listesi vermemişse kalite çıtası 1. maddedeki 390 / 768 /
+  1280 px'i kullanır; ölçecek tarayıcı aracı yoksa bunu raporda söyler)
+  (yatay taşma, ilgili öğenin konum/genişliği — tarayıcıda computed
+  değerler ya da ekran görüntüsü) ve rapora koyar. Otomatik ölçülemeyen
+  davranış (ör. trackpad yaylanması) spec'te "PO elle bakar" diye
+  işaretli değilse UNVERIFIED yazar, PASS demez.
+- Tasarım referansında karşılığı olmayan bir öğe/davranış için spec
+  "referans dışı, şu dille doldur" demiyorsa tahminle doldurmaz, lead'e sorar.
 
 ## Rapor formatı
 1. Değişen dosyalar (path:satır aralığı) ve ne yapıldı (madde başına 1 cümle).
 2. Kabul kriteri tablosu: kriter → PASS/FAIL/UNVERIFIED + nasıl doğrulandı.
+   Görsel işte kırılım × tema ölçüm tablosu bu bölümün parçasıdır.
 3. Build/vet/test çıktısının son satırları.
 4. Spec dışı bırakılanlar ve öneriler.
