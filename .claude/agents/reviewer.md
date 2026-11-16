@@ -31,8 +31,10 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
    yan yana göstermeli: aday blok kararı tekrarlanabilirliğinde canlıdan
    kötü değil ve pass beklenen kartlarda canlıdan fazla blok üretmiyor;
    tek koşuluk sonuç ya da bu iki koşuldan birinin tutmaması "DÜZELTME
-   GEREKLİ"dir. Diff sağlayıcı/model seçimine ya da karar toplama (oylama)
-   mantığına dokunuyorsa prompt değişikliği gibi değerlendir. Canlıya
+   GEREKLİ"dir. Sonuç koşu başına ham tablo olarak (kart × koşu × verdict)
+   issue ya da PR yorumunda olmalı; yalnız özet satır ("6/7 uyuştu")
+   kaynaksız sayılır. Diff sağlayıcı/model seçimine ya da karar toplama
+   (oylama) mantığına dokunuyorsa prompt değişikliği gibi değerlendir. Canlıya
    çıkışı bir env bayrağına bağlı ve varsayılanı eski davranış olan
    değişiklikte ölçüm, bayrak açılmadan önce lead tarafından yapılır;
    PR'da varsayılanın gerçekten eski davranış olduğunu doğrula.
@@ -40,7 +42,10 @@ Working tree'deki diff'i (git diff / git status) incele. Öncelikli proje tuzakl
    olmalı. Tasarımın dayandığı her veri dağılımı (kaç farklı değer, kova
    başına kaç kayıt, hangi oran — örn. "etiket başına mevcut tema sayısı")
    ya ölçülmüş rakam + sorgusu/kaynağı ya da açık "TAHMİN" etiketi taşır;
-   dayanılan dağılım yoksa bölüm "Yok" + tek cümle gerekçe der. Bölüm
+   dayanılan dağılım yoksa bölüm "Yok" + tek cümle gerekçe der. Ölçüt:
+   rakamın yanında (a) sorgu metni ya da (b) tablo/kolon adı — dönemsel
+   bir sayımsa bir de zaman aralığı — yoksa rakam KAYNAKSIZ sayılır;
+   (a) tek başına yeter. Bölüm
    yoksa ya da kaynaksız rakam varsa bulgu "DÜZELTME GEREKLİ"dir (madde 6
    ile aynı ağırlık). Bunu DB'ye bakmadan, yalnız issue metninden denetle;
    diff spec'te adı geçmeyen bir dağılıma dayanıyorsa (sabit eşik, limit,
