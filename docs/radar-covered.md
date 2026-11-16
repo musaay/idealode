@@ -172,3 +172,7 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Sosyal Beceri Koçluğu Uygulaması (Flippa ilanı) — yetişkinlere kısa ders + pratik senaryolarla iletişim becerisi öğreten iOS/Android uygulaması, $1.21M yıllık gelir (2026-11-14)
 - Nose Job - Plastic Surgery AI — selfie'den burun/çene/göz kapağı estetik operasyon sonucunu önizleyen mobil uygulama, $41.555 toplam gelir / $3.107 MRR (2026-11-14)
 - AiSDR (Yuriy Zaremba) — şirket web sitesinden otomatik AI outbound planı çıkarıp e-posta/LinkedIn kampanyası yürüten B2B AI satış geliştirme (SDR) ajanı, TrustMRR doğrulamalı $179.391 MRR, 176 aktif abonelik (2026-11-15)
+- PhonicsMaker (Flippa ilanı) — öğretmenler için AI destekli fonetik/okuma eğitimi materyali üreten EdTech SaaS, $6,673 MRR / $80K ARR, 428 abone, 1 yaşında (2026-11-16)
+- Stat AI - Sports Analysis (Flippa ilanı) — spor bahisleri için "PhD-level" AI analiz sunan iOS uygulaması, $36.6K/ay gelir / $25.4K/ay kâr, 1 yaşında (2026-11-16)
+- Plannotator (backnotprop) — AI kodlama ajanlarının (Claude Code, Codex vb.) plan/diff çıktısını tarayıcıda inceleyip geri bildirim gönderen yerel review aracı, ★12.1K, ivme (2026-11-16)
+- daily_stock_analysis (ZhuLinsen) — LLM destekli çok-pazarlı (ABD/Çin/HK/JP/KR/TW) hisse analiz ve karar panosu açık kaynak sistemi, ★72.6K, ivme (2026-11-16)
