@@ -176,3 +176,6 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Stat AI - Sports Analysis (Flippa ilanı) — spor bahisleri için "PhD-level" AI analiz sunan iOS uygulaması, $36.6K/ay gelir / $25.4K/ay kâr, 1 yaşında (2026-11-16)
 - Plannotator (backnotprop) — AI kodlama ajanlarının (Claude Code, Codex vb.) plan/diff çıktısını tarayıcıda inceleyip geri bildirim gönderen yerel review aracı, ★12.1K, ivme (2026-11-16)
 - daily_stock_analysis (ZhuLinsen) — LLM destekli çok-pazarlı (ABD/Çin/HK/JP/KR/TW) hisse analiz ve karar panosu açık kaynak sistemi, ★72.6K, ivme (2026-11-16)
+- AIDesigner.ai (Tyler "Wiz") — doğal dil promptlarından UI/logo/marka kiti üreten AI tasarım platformu, TrustMRR doğrulamalı $8,103 MRR (2026-11-17)
+- Motionvid.ai (Anatoly Pashias) — metin promptundan hareketli grafik/kısa video üreten AI araç, TrustMRR/Starter Story doğrulamalı $7,775 MRR (2026-11-17)
+- Stanley (Vitalii Dodonov) — kurucu/içerik üreticileri için büyümeyi yöneten AI "İçerik Müdürü", lansmandan 6 hafta sonra ~$50K gelir (2026-11-17)
