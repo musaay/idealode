@@ -179,3 +179,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - AIDesigner.ai (Tyler "Wiz") — doğal dil promptlarından UI/logo/marka kiti üreten AI tasarım platformu, TrustMRR doğrulamalı $8,103 MRR (2026-11-17)
 - Motionvid.ai (Anatoly Pashias) — metin promptundan hareketli grafik/kısa video üreten AI araç, TrustMRR/Starter Story doğrulamalı $7,775 MRR (2026-11-17)
 - Stanley (Vitalii Dodonov) — kurucu/içerik üreticileri için büyümeyi yöneten AI "İçerik Müdürü", lansmandan 6 hafta sonra ~$50K gelir (2026-11-17)
+- DM Champ — WhatsApp/Instagram/SMS/web chat üzerinde çalışan, ajanslarca white-label yeniden satılan AI satış ajanı, TrustMRR doğrulamalı $113.809 MRR, 72 abonelik (2026-11-18)
