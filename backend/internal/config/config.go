@@ -67,6 +67,11 @@ type Config struct {
 	// kalır; lead ölçümden sonra Railway'de v3'e geçirir.
 	SeedCardPrompt string // SEED_CARD_PROMPT (default: v1; "v1"|"v3"|"v4" — v4: #212)
 
+	// MomentumCardPrompt (#221): ivme (trending) tohumu kartı isteminin sürümü —
+	// "v1" (canlı, yerelleştirme açısı) ya da "v4" (yeni yaklaşımı başka derde
+	// uygula, açı satırı yok). Boş/geçersiz -> "v1". SEED_CARD_PROMPT'tan BAĞIMSIZ.
+	MomentumCardPrompt string // MOMENTUM_CARD_PROMPT (default: v1; "v1"|"v4" — #221)
+
 	// DistinctivenessPrompt (#212): özgünlük merceğinin sistem istemi sürümü —
 	// "v4" (canlı, varsayılan) ya da "v6" (K1 büyüme istisnası, aday; yalnız
 	// gelir tohumu yolunda uygulanır). Geçersiz değer -> "v4" + log uyarısı.
@@ -159,6 +164,7 @@ func Load() (*Config, error) {
 	c.ThirdPartyPrompt = loadPromptVersion("THIRD_PARTY_PROMPT")
 	c.DataAccessPrompt = loadPromptVersion("DATA_ACCESS_PROMPT")
 	c.SeedCardPrompt = loadPromptVersionOf("SEED_CARD_PROMPT", "v1", "v1", "v3", "v4")
+	c.MomentumCardPrompt = loadPromptVersionOf("MOMENTUM_CARD_PROMPT", "v1", "v1", "v4")
 	c.DistinctivenessPrompt = loadPromptVersionOf("DISTINCTIVENESS_PROMPT", "v4", "v4", "v6")
 	c.CompetitorCheck = loadPromptVersionOf("COMPETITOR_CHECK", "off", "on", "off") == "on"
 	c.CompetitorModel = strings.TrimSpace(os.Getenv("COMPETITOR_CHECK_MODEL"))
@@ -283,7 +289,7 @@ func loadPromptVersion(envName string) string {
 // loadPromptVersionOf (#212), loadPromptVersion'ın izinli-değer listeli genel
 // hâli: boş -> def (sessiz), allowed içindeyse kendisi, başka her değer -> def +
 // log uyarısı. THIRD_PARTY/DATA_ACCESS loadPromptVersion ile v1|v3'te kalır
-// (v4/v6 REDDEDİLİR); yalnız SEED_CARD_PROMPT ve DISTINCTIVENESS_PROMPT kendi
+// (v4/v6 REDDEDİLİR); yalnız SEED_CARD_PROMPT, DISTINCTIVENESS_PROMPT ve MOMENTUM_CARD_PROMPT kendi
 // listesini geçer.
 func loadPromptVersionOf(envName, def string, allowed ...string) string {
 	v := strings.TrimSpace(os.Getenv(envName))

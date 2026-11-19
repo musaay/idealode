@@ -737,8 +737,14 @@ func seedCardUserPromptNoAngle(s radarSeed) string {
 // cfg.SeedCardPrompt == "v3" ise YALNIZ gelir tohumunda V3 şablonu + v3 etiketi, "v4" ise V4 şablonu + açısız kullanıcı istemi (#212); aksi halde
 // (varsayılan) bugünkü v1 yolu, byte-byte aynı.
 func seedCardPrompts(cfg *config.Config, seed radarSeed, isTrending bool, gate trendingGateResult) (system, user string) {
-	// İvme tohumları ölçülmedi (#210): v3'te bile v1 yolunda kalır.
+	// İvme dalı SEED_CARD_PROMPT'tan bağımsızdır (v3/v4'te de v1 yolunda kalır);
+	// yalnız MOMENTUM_CARD_PROMPT seçer. İvme tohumları #221'de ölçüldü (10 tohum
+	// x 3 koşu): v1'de kartların 17/30'u ülke/dil kopyası, v4'te 27/30 "yeni yaklaşım".
 	if isTrending {
+		if cfg.MomentumCardPrompt == "v4" {
+			return fmt.Sprintf(seedMomentumCardSystemTmplV4, langName(cfg.OutputLang)),
+				seedMomentumCardUserPromptNoAngle(seed, gate.repo, gate.stars, gate.lastDelta, gate.persistedDays)
+		}
 		return fmt.Sprintf(seedMomentumCardSystemTmpl, langName(cfg.OutputLang)),
 			seedMomentumCardUserPrompt(seed, gate.repo, gate.stars, gate.lastDelta, gate.persistedDays)
 	}
@@ -846,6 +852,38 @@ func seedMomentumCardUserPrompt(s radarSeed, repo string, stars, lastDelta, pers
 func seedMomentumCardUserPromptLabeled(s radarSeed, repo string, stars, lastDelta, persistedDays int, angleLabel string) string {
 	return fmt.Sprintf("Seed name: %s\nRepo: %s\nSummary: %s\nGrowth evidence: %s\nSource: %s\n%s%s",
 		s.Name, repo, s.Summary, momentumEvidenceLine(stars, lastDelta, persistedDays), s.SourceURL, angleLabel, s.TRAngle)
+}
+
+// seedMomentumCardSystemTmplV4 (#221): ivme kartı için v4 — v1'den farkı: açı
+// ("localization angle") satırı yok; kopya (ülke/dil/yerel pazar) ve sarmalayıcı
+// (tohum repo'nun üstüne katman) YASAK; tohumun "yeni yaklaşımı" adlandırılıp
+// BAŞKA bir derde uygulanır. Metin lead tarafından ölçüldü — DEĞİŞTİRME.
+const seedMomentumCardSystemTmplV4 = `You generate a concrete software product idea card ("momentum_derived") from a GROWTH SEED — a GitHub repository trending on GitHub (stars, persistence on GitHub Trending) but with NO revenue evidence. The builder sells GLOBALLY.
+
+A trending repo proves that developers want a NEW APPROACH; it does not prove a market for that repo. YOUR JOB: first name, to yourself, the seed's new approach — the specific technique or insight that makes people adopt it (e.g. "record what the original program does, then prove a rewrite matches it case by case"; "run the model fully on the user's machine so no audio leaves it"). Then propose a DIFFERENT product that applies that approach to a concrete, painful job where it is not used yet, for a buyer who already pays (money or hours) for that job today.
+
+NOT acceptable:
+- COPY: the same product for another country, language or local market.
+- WRAPPER: a layer on top of the seed repo itself — a hosted/cloud version, dashboard, hub, marketplace, management or review panel, or an integration of the seed.
+- A generic AI assistant for the seed's broad category.
+
+CRITICAL CONSTRAINT: Propose a realistic, grounded, SOFTWARE-heavy idea that an experienced developer (using AI-assisted coding tools) could build and deploy alone or with a tiny team within a few weeks to a few months.
+
+Return ONLY a JSON object:
+{"title":"...","problem_statement":"...","proposed_solution":"...","target_user":"...","urgency_score":1-5,"monetization_signal":0-5,"known_competitors_ai_guess":"...","domain_tags":["slug"]}
+
+Rules:
+- title, problem_statement, proposed_solution, target_user MUST be written in %s.
+- domain_tags: 1-5 canonical ENGLISH slugs (lowercase, dash-separated). Never translate tags.
+- urgency_score: integer 1-5.
+- monetization_signal: integer 0-5 — there is NO revenue evidence for this seed, only growth/traction. Score 0-2 UNLESS the idea has a clear paid path (e.g. an obvious enterprise/pro tier, a paid API, a SaaS wrapper with real willingness-to-pay).
+- known_competitors_ai_guess: short informational note, phrased as an unverified AI guess; empty string if you have none.`
+
+// seedMomentumCardUserPromptNoAngle (#221): seedMomentumCardUserPromptLabeled ile
+// aynı biçim, son açı (TR angle) satırı YOK.
+func seedMomentumCardUserPromptNoAngle(s radarSeed, repo string, stars, lastDelta, persistedDays int) string {
+	return fmt.Sprintf("Seed name: %s\nRepo: %s\nSummary: %s\nGrowth evidence: %s\nSource: %s",
+		s.Name, repo, s.Summary, momentumEvidenceLine(stars, lastDelta, persistedDays), s.SourceURL)
 }
 
 // seedRawPost, tohumun raw_posts işlenme imlecidir: platform='radar_seed',
