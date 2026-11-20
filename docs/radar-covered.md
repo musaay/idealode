@@ -181,3 +181,4 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Stanley (Vitalii Dodonov) — kurucu/içerik üreticileri için büyümeyi yöneten AI "İçerik Müdürü", lansmandan 6 hafta sonra ~$50K gelir (2026-11-17)
 - DM Champ — WhatsApp/Instagram/SMS/web chat üzerinde çalışan, ajanslarca white-label yeniden satılan AI satış ajanı, TrustMRR doğrulamalı $113.809 MRR, 72 abonelik (2026-11-18)
 - PeptIQ (Chris Chase) — doz takibi, kan tahlili/Apple Health entegrasyonu ve kendi verisiyle çalışan AI asistanı sunan peptit-tedavisi takip uygulaması, 9 ayda $115K+/yıl, ~$14K MRR (2026-11-19)
+- GeoSports (Frank Michael Smith) — haritada tıklayarak ipuçlarından yer bulunan günlük spor coğrafyası web oyunu, Starter Story doğrulamalı ~$40K/ay (çoğu programatik reklam), 1.800 Pro abone, ~700K aylık aktif kullanıcı (2026-11-20)
