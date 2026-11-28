@@ -196,3 +196,5 @@ Yeni raporlanan her ürün buraya eklenir (elle, rapor değerlendirilirken).
 - Fon Yöneticileri için Sermaye Toplama Platformu (acquire.com ilanı) — yatırımcı onboarding/teklif yönetimi/akreditasyon doğrulamasını otomatikleştiren küçük SaaS, $94.3K ARR, <10 müşteri (2026-11-26)
 - Kolbo.AI (Zohar Vanunu) — 100+ AI modelini (görsel, video, müzik, ses, chat) tek abonelik + tek paylaşımlı kredi havuzunda birleştiren solo-kurucu "all-in-one AI yaratıcı çalışma alanı", TrustMRR doğrulamalı ~$40K MRR, 10 ayda $1M ARR run-rate (2026-11-27)
 - Pckgr (Thomas Mahony) — Microsoft Intune için yazılım paketleme/güncelleme sürecini otomatikleştiren Melbourne merkezli web SaaS, kurucu beyanıyla $1M+ ARR / küçük ekip, Reddit/Facebook topluluklarında organik büyüme (2026-11-27)
+- Adaptive Assessment SaaS (acquire.com ilanı) — K-12 okul bölgeleri için patent başvurulu AI uyarlanabilir sınav platformu + eğitim paketi, $500K ARR (2026-11-28)
+- AI Text-to-SQL SaaS (acquire.com ilanı) — legacy veritabanlarını (Oracle/SQL Server/Mongo) doğal dille sorgulayan araç, $45-61K ARR / 238+ abone (2026-11-28)
